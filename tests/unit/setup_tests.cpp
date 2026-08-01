@@ -304,6 +304,154 @@ TEST_CASE("setup plan resolves only explicitly composed components") {
     fs::remove_all(root);
 }
 
+void write_provider_service_install(const SetupPaths& paths,
+                                    const std::string_view contract_version = "1.0") {
+    constexpr std::string_view component_id = "replaceable.provider";
+    constexpr std::string_view component_version = "1.0.0";
+    constexpr std::string_view cli_relative = "provider.mjs";
+    constexpr std::string_view cli_contents = "provider";
+    constexpr std::string_view contract_relative = "contracts/service-contract.json";
+    constexpr std::string_view operations_relative = "contracts/manager-operations.json";
+    constexpr std::string_view configuration_relative = "contracts/configuration-schema.json";
+    constexpr std::string_view configuration_update_relative =
+        "contracts/configuration-update-schema.json";
+    constexpr std::string_view status_relative = "contracts/status-schema.json";
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / component_version;
+    fs::create_directories(active_root / "contracts");
+    fs::create_directories(paths.data_root / "receipts");
+    std::ofstream(active_root / cli_relative, std::ios::binary) << cli_contents;
+
+    const json closed_schema{
+        {"$schema", "https://json-schema.org/draft/2020-12/schema"},
+        {"$id", "https://uci-arena.example/test/provider.json"},
+        {"type", "object"},
+        {"required", json::array({"schema"})},
+        {"properties", {{"schema", {{"type", "string"}}}}},
+        {"additionalProperties", false},
+    };
+    const json operations{
+        {"schema", "replaceable_provider_manager_api_v1"},
+        {"version", "1.0"},
+        {"transport",
+         {{"kind", "cli_json"},
+          {"entrypoint", cli_relative},
+          {"stdout", "one_bounded_json_document"},
+          {"stderr", "sanitized_diagnostics"},
+          {"shell", false}}},
+        {"operations",
+         {{"provider_status",
+           {{"arguments", json::array({"status"})},
+            {"mutates", false},
+            {"credential", "forbidden"}}}}},
+    };
+    const json startup{
+        {"windows", "per_user_task_scheduler"},
+        {"linux", "per_user_systemd"},
+        {"credential_gated", true},
+    };
+    const json contract{
+        {"schema", "uci_arena_service_contract_v1"},
+        {"service",
+         {{"component_id", component_id},
+          {"component_version", component_version},
+          {"product_id", "replaceable.provider.product"},
+          {"contract_version", contract_version},
+          {"transport", "cli_json"},
+          {"entrypoint", cli_relative}}},
+        {"provided_capabilities", json::array({"provider.status"})},
+        {"required_capabilities", json::array({"runtime.process"})},
+        {"credential_contract",
+         {{"input", "external_absolute_file_path"},
+          {"contents_visible_to", "provider_transport_only"},
+          {"manager_projection", "path_and_redacted_status_only"},
+          {"installer_behavior", "never_package_copy_or_inspect"}}},
+        {"startup", startup},
+        {"persistence",
+         {{"upgrade", "preserve_and_migrate"},
+          {"repair", "preserve"},
+          {"uninstall_default", "preserve"}}},
+        {"manager_operations", operations_relative},
+        {"configuration_schema", configuration_relative},
+        {"configuration_update_schema", configuration_update_relative},
+        {"status_schema", status_relative},
+        {"error_contract",
+         {{"format", "bounded_typed_json"},
+          {"secrets", "redacted"},
+          {"unknown_operation", "fail_closed"},
+          {"unknown_major_version", "incompatible"}}},
+    };
+    const std::vector<std::pair<fs::path, std::string>> documents{
+        {contract_relative, contract.dump()},
+        {operations_relative, operations.dump()},
+        {configuration_relative, closed_schema.dump()},
+        {configuration_update_relative, closed_schema.dump()},
+        {status_relative, closed_schema.dump()},
+    };
+    json files = json::array(
+        {{{"path", cli_relative},
+          {"size_bytes", cli_contents.size()},
+          {"sha256", sha256_text(cli_contents)}}});
+    for (const auto& [relative, contents] : documents) {
+        std::ofstream(active_root / relative, std::ios::binary) << contents;
+        files.push_back({{"path", relative.generic_string()},
+                         {"size_bytes", contents.size()},
+                         {"sha256", sha256_text(contents)}});
+    }
+    std::ofstream(active_root / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", component_version},
+               {"entrypoints", {{"cli", cli_relative}}},
+               {"contract_manifest", contract_relative},
+               {"capabilities", json::array({"provider_status"})},
+               {"dependencies", json::array()},
+               {"startup", startup},
+               {"data_paths", json::array({"workspace"})},
+               {"files", files},
+           }
+               .dump(2);
+
+    const auto digest_for = [&](const std::string_view relative) {
+        return sha256_text(
+            std::find_if(documents.begin(), documents.end(), [&](const auto& item) {
+                return item.first.generic_string() == relative;
+            })->second);
+    };
+    std::ofstream(paths.data_root / "receipts" / "replaceable.provider.json",
+                  std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", component_version},
+               {"state", "installed_disabled"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array()},
+               {"configuration_path", ""},
+               {"activated_files", json::array()},
+               {"service_contract",
+                {{"schema", "uci_arena_service_contract_v1"},
+                 {"path", contract_relative},
+                 {"sha256", digest_for(contract_relative)},
+                 {"configuration_schema_path", configuration_relative},
+                 {"configuration_schema_sha256", digest_for(configuration_relative)},
+                 {"configuration_update_schema_path", configuration_update_relative},
+                 {"configuration_update_schema_sha256",
+                  digest_for(configuration_update_relative)},
+                 {"status_schema_path", status_relative},
+                 {"status_schema_sha256", digest_for(status_relative)},
+                 {"manager_operations_path", operations_relative},
+                 {"manager_operations_sha256", digest_for(operations_relative)},
+                 {"credential_gated_startup", true}}},
+           }
+               .dump(2);
+}
+
 TEST_CASE("setup planner applies catalog roles without product identity knowledge") {
     const fs::path root = temporary_directory();
     json producer = component("renamed.producer");
@@ -456,6 +604,31 @@ TEST_CASE("standalone service contracts are identity-bound and receipt-verified"
     write_book_forge_service_install(missing_paths, std::nullopt);
     REQUIRE(SetupEngine::verify(missing_paths).at("ok") == false);
     fs::remove_all(missing_root);
+}
+
+TEST_CASE("typed provider service contracts are replaceable and receipt-verified") {
+    const fs::path valid_root = temporary_directory();
+    const SetupPaths valid_paths = paths_under(valid_root);
+    write_provider_service_install(valid_paths);
+    REQUIRE(SetupEngine::verify(valid_paths).at("ok") == true);
+    fs::remove_all(valid_root);
+
+    const fs::path incompatible_root = temporary_directory();
+    const SetupPaths incompatible_paths = paths_under(incompatible_root);
+    write_provider_service_install(incompatible_paths, "2.0");
+    REQUIRE(SetupEngine::verify(incompatible_paths).at("ok") == false);
+    fs::remove_all(incompatible_root);
+
+    const fs::path tampered_root = temporary_directory();
+    const SetupPaths tampered_paths = paths_under(tampered_root);
+    write_provider_service_install(tampered_paths);
+    std::ofstream(
+        tampered_paths.install_root / "components" / "replaceable.provider" / "1.0.0" /
+            "contracts" / "manager-operations.json",
+        std::ios::app)
+        << " ";
+    REQUIRE(SetupEngine::verify(tampered_paths).at("ok") == false);
+    fs::remove_all(tampered_root);
 }
 
 TEST_CASE("standalone Manager API accepts additive typed operations") {
@@ -1461,6 +1634,45 @@ TEST_CASE("unsigned catalogs require an explicit development override") {
         << R"({"schema":"arena_install_catalog_v1","schema_version":1,"suite_version":"1.0.0","presets":{},"components":[]})";
     REQUIRE_THROWS(SetupEngine::load_catalog(catalog_path));
     REQUIRE(SetupEngine::load_catalog(catalog_path, {}, true).at("suite_version") == "1.0.0");
+    fs::remove_all(root);
+}
+
+TEST_CASE("unsafe retained release media fails preflight before installation mutation") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path media = root / "installer-media";
+    const fs::path external_payload = root / "external-manager.tar.gz";
+    const fs::path working_marker = paths.install_root / "working-installation.marker";
+    fs::create_directories(media);
+    fs::create_directories(paths.install_root);
+    std::ofstream(external_payload) << "payload";
+    std::ofstream(working_marker) << "working";
+    const json catalog{
+        {"schema", "arena_install_catalog_v1"},
+        {"schema_version", 1},
+        {"suite_version", "1.0.0"},
+        {"presets", {{"manager_only", json::array({"manager.core"})}}},
+        {"components", json::array({{{"id", "manager.core"},
+                                     {"version", "1.0.0"},
+                                     {"dependencies", json::array()},
+                                     {"installed_bytes", 7},
+                                     {"staging_bytes", 7},
+                                     {"backup_bytes", 0},
+                                     {"workspace_reserve_bytes", 0},
+                                     {"artifacts",
+                                      {{SetupEngine::platform_key(),
+                                        {{"source", external_payload.string()},
+                                         {"sha256", "239f59ed55e737c77147cf55ad0c1b030b6d7e"
+                                                    "e748a7426952f9b852d5a935e5"},
+                                         {"size_bytes", 7}}}}}}})},
+    };
+    const fs::path catalog_path = media / "catalog.json";
+    std::ofstream(catalog_path) << catalog.dump(2);
+    const json loaded = SetupEngine::load_catalog(catalog_path, {}, true);
+
+    REQUIRE_THROWS(SetupEngine::validate_release_media(loaded, catalog_path, {}, true));
+    REQUIRE(fs::is_regular_file(working_marker));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "release"));
     fs::remove_all(root);
 }
 

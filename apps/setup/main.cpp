@@ -307,6 +307,11 @@ int main(int argc, char** argv) {
                 curl_global_cleanup();
                 return resolved.at("blockers").empty() ? 0 : 3;
             }
+            static_cast<void>(SetupEngine::validate_release_media(
+                catalog,
+                catalog_path,
+                metadata_directory,
+                catalog.value("_catalog_trust", "") != "tuf"));
             const bool feature_reconcile = !bundle_features.empty();
             const bool restart_manager = paths.restart_manager_service;
             bool manager_was_running = false;

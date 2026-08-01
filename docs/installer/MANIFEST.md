@@ -10,6 +10,21 @@ An optional `feature_selection` object defines the base preset, exact operator-v
 
 Changing package contents normally changes catalog or component data, not orchestrator control flow. Values must not be duplicated in batch launchers, PowerShell scripts, WiX source, or C++ branches.
 
+Provider products may publish a richer product-owned manifest under
+`contracts/component-manifest.json`, but every installable archive also carries
+one generated root `arena-component.json`. That root document is the
+Installer-facing inventory: it binds every payload file by relative path, size,
+and SHA-256 and projects only the entrypoints, dependencies, startup ownership,
+data paths, and public contract references needed by installation. It is
+generated from provider-owned package data; Installer does not translate
+repository layouts or infer provider behavior.
+
+`uci_arena_service_contract_v1` providers additionally publish the exact
+Manager operation catalog and configuration/status schemas referenced by their
+service contract. Installer validates and receipts those files as opaque typed
+contracts. It does not interpret operation meaning, open provider storage, or
+handle credential contents.
+
 Before mutation, validation requires:
 
 - supported schema major and target;

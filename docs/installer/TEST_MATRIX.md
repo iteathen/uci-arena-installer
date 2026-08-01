@@ -8,6 +8,8 @@ Required scenarios:
 - spaces, Unicode, long paths, trailing separators, and unrelated working directory;
 - valid upgrade, invalid downgrade, repair, reinstall, replacement, and uninstall;
 - missing or corrupt payload and invalid manifest;
+- unsafe, external, missing, size-mismatched, and digest-mismatched retained
+  release media rejected before installation mutation;
 - missing runtime and failed dependency command;
 - locked destination and partial existing installation;
 - interrupted stage and staged validation failure;
@@ -24,6 +26,9 @@ Required scenarios:
 - deterministic online and offline launcher envelopes, exact embedded bundle
   digests, corrupt-envelope rejection, and temporary-child cleanup;
 - installed-scope maintenance and explicit cross-scope block;
-- and one startup owner with no duplicate Manager, Book Forge, Evidence, or Lichess daemon.
+- one startup owner with no duplicate Manager, Book Forge, Evidence, or Lichess daemon;
+- replaceable provider service contracts with independent operation-catalog
+  schema names, exact receipt digests, unknown-major rejection, and tamper
+  detection.
 
 Mandatory focused commands are documented in `AGENTS.md`. Complete Windows acceptance additionally validates the visible bootstrapper, installed scope marker, exact running Manager root, packaged services, output integration, repair/update, and uninstall preservation.

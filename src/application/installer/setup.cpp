@@ -823,6 +823,183 @@ json validate_manager_service_api(const json& declaration,
     return declaration;
 }
 
+fs::path validated_contract_file(const fs::path& root,
+                                 const std::set<fs::path>& listed_files,
+                                 const json& contract, const char* field) {
+    if (!contract.contains(field) || !contract.at(field).is_string()) {
+        throw std::runtime_error(std::string("provider service contract path is missing: ") +
+                                 field);
+    }
+    const fs::path relative =
+        fs::path(contract.at(field).get<std::string>()).lexically_normal();
+    if (!safe_relative_path(relative) || !listed_files.contains(relative)) {
+        throw std::runtime_error(std::string("provider service contract path is unsafe or ") +
+                                 "unlisted: " + field);
+    }
+    const fs::path absolute = root / relative;
+    if (!fs::is_regular_file(absolute) || fs::is_symlink(absolute)) {
+        throw std::runtime_error(std::string("provider service contract file is unavailable: ") +
+                                 field);
+    }
+    return relative;
+}
+
+void validate_closed_json_schema(const fs::path& path, const char* label) {
+    const json schema = read_json(path);
+    if (!schema.is_object() || schema.value("$schema", "") !=
+                                   "https://json-schema.org/draft/2020-12/schema" ||
+        schema.value("type", "") != "object" ||
+        !schema.contains("additionalProperties") ||
+        !schema.at("additionalProperties").is_boolean() ||
+        schema.at("additionalProperties").get<bool>()) {
+        throw std::runtime_error(std::string("provider ") + label +
+                                 " must be a closed JSON Schema object");
+    }
+}
+
+void validate_manager_operation_catalog(const fs::path& path,
+                                        const fs::path& expected_entrypoint,
+                                        const std::string& expected_contract_version) {
+    const json catalog = read_json(path);
+    const std::string catalog_schema = catalog.value("schema", "");
+    if (!catalog.is_object() ||
+        !valid_identifier(catalog_schema) || !catalog_schema.ends_with("_manager_api_v1") ||
+        !catalog.contains("version") || !catalog.at("version").is_string() ||
+        catalog.at("version").get_ref<const std::string&>() != expected_contract_version ||
+        !compatible_manager_api_version(
+            catalog.at("version").get_ref<const std::string&>()) ||
+        !catalog.contains("transport") || !catalog.at("transport").is_object() ||
+        !catalog.contains("operations") || !catalog.at("operations").is_object() ||
+        catalog.at("operations").empty()) {
+        throw std::runtime_error("provider Manager operation catalog is incompatible");
+    }
+    const json& transport = catalog.at("transport");
+    if (transport.value("kind", "") != "cli_json" ||
+        transport.value("entrypoint", "") != expected_entrypoint.generic_string() ||
+        transport.value("stdout", "") != "one_bounded_json_document" ||
+        !transport.contains("shell") || !transport.at("shell").is_boolean() ||
+        transport.at("shell").get<bool>()) {
+        throw std::runtime_error("provider Manager transport is incompatible");
+    }
+    for (const auto& [name, operation] : catalog.at("operations").items()) {
+        if (!valid_identifier(name) || !operation.is_object() ||
+            !operation.contains("arguments") || !operation.at("arguments").is_array() ||
+            operation.at("arguments").empty() ||
+            !operation.contains("credential") || !operation.at("credential").is_string()) {
+            throw std::runtime_error("provider Manager operation is invalid: " + name);
+        }
+        const std::string credential = operation.at("credential").get<std::string>();
+        if (credential != "forbidden" && credential != "external_file_path_only") {
+            throw std::runtime_error("provider Manager operation credential boundary is invalid: " +
+                                     name);
+        }
+        for (const auto& argument : operation.at("arguments")) {
+            if (!argument.is_string() || !valid_identifier(argument.get<std::string>())) {
+                throw std::runtime_error("provider Manager operation argument is invalid: " +
+                                         name);
+            }
+        }
+    }
+}
+
+json validate_provider_service_contract(const fs::path& root, const json& manifest,
+                                        const std::set<fs::path>& listed_files,
+                                        const fs::path& contract_relative,
+                                        const json& contract) {
+    const std::string component_id = manifest.at("component_id").get<std::string>();
+    const std::string component_version = manifest.at("component_version").get<std::string>();
+    if (!contract.contains("service") || !contract.at("service").is_object()) {
+        throw std::runtime_error("provider service identity is missing");
+    }
+    const json& service = contract.at("service");
+    if (service.value("component_id", "") != component_id ||
+        service.value("component_version", "") != component_version ||
+        !service.contains("contract_version") ||
+        !service.at("contract_version").is_string() ||
+        !compatible_manager_api_version(
+            service.at("contract_version").get_ref<const std::string&>()) ||
+        service.value("transport", "") != "cli_json" ||
+        !service.contains("entrypoint") || !service.at("entrypoint").is_string() ||
+        !manifest.contains("entrypoints") || !manifest.at("entrypoints").is_object() ||
+        !manifest.at("entrypoints").contains("cli") ||
+        !manifest.at("entrypoints").at("cli").is_string()) {
+        throw std::runtime_error("provider service identity or transport is incompatible");
+    }
+    const fs::path service_entrypoint =
+        fs::path(service.at("entrypoint").get<std::string>()).lexically_normal();
+    const fs::path component_entrypoint = fs::path(
+        manifest.at("entrypoints").at("cli").get<std::string>()).lexically_normal();
+    if (!safe_relative_path(service_entrypoint) ||
+        service_entrypoint != component_entrypoint ||
+        !listed_files.contains(service_entrypoint)) {
+        throw std::runtime_error("provider service CLI entrypoint does not match the component");
+    }
+    static_cast<void>(identifier_set_field(contract, "provided_capabilities"));
+    static_cast<void>(identifier_set_field(contract, "required_capabilities"));
+    if (!contract.contains("credential_contract") ||
+        !contract.at("credential_contract").is_object() ||
+        contract.at("credential_contract").value("input", "") !=
+            "external_absolute_file_path" ||
+        contract.at("credential_contract").value("contents_visible_to", "") !=
+            "provider_transport_only" ||
+        contract.at("credential_contract").value("manager_projection", "") !=
+            "path_and_redacted_status_only" ||
+        contract.at("credential_contract").value("installer_behavior", "") !=
+            "never_package_copy_or_inspect") {
+        throw std::runtime_error("provider credential contract is incompatible");
+    }
+    if (!contract.contains("startup") || !contract.at("startup").is_object() ||
+        !manifest.contains("startup") || contract.at("startup") != manifest.at("startup") ||
+        !contract.at("startup").value("credential_gated", false)) {
+        throw std::runtime_error("provider startup ownership does not match the component");
+    }
+    if (!contract.contains("persistence") || !contract.at("persistence").is_object() ||
+        contract.at("persistence").value("upgrade", "") != "preserve_and_migrate" ||
+        contract.at("persistence").value("repair", "") != "preserve" ||
+        contract.at("persistence").value("uninstall_default", "") != "preserve") {
+        throw std::runtime_error("provider persistence contract is incompatible");
+    }
+    if (!contract.contains("error_contract") || !contract.at("error_contract").is_object() ||
+        contract.at("error_contract").value("format", "") != "bounded_typed_json" ||
+        contract.at("error_contract").value("secrets", "") != "redacted" ||
+        contract.at("error_contract").value("unknown_operation", "") != "fail_closed" ||
+        contract.at("error_contract").value("unknown_major_version", "") != "incompatible") {
+        throw std::runtime_error("provider error contract is incompatible");
+    }
+
+    const fs::path operations_relative =
+        validated_contract_file(root, listed_files, contract, "manager_operations");
+    const fs::path configuration_relative =
+        validated_contract_file(root, listed_files, contract, "configuration_schema");
+    const fs::path configuration_update_relative = validated_contract_file(
+        root, listed_files, contract, "configuration_update_schema");
+    const fs::path status_relative =
+        validated_contract_file(root, listed_files, contract, "status_schema");
+    validate_manager_operation_catalog(
+        root / operations_relative, service_entrypoint,
+        service.at("contract_version").get_ref<const std::string&>());
+    validate_closed_json_schema(root / configuration_relative, "configuration schema");
+    validate_closed_json_schema(root / configuration_update_relative,
+                                "configuration-update schema");
+    validate_closed_json_schema(root / status_relative, "status schema");
+
+    return {
+        {"schema", "uci_arena_service_contract_v1"},
+        {"path", contract_relative.generic_string()},
+        {"sha256", sha256_file(root / contract_relative)},
+        {"configuration_schema_path", configuration_relative.generic_string()},
+        {"configuration_schema_sha256", sha256_file(root / configuration_relative)},
+        {"configuration_update_schema_path", configuration_update_relative.generic_string()},
+        {"configuration_update_schema_sha256",
+         sha256_file(root / configuration_update_relative)},
+        {"status_schema_path", status_relative.generic_string()},
+        {"status_schema_sha256", sha256_file(root / status_relative)},
+        {"manager_operations_path", operations_relative.generic_string()},
+        {"manager_operations_sha256", sha256_file(root / operations_relative)},
+        {"credential_gated_startup", true},
+    };
+}
+
 std::optional<json> validate_standalone_service_contract(
     const fs::path& root, const json& manifest, const std::set<fs::path>& listed_files) {
     const std::string component_id = manifest.at("component_id").get<std::string>();
@@ -848,6 +1025,11 @@ std::optional<json> validate_standalone_service_contract(
         throw std::runtime_error("component contract manifest is not a regular payload file");
     }
     const json contract = read_json(contract_path);
+    if (contract.is_object() &&
+        contract.value("schema", "") == "uci_arena_service_contract_v1") {
+        return validate_provider_service_contract(root, manifest, listed_files,
+                                                  contract_relative, contract);
+    }
     if (!contract.is_object() ||
         contract.value("schema", "") != "uci_arena_standalone_service_contract_v1" ||
         contract.value("component_id", "") != component_id ||
@@ -972,6 +1154,31 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
             sha256_file(path) != file.at("sha256").get<std::string>()) {
             throw std::runtime_error("component payload verification failed for " +
                                      relative.generic_string());
+        }
+    }
+    if (manifest.contains("entrypoints")) {
+        if (!manifest.at("entrypoints").is_object()) {
+            throw std::runtime_error("component entrypoints are not an object");
+        }
+        for (const auto& [name, value] : manifest.at("entrypoints").items()) {
+            if (!valid_identifier(name) || !value.is_string()) {
+                throw std::runtime_error("component entrypoint declaration is invalid");
+            }
+            const fs::path relative = fs::path(value.get<std::string>()).lexically_normal();
+            if (!safe_relative_path(relative) || !listed_files.contains(relative)) {
+                throw std::runtime_error("component entrypoint is unsafe or unlisted: " + name);
+            }
+        }
+    }
+    if (manifest.contains("configuration_template")) {
+        if (!manifest.at("configuration_template").is_string()) {
+            throw std::runtime_error("component configuration template path is invalid");
+        }
+        const fs::path relative = fs::path(
+            manifest.at("configuration_template").get<std::string>()).lexically_normal();
+        if (!safe_relative_path(relative) || !listed_files.contains(relative)) {
+            throw std::runtime_error(
+                "component configuration template is unsafe or unlisted");
         }
     }
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
@@ -2451,8 +2658,23 @@ json generated_component_config(const std::string& component_id, const fs::path&
         return config;
     }
     if (component_id == "lichess.adapter") {
-        const fs::path template_path =
-            component_root / "deploy" / "lichess" / "config.uci_arena.template.yml";
+        const json component_manifest = read_json(component_root / "arena-component.json");
+        fs::path template_relative =
+            fs::path("deploy") / "lichess" / "config.uci_arena.template.yml";
+        if (component_manifest.contains("configuration_template")) {
+            if (!component_manifest.at("configuration_template").is_string()) {
+                throw std::runtime_error(
+                    "installed Lichess adapter configuration-template contract is invalid");
+            }
+            template_relative = fs::path(
+                component_manifest.at("configuration_template").get<std::string>())
+                                    .lexically_normal();
+        }
+        if (!safe_relative_path(template_relative)) {
+            throw std::runtime_error(
+                "installed Lichess adapter configuration-template path is unsafe");
+        }
+        const fs::path template_path = component_root / template_relative;
         json config = read_json(template_path);
         if (config.value("schema", "") != "uci_arena_lichess_adapter_v6") {
             throw std::runtime_error("installed Lichess adapter template is incompatible");
@@ -2976,10 +3198,74 @@ json SetupEngine::load_catalog(const fs::path& catalog_path, const fs::path& met
     return catalog;
 }
 
+json SetupEngine::validate_release_media(const json& catalog,
+                                         const fs::path& catalog_path,
+                                         const fs::path& metadata_directory,
+                                         const bool retain_development_trust) {
+    if (retain_development_trust && !metadata_directory.empty()) {
+        throw std::runtime_error(
+            "development catalog trust cannot replace TUF metadata");
+    }
+    const fs::path source_catalog = normalized_absolute(catalog_path);
+    const fs::path source_root = source_catalog.parent_path();
+    if (!fs::is_regular_file(source_catalog) || contains_symbolic_link(source_catalog)) {
+        throw std::runtime_error("verified release catalog is unavailable for retention");
+    }
+    if (!metadata_directory.empty()) {
+        const fs::path metadata_root = normalized_absolute(metadata_directory);
+        for (const auto* required :
+             {"root.json", "targets.json", "snapshot.json", "timestamp.json"}) {
+            const fs::path source = metadata_root / required;
+            if (!fs::is_regular_file(source) || contains_symbolic_link(source)) {
+                throw std::runtime_error(std::string("verified TUF metadata is unavailable: ") +
+                                         required);
+            }
+        }
+    }
+
+    std::set<std::string> retained_sources;
+    std::uint64_t retained_bytes = 0;
+    for (const auto& component : catalog.at("components")) {
+        const json& artifact = platform_artifact(component);
+        const std::string source = artifact.at("source").get<std::string>();
+        if (source.starts_with("https://")) {
+            continue;
+        }
+        const fs::path relative = fs::path(source).lexically_normal();
+        if (!safe_relative_path(relative)) {
+            throw std::runtime_error("release catalog contains an unsafe retained source");
+        }
+        if (!retained_sources.insert(relative.generic_string()).second) {
+            continue;
+        }
+        const fs::path source_file = source_root / relative;
+        if (!within(source_root, source_file) || !fs::is_regular_file(source_file) ||
+            contains_symbolic_link(source_file) ||
+            fs::file_size(source_file) != integer_field(artifact, "size_bytes") ||
+            sha256_file(source_file) != artifact.at("sha256").get<std::string>()) {
+            throw std::runtime_error(
+                "release payload cannot be retained with exact identity: " +
+                relative.generic_string());
+        }
+        retained_bytes += integer_field(artifact, "size_bytes");
+    }
+    return {
+        {"schema", "arena_release_media_preflight_v1"},
+        {"catalog", source_catalog.string()},
+        {"catalog_sha256", sha256_file(source_catalog)},
+        {"retained_payload_count", retained_sources.size()},
+        {"retained_payload_bytes", retained_bytes},
+        {"trust", metadata_directory.empty() ? "development" : "tuf"},
+        {"ok", true},
+    };
+}
+
 json SetupEngine::persist_release_media(const json& catalog, const SetupPaths& paths,
                                         const fs::path& catalog_path,
                                         const fs::path& metadata_directory,
                                         const bool retain_development_trust) {
+    static_cast<void>(validate_release_media(catalog, catalog_path, metadata_directory,
+                                             retain_development_trust));
     if (retain_development_trust && !metadata_directory.empty()) {
         throw std::runtime_error(
             "development catalog trust cannot replace TUF metadata");
@@ -3832,13 +4118,24 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["actions"].back()["receipt_path"] = receipt_path.string();
             json data_paths = json::array();
             std::string configuration_path;
-            if (id == "book_forge.service" || id == "uci_arena_evidence.service" ||
-                id == "lichess.adapter") {
-                const fs::path workspace =
-                    paths.workspace_root / (id == "book_forge.service" ? "book-forge"
-                                            : id == "uci_arena_evidence.service"
-                                                ? "evidence-service"
-                                                : "lichess-adapter");
+            if (validated.service_contract.has_value() || id == "book_forge.service" ||
+                id == "uci_arena_evidence.service" || id == "lichess.adapter") {
+                std::string workspace_name;
+                if (validated.manifest.contains("workspace_name") &&
+                    validated.manifest.at("workspace_name").is_string()) {
+                    workspace_name =
+                        validated.manifest.at("workspace_name").get<std::string>();
+                    if (!valid_identifier(workspace_name)) {
+                        throw std::runtime_error(
+                            "component workspace name is not a safe identifier");
+                    }
+                } else {
+                    workspace_name = id == "book_forge.service" ? "book-forge"
+                                     : id == "uci_arena_evidence.service"
+                                         ? "evidence-service"
+                                         : "lichess-adapter";
+                }
+                const fs::path workspace = paths.workspace_root / workspace_name;
                 if (action.value("enabled", true) ||
                     id == "lichess.adapter") {
                     fs::create_directories(workspace);

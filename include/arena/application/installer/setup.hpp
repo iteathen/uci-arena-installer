@@ -30,6 +30,12 @@ class SetupEngine final {
                  const std::filesystem::path& retained_development_trust_path = {});
 
     [[nodiscard]] static nlohmann::json
+    validate_release_media(const nlohmann::json& catalog,
+                           const std::filesystem::path& catalog_path,
+                           const std::filesystem::path& metadata_directory = {},
+                           bool retain_development_trust = false);
+
+    [[nodiscard]] static nlohmann::json
     persist_release_media(const nlohmann::json& catalog, const SetupPaths& paths,
                           const std::filesystem::path& catalog_path,
                           const std::filesystem::path& metadata_directory = {},

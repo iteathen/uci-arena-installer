@@ -22,22 +22,10 @@
     "data_paths": {"type": "array", "items": {"type": "string"}},
     "configuration_path": {"type": "string"},
     "service_contract": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema",
-        "path",
-        "sha256",
-        "configuration_schema",
-        "status_schema"
-      ],
-      "properties": {
-        "schema": {"const": "uci_arena_standalone_service_contract_v1"},
-        "path": {"type": "string", "minLength": 1},
-        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "configuration_schema": {"type": "string", "minLength": 1},
-        "status_schema": {"type": "string", "minLength": 1}
-      }
+      "oneOf": [
+        {"$ref": "#/$defs/standalone_service_receipt"},
+        {"$ref": "#/$defs/provider_service_receipt"}
+      ]
     },
     "startup": {
       "type": "object",
@@ -64,6 +52,54 @@
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "size_bytes": {"type": "integer", "minimum": 0}
         }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "standalone_service_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "path", "sha256", "configuration_schema", "status_schema"],
+      "properties": {
+        "schema": {"const": "uci_arena_standalone_service_contract_v1"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "configuration_schema": {"type": "string", "minLength": 1},
+        "status_schema": {"type": "string", "minLength": 1},
+        "manager_integration_api": {"type": "object"}
+      }
+    },
+    "provider_service_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "path",
+        "sha256",
+        "configuration_schema_path",
+        "configuration_schema_sha256",
+        "configuration_update_schema_path",
+        "configuration_update_schema_sha256",
+        "status_schema_path",
+        "status_schema_sha256",
+        "manager_operations_path",
+        "manager_operations_sha256",
+        "credential_gated_startup"
+      ],
+      "properties": {
+        "schema": {"const": "uci_arena_service_contract_v1"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "configuration_schema_path": {"type": "string", "minLength": 1},
+        "configuration_schema_sha256": {"$ref": "#/$defs/digest"},
+        "configuration_update_schema_path": {"type": "string", "minLength": 1},
+        "configuration_update_schema_sha256": {"$ref": "#/$defs/digest"},
+        "status_schema_path": {"type": "string", "minLength": 1},
+        "status_schema_sha256": {"$ref": "#/$defs/digest"},
+        "manager_operations_path": {"type": "string", "minLength": 1},
+        "manager_operations_sha256": {"$ref": "#/$defs/digest"},
+        "credential_gated_startup": {"const": true}
       }
     }
   }

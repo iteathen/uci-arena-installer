@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/provider-service-contract.schema.json",
+  "title": "uci_arena_service_contract_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "service",
+    "provided_capabilities",
+    "required_capabilities",
+    "credential_contract",
+    "startup",
+    "persistence",
+    "manager_operations",
+    "configuration_schema",
+    "configuration_update_schema",
+    "status_schema",
+    "error_contract"
+  ],
+  "properties": {
+    "schema": {"const": "uci_arena_service_contract_v1"},
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "component_version",
+        "product_id",
+        "contract_version",
+        "transport",
+        "entrypoint"
+      ],
+      "properties": {
+        "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "component_version": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "product_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "contract_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+        "transport": {"const": "cli_json"},
+        "entrypoint": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "provided_capabilities": {"$ref": "#/$defs/identifiers"},
+    "required_capabilities": {"$ref": "#/$defs/identifiers"},
+    "credential_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "contents_visible_to",
+        "manager_projection",
+        "installer_behavior"
+      ],
+      "properties": {
+        "input": {"const": "external_absolute_file_path"},
+        "contents_visible_to": {"const": "provider_transport_only"},
+        "manager_projection": {"const": "path_and_redacted_status_only"},
+        "installer_behavior": {"const": "never_package_copy_or_inspect"}
+      }
+    },
+    "startup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows", "linux", "credential_gated"],
+      "properties": {
+        "windows": {"type": "string", "minLength": 1},
+        "linux": {"type": "string", "minLength": 1},
+        "credential_gated": {"const": true}
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upgrade", "repair", "uninstall_default"],
+      "properties": {
+        "upgrade": {"const": "preserve_and_migrate"},
+        "repair": {"const": "preserve"},
+        "uninstall_default": {"const": "preserve"}
+      }
+    },
+    "manager_operations": {"$ref": "#/$defs/relative_path"},
+    "configuration_schema": {"$ref": "#/$defs/relative_path"},
+    "configuration_update_schema": {"$ref": "#/$defs/relative_path"},
+    "status_schema": {"$ref": "#/$defs/relative_path"},
+    "error_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "secrets", "unknown_operation", "unknown_major_version"],
+      "properties": {
+        "format": {"const": "bounded_typed_json"},
+        "secrets": {"const": "redacted"},
+        "unknown_operation": {"const": "fail_closed"},
+        "unknown_major_version": {"const": "incompatible"}
+      }
+    }
+  },
+  "$defs": {
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+$"
+    },
+    "identifiers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}
+    }
+  }
+}

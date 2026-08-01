@@ -15,9 +15,11 @@ authority:
       components:
         - uci_arena.engine
         - uci_arena_evidence.runtime
-        - lichess.adapter
         - syzygy.wdl.3-4-5
         - syzygy.dtz.3-4-5
+    lichess_bot:
+      repository: iteathen/uci-arena-lichess-bot
+      components: [lichess.adapter]
     book_forge:
       repository: iteathen/uci-arena-book-forge
       components: [book_forge.service, opening_book.standard]
@@ -66,6 +68,10 @@ signed_provenance:
         repository: iteathen/UCI_Arena
         workflow: .github/workflows/component-release.yml
         workflow_name: Provider component candidate
+      lichess_bot:
+        repository: iteathen/uci-arena-lichess-bot
+        workflow: .github/workflows/component-release.yml
+        workflow_name: Lichess Bot component candidate
       book_forge:
         repository: iteathen/uci-arena-book-forge
         workflow: .github/workflows/component-release.yml
@@ -189,6 +195,7 @@ interfaces:
   catalog: arena_install_catalog_v1
   component: arena_install_component_v1
   standalone_service_contract: uci_arena_standalone_service_contract_v1
+  provider_service_contract: uci_arena_service_contract_v1
   provider_result: arena_provider_release_result_v1
   plan: arena_install_plan_v1
   receipt: arena_install_receipt_v1
@@ -275,6 +282,7 @@ installer_lego_architecture:
     - detect_installation_state
     - build_plan
     - report_plan
+    - validate_release_media_retention
     - stage
     - validate_stage
     - backup_when_required
@@ -374,6 +382,51 @@ standalone_service_contracts:
         rejects a missing, stale, or fabricated receipt projection.
       - Manager consumes only the installed contract and public service
         entrypoints; it never imports provider source or service-owned storage.
+
+provider_service_contracts:
+  components:
+    - lichess.adapter
+  accepted_schema: uci_arena_service_contract_v1
+  required_for_new_provider_candidates: true
+  legacy_compatibility: >
+    Already-installed engine-embedded Lichess 1.0 payloads without this public
+    contract remain readable for verification, repair, and removal. New
+    candidates from the standalone provider repository fail release assembly
+    unless the contract is present and validated.
+  validation:
+    - The service identity and exact component version match arena-component.json.
+    - Provider workspace names and configuration-template paths are manifest
+      data. A new provider does not add a workspace-name or source-layout
+      branch to the transaction engine.
+    - The declared CLI entrypoint, service contract, Manager operation catalog,
+      configuration schema, configuration-update schema, and status schema are
+      safe relative regular files listed by exact size and SHA-256 in the
+      component manifest.
+    - The service contract uses CLI JSON transport, publishes bounded typed
+      errors, preserves provider-owned data for upgrade, repair, and normal
+      uninstall, and declares credential-gated startup explicitly.
+    - The Manager operation catalog is a closed versioned object containing
+      fixed argument arrays; it cannot name an executable, working directory,
+      shell string, token value, or provider-private storage path.
+    - Installer records only the exact contract paths, schemas, digests,
+      operation-catalog identity, and credential gate in the receipt. It never
+      synthesizes provider operations or reads a credential.
+    - An unknown contract major, missing referenced contract, unlisted file,
+      identity drift, unsafe path, or digest mismatch fails before mutation.
+  receipt:
+    schema: uci_arena_service_contract_v1
+    fields:
+      - path
+      - sha256
+      - configuration_schema_path
+      - configuration_schema_sha256
+      - configuration_update_schema_path
+      - configuration_update_schema_sha256
+      - status_schema_path
+      - status_schema_sha256
+      - manager_operations_path
+      - manager_operations_sha256
+      - credential_gated_startup
 
 setup:
   executable: arena-setup
@@ -1066,6 +1119,13 @@ capacity:
 transaction:
   staging: immutable
   verification: before_activation
+  release_media_preflight: >
+    Before any component, receipt, workspace, service, or existing release-media
+    mutation, validate that the catalog and every retained local payload use
+    safe relative paths and match their declared size and digest. A retention
+    policy failure is a preflight failure and must leave the installed state
+    unchanged; the CLI must never report an installation failure after silently
+    committing components for a catalog it already knows cannot be retained.
   activation: atomic_version_pointer
   journal: durable_before_each_side_effect
   backup: before_replacement_or_migration
