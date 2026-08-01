@@ -203,8 +203,8 @@ interfaces:
   validation_result: arena_install_validation_result_v1
   deployment_result: arena_install_deployment_result_v1
   rollback_result: arena_install_rollback_result_v1
-    installer_result: arena_installer_result_v1
-    windows_launcher_envelope: arena_windows_installer_envelope_v1
+  installer_result: arena_installer_result_v1
+  windows_launcher_envelope: arena_windows_installer_envelope_v1
 
 installer_lego_architecture:
   status: required
@@ -761,6 +761,15 @@ components:
     - uci_arena_evidence.service
     - lichess.adapter
   composition_rules:
+    - Presets and explicit custom selection are the only authorities that add
+      ordinary components to a plan. The planner never injects manager.core,
+      a runtime, or any other product identity implicitly.
+    - Named optional-component groups translate operator requests such as
+      download missing knowledge, books, or tablebases into component ids.
+      Group membership is catalog data and never a component-id prefix test.
+    - Catalog fields declare default activation, capacity-degraded activation,
+      and whether installed bytes are also copied to the knowledge activation
+      root. Product identities never select any of those planner behaviors.
     - The validated default model is an immutable runtime asset inside the
       uci_arena.engine provider component and is not selected as a nonexistent
       independent catalog component.

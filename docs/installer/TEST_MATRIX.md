@@ -16,6 +16,8 @@ Required scenarios:
 - user-data preservation and application-file replacement;
 - idempotent configuration, PATH, shortcuts, startup, and migration;
 - post-install health success and failure;
+- arbitrary component identities exercising declarative selection, default
+  activation, capacity policy, and knowledge accounting without engine changes;
 - cleanup after success and failure;
 - Personal delegation without elevation;
 - All-users delegation to the elevation-requiring machine bundle;
