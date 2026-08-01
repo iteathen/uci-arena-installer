@@ -26,3 +26,30 @@ Every side effect is journaled before execution. Provider startup changes occur 
 Release-media policy is decided before any process, component, receipt,
 workspace, or service mutation. Retention revalidates identity at the point of
 copy to defend against media changes between preflight and commit.
+
+## Removal lifecycle
+
+Uninstall and purge are separate lifecycle modes:
+
+1. `uninstall-plan` selects installed receipts, verifies dependency order and
+   bundle ownership, and records the exact receipt digest, active root, startup
+   cleanup requirement, and future preservation-record path. It performs no
+   mutation.
+2. Confirmed `uninstall` rejects stale plans, writes preservation evidence,
+   removes receipt-owned startup and executable authority, then removes the
+   receipt. Managed-copy books and every declared persistent path remain.
+3. `purge-plan` reads the latest non-authoritative preservation evidence. It
+   rejects active installations, root-equality (including nested configured
+   roots), unbounded paths, unknown ownership, symbolic-link or Windows reparse
+   traversal, protected lifecycle overlap, and recursive ownership that would
+   engulf an external path. It then separates deletable operations from paths
+   preserved by policy.
+4. Confirmed `purge` revalidates the evidence digest and path bounds before
+   every deletion. Exact-identity files are deleted only while their recorded
+   size and SHA-256 still match. Modified files are retained and reported.
+
+Retained state never establishes installation authority. A reinstall must
+revalidate retained workspaces, assets, locators, profiles, release media, and
+trust state before use. Purge is deliberately not modeled as rollback-capable:
+its reviewed plan, per-operation outcome, partial failures, and preserved files
+remain in the preservation record.

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/uninstall-preservation.schema.json",
+  "title": "arena_install_uninstall_preservation_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "component_id", "component_version", "receipt_sha256", "authority", "state", "entries"],
+  "properties": {
+    "schema": {"const": "arena_install_uninstall_preservation_v1"},
+    "schema_version": {"const": 1},
+    "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+    "component_version": {"type": "string"},
+    "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "bundle_owner": {"type": "string", "pattern": "^[A-Za-z0-9._{}-]+$"},
+    "authority": {"const": "non_authoritative_preservation_evidence"},
+    "state": {"enum": ["prepared", "uninstalled", "purged", "purged_with_preserved_files", "purge_failed"]},
+    "prepared_at": {"type": "string"},
+    "uninstalled_at": {"type": "string"},
+    "purged_at": {"type": "string"},
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "install-receipt.schema.json#/$defs/ownership_entry"}
+    },
+    "purge_results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/purge_result"}
+    }
+  },
+  "$defs": {
+    "purge_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "purge", "state"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "purge": {"enum": ["explicit_recursive", "exact_identity", "empty_only", "forbidden"]},
+        "state": {"enum": ["already_absent", "removed", "preserved_modified", "preserved_nonempty", "preserved_by_policy", "failed"]},
+        "reason": {"type": "string", "minLength": 1},
+        "error": {"type": "string", "minLength": 1},
+        "ownership_class": {"enum": ["application_replaceable", "user_preserved", "generated", "migrated", "cache_disposable", "installer_temporary", "external_dependency", "unknown_policy_controlled"]},
+        "normal_uninstall": {"enum": ["remove", "preserve"]},
+        "kind": {"enum": ["directory_tree", "file"]},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

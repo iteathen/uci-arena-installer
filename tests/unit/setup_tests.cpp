@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "arena/application/installer/credential_recovery.hpp"
+#include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/installer/setup.hpp"
 #include "arena/domain/uuid.hpp"
 
@@ -20,6 +22,8 @@ namespace {
 namespace fs = std::filesystem;
 using arena::application::installer::SetupEngine;
 using arena::application::installer::SetupPaths;
+using arena::application::installer::RemovalLifecycle;
+using arena::application::installer::RemovalLifecycleHooks;
 using arena::application::installer::assess_book_forge_credential_recovery;
 using arena::application::installer::recover_book_forge_credential;
 using nlohmann::json;
@@ -1598,6 +1602,21 @@ TEST_CASE("managed copy is restricted to small flat opening books") {
     const json inventory = SetupEngine::inventory(paths);
     REQUIRE(inventory.at("discovery").at("opening_book").at("selection").at("source") ==
             "install_receipt");
+    const fs::path managed_root = imported.at("path").get<std::string>();
+    const std::string managed_id =
+        imported.at("receipt").at("component_id").get<std::string>();
+    const json uninstall_plan =
+        SetupEngine::plan_uninstall(paths, {managed_id});
+    REQUIRE(uninstall_plan.at("components").at(0).at("remove_active_root") == false);
+    const json uninstall_result =
+        SetupEngine::uninstall(paths, uninstall_plan, true);
+    REQUIRE(uninstall_result.at("components").at(0).at("data_preserved") == true);
+    REQUIRE(fs::is_regular_file(managed_root / "book.bin"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts" / (managed_id + ".json")));
+    const json purge_plan = SetupEngine::plan_purge(paths, {managed_id});
+    REQUIRE(purge_plan.at("blockers").empty());
+    static_cast<void>(SetupEngine::purge(paths, purge_plan, true));
+    REQUIRE_FALSE(fs::exists(managed_root));
     REQUIRE_THROWS(SetupEngine::import_path(paths, "syzygy", source, true));
 
     const fs::path nested = root / "nested-book";
@@ -1751,6 +1770,86 @@ TEST_CASE("verified release media is retained for later repair and downloads") {
     fs::remove_all(root);
 }
 
+TEST_CASE("removal lifecycle accepts a replaceable startup adapter") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "replaceable.provider";
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path workspace = paths.workspace_root / component_id;
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(active_root);
+    fs::create_directories(workspace);
+    fs::create_directories(receipts);
+    std::ofstream(active_root / "payload") << "payload";
+    std::ofstream(workspace / "state") << "preserved";
+    std::ofstream(receipts / (component_id + ".json"))
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array({workspace.string()})},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+
+    bool startup_invoked = false;
+    RemovalLifecycleHooks hooks;
+    hooks.startup_cleanup_required =
+        [](const json&) { return true; };
+    hooks.uninstall_startup = [&startup_invoked](const json& receipt) {
+        startup_invoked = true;
+        return json{{"component_id", receipt.at("component_id")},
+                    {"installed", false},
+                    {"adapter", "fake"}};
+    };
+    const json plan =
+        RemovalLifecycle::plan_uninstall(paths, {component_id}, false, hooks);
+    REQUIRE(plan.at("components").at(0).at("startup_cleanup_required") == true);
+    const json result =
+        RemovalLifecycle::uninstall(paths, plan, true, hooks);
+    REQUIRE(startup_invoked);
+    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("adapter") ==
+            "fake");
+    REQUIRE_FALSE(fs::exists(active_root));
+    REQUIRE(fs::is_regular_file(workspace / "state"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("uninstall planning fails closed on ambiguous receipt authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path active_root =
+        paths.install_root / "components" / "identity.fixture" / "1.0.0";
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(active_root);
+    fs::create_directories(receipts);
+    std::ofstream(active_root / "payload") << "payload";
+    std::ofstream(receipts / "wrong-name.json")
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", "identity.fixture"},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    REQUIRE_THROWS(SetupEngine::plan_uninstall(paths, {}, true));
+    REQUIRE(fs::is_regular_file(active_root / "payload"));
+    REQUIRE(fs::is_regular_file(receipts / "wrong-name.json"));
+    fs::remove_all(root);
+}
+
 TEST_CASE("suite uninstall removes every receipt while preserving workspaces") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -1800,8 +1899,23 @@ TEST_CASE("suite uninstall removes every receipt while preserving workspaces") {
         std::ofstream(path) << "retained";
     }
 
-    REQUIRE_THROWS(SetupEngine::uninstall(paths, {"node_runtime.private"}, true, false));
-    const json result = SetupEngine::uninstall(paths, {}, true, false, true);
+    REQUIRE_THROWS(SetupEngine::plan_uninstall(paths, {"node_runtime.private"}));
+    json plan = SetupEngine::plan_uninstall(paths, {}, true);
+    REQUIRE(plan.at("schema") == "arena_install_uninstall_plan_v1");
+    REQUIRE(fs::is_regular_file(manager / "payload"));
+    REQUIRE(fs::is_regular_file(node / "payload"));
+    REQUIRE(fs::is_regular_file(provider / "payload"));
+    REQUIRE_THROWS(SetupEngine::uninstall(paths, plan, false));
+    json altered_plan = plan;
+    altered_plan.at("components").at(0).at("remove_active_root") = false;
+    REQUIRE_THROWS(SetupEngine::uninstall(paths, altered_plan, true));
+    std::ofstream(
+        fs::path(plan.at("components").at(0).at("receipt_path").get<std::string>()),
+        std::ios::app)
+        << ' ';
+    REQUIRE_THROWS(SetupEngine::uninstall(paths, plan, true));
+    plan = SetupEngine::plan_uninstall(paths, {}, true);
+    const json result = SetupEngine::uninstall(paths, plan, true);
     REQUIRE(result.at("all") == true);
     REQUIRE(result.at("components").size() == 3);
     REQUIRE_FALSE(fs::exists(manager));
@@ -1817,6 +1931,16 @@ TEST_CASE("suite uninstall removes every receipt while preserving workspaces") {
     REQUIRE(std::ranges::none_of(
         fs::directory_iterator(receipts),
         [](const fs::directory_entry& entry) { return entry.path().extension() == ".json"; }));
+    const fs::path preservation =
+        paths.data_root / "transactions" / "uninstall-preservation";
+    REQUIRE(fs::is_directory(preservation));
+    REQUIRE(std::ranges::distance(fs::directory_iterator(preservation),
+                                  fs::directory_iterator{}) == 3);
+    const json repeated_plan = SetupEngine::plan_uninstall(paths, {}, true);
+    REQUIRE(repeated_plan.at("components").empty());
+    REQUIRE(SetupEngine::uninstall(paths, repeated_plan, true)
+                .at("components")
+                .empty());
     fs::remove_all(root);
 }
 
@@ -1845,16 +1969,305 @@ TEST_CASE("older bundle uninstall cannot remove receipts adopted by a newer bund
                .dump(2);
 
     paths.bundle_owner = "{11111111-1111-1111-1111-111111111111}";
-    const json old_uninstall = SetupEngine::uninstall(paths, {}, true, false, true);
+    const json old_plan = SetupEngine::plan_uninstall(paths, {}, true);
+    const json old_uninstall = SetupEngine::uninstall(paths, old_plan, true);
     REQUIRE(old_uninstall.at("components").empty());
     REQUIRE(old_uninstall.at("skipped_foreign_receipts") == 1);
     REQUIRE(fs::is_regular_file(component_root / "payload"));
     REQUIRE(fs::is_regular_file(receipts / "manager.core.json"));
 
     paths.bundle_owner = "{22222222-2222-2222-2222-222222222222}";
-    const json current_uninstall = SetupEngine::uninstall(paths, {}, true, false, true);
+    const json current_plan = SetupEngine::plan_uninstall(paths, {}, true);
+    const json current_uninstall = SetupEngine::uninstall(paths, current_plan, true);
     REQUIRE(current_uninstall.at("components").size() == 1);
     REQUIRE_FALSE(fs::exists(component_root));
     REQUIRE_FALSE(fs::exists(receipts / "manager.core.json"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("purge is separate bounded and preserves modified or external files") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "provider.fixture";
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path workspace = paths.workspace_root / "provider-fixture";
+    const fs::path unchanged = paths.knowledge_root / "fixture" / "unchanged.bin";
+    const fs::path modified = paths.knowledge_root / "fixture" / "modified.bin";
+    const fs::path external = root / "operator-owned" / "external.bin";
+    fs::create_directories(active_root);
+    fs::create_directories(workspace);
+    fs::create_directories(unchanged.parent_path());
+    fs::create_directories(external.parent_path());
+    std::ofstream(active_root / "payload") << "payload";
+    std::ofstream(workspace / "observations.db") << "valuable";
+    std::ofstream(unchanged, std::ios::binary) << "unchanged";
+    std::ofstream(modified, std::ios::binary) << "original";
+    std::ofstream(external, std::ios::binary) << "external";
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(receipts);
+    std::ofstream(receipts / (component_id + ".json"))
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"ownership",
+                json::array({
+                    {{"path", workspace.string()},
+                     {"ownership_class", "user_preserved"},
+                     {"normal_uninstall", "preserve"},
+                     {"purge", "explicit_recursive"},
+                     {"kind", "directory_tree"}},
+                    {{"path", unchanged.string()},
+                     {"ownership_class", "generated"},
+                     {"normal_uninstall", "preserve"},
+                     {"purge", "exact_identity"},
+                     {"kind", "file"},
+                     {"size_bytes", 9},
+                     {"sha256", sha256_text("unchanged")}},
+                    {{"path", modified.string()},
+                     {"ownership_class", "generated"},
+                     {"normal_uninstall", "preserve"},
+                     {"purge", "exact_identity"},
+                     {"kind", "file"},
+                     {"size_bytes", 8},
+                     {"sha256", sha256_text("original")}},
+                    {{"path", external.string()},
+                     {"ownership_class", "external_dependency"},
+                     {"normal_uninstall", "preserve"},
+                     {"purge", "forbidden"},
+                     {"kind", "file"}},
+                })},
+               {"data_paths", json::array()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+
+    const json uninstall_plan =
+        SetupEngine::plan_uninstall(paths, {component_id});
+    REQUIRE(fs::is_regular_file(active_root / "payload"));
+    REQUIRE(fs::is_regular_file(workspace / "observations.db"));
+    REQUIRE_THROWS(SetupEngine::uninstall(paths, uninstall_plan, false));
+    const json uninstall_result =
+        SetupEngine::uninstall(paths, uninstall_plan, true);
+    REQUIRE_FALSE(fs::exists(active_root));
+    REQUIRE(fs::is_regular_file(workspace / "observations.db"));
+    REQUIRE(fs::is_regular_file(unchanged));
+    REQUIRE(fs::is_regular_file(modified));
+    REQUIRE(fs::is_regular_file(external));
+    REQUIRE(uninstall_result.at("components").at(0).at("data_preserved") == true);
+
+    const json purge_plan = SetupEngine::plan_purge(paths, {component_id});
+    REQUIRE(purge_plan.at("blockers").empty());
+    REQUIRE(purge_plan.at("components").at(0).at("operations").size() == 3);
+    REQUIRE(purge_plan.at("components").at(0).at("preserved").size() == 1);
+    REQUIRE(fs::is_regular_file(workspace / "observations.db"));
+    REQUIRE_THROWS(SetupEngine::purge(paths, purge_plan, false));
+    const fs::path injected = paths.cache_root / "injected";
+    fs::create_directories(injected);
+    std::ofstream(injected / "sentinel") << "must remain";
+    json altered_purge_plan = purge_plan;
+    altered_purge_plan.at("components").at(0).at("operations").at(0).at("path") =
+        injected.string();
+    REQUIRE_THROWS(SetupEngine::purge(paths, altered_purge_plan, true));
+    REQUIRE(fs::is_regular_file(injected / "sentinel"));
+    std::ofstream(modified, std::ios::binary | std::ios::trunc) << "operator-modified";
+    const json purge_result = SetupEngine::purge(paths, purge_plan, true);
+    REQUIRE(purge_result.at("ok") == true);
+    REQUIRE(purge_result.at("components").at(0).at("state") ==
+            "purged_with_preserved_files");
+    REQUIRE_FALSE(fs::exists(workspace));
+    REQUIRE_FALSE(fs::exists(unchanged));
+    REQUIRE(fs::is_regular_file(modified));
+    REQUIRE(fs::is_regular_file(external));
+
+    const json repeated_plan = SetupEngine::plan_purge(paths, {component_id});
+    REQUIRE(repeated_plan.at("blockers").empty());
+    const json repeated = SetupEngine::purge(paths, repeated_plan, true);
+    REQUIRE(repeated.at("ok") == true);
+    REQUIRE(fs::is_regular_file(modified));
+    REQUIRE(fs::is_regular_file(external));
+    fs::remove_all(root);
+}
+
+TEST_CASE("purge planning blocks ownership at a lifecycle root") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "unsafe.fixture";
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(active_root);
+    fs::create_directories(receipts);
+    std::ofstream(active_root / "payload") << "payload";
+    std::string forbidden_root = paths.knowledge_root.string();
+#ifdef _WIN32
+    std::ranges::transform(
+        forbidden_root, forbidden_root.begin(), [](const unsigned char character) {
+            return static_cast<char>(std::toupper(character));
+        });
+#endif
+    std::ofstream(receipts / (component_id + ".json"))
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"ownership",
+                json::array({{{"path", forbidden_root},
+                              {"ownership_class", "user_preserved"},
+                              {"normal_uninstall", "preserve"},
+                              {"purge", "explicit_recursive"},
+                              {"kind", "directory_tree"}}})},
+               {"data_paths", json::array()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    const json uninstall_plan =
+        SetupEngine::plan_uninstall(paths, {component_id});
+    static_cast<void>(SetupEngine::uninstall(paths, uninstall_plan, true));
+    const json purge_plan = SetupEngine::plan_purge(paths, {component_id});
+    REQUIRE(purge_plan.at("components").empty());
+    REQUIRE(purge_plan.at("blockers").size() == 1);
+    REQUIRE_THROWS(SetupEngine::purge(paths, purge_plan, true));
+    REQUIRE(fs::is_directory(paths.data_root));
+
+    const std::string protected_id = "protected.fixture";
+    const fs::path protected_active =
+        paths.install_root / "components" / protected_id / "1.0.0";
+    fs::create_directories(protected_active);
+    std::ofstream(protected_active / "payload") << "payload";
+    std::ofstream(receipts / (protected_id + ".json"))
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", protected_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", protected_active.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"ownership",
+                json::array({{{"path", (paths.data_root / "transactions").string()},
+                              {"ownership_class", "user_preserved"},
+                              {"normal_uninstall", "preserve"},
+                              {"purge", "explicit_recursive"},
+                              {"kind", "directory_tree"}}})},
+               {"data_paths", json::array()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    const json protected_uninstall =
+        SetupEngine::plan_uninstall(paths, {protected_id});
+    static_cast<void>(SetupEngine::uninstall(paths, protected_uninstall, true));
+    const json protected_purge = SetupEngine::plan_purge(paths, {protected_id});
+    REQUIRE(protected_purge.at("components").empty());
+    REQUIRE(protected_purge.at("blockers").size() == 1);
+    REQUIRE(fs::is_directory(paths.data_root / "transactions" /
+                             "uninstall-preservation"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("purge refuses a persistent tree containing a symbolic link") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "symlink.fixture";
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path workspace = paths.workspace_root / "symlink-fixture";
+    const fs::path external = root / "external-data";
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(active_root);
+    fs::create_directories(workspace);
+    fs::create_directories(external);
+    fs::create_directories(receipts);
+    std::ofstream(active_root / "payload") << "payload";
+    std::ofstream(workspace / "state") << "valuable";
+    std::ofstream(external / "sentinel") << "external";
+    std::ofstream(receipts / (component_id + ".json"))
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array({workspace.string()})},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    const json uninstall_plan =
+        SetupEngine::plan_uninstall(paths, {component_id});
+    static_cast<void>(SetupEngine::uninstall(paths, uninstall_plan, true));
+    const json purge_plan = SetupEngine::plan_purge(paths, {component_id});
+    std::error_code link_error;
+    fs::create_directory_symlink(external, workspace / "external-link", link_error);
+    if (!link_error) {
+        REQUIRE_THROWS(SetupEngine::purge(paths, purge_plan, true));
+        REQUIRE(fs::is_regular_file(workspace / "state"));
+        REQUIRE(fs::is_regular_file(external / "sentinel"));
+    }
+    fs::remove_all(root);
+}
+
+TEST_CASE("purge planning blocks recursive ownership overlapping external data") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "overlap.fixture";
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path workspace = paths.workspace_root / "overlap-fixture";
+    const fs::path external = workspace / "operator-owned.bin";
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(active_root);
+    fs::create_directories(workspace);
+    fs::create_directories(receipts);
+    std::ofstream(active_root / "payload") << "payload";
+    std::ofstream(external) << "external";
+    std::ofstream(receipts / (component_id + ".json"))
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"ownership",
+                json::array({
+                    {{"path", workspace.string()},
+                     {"ownership_class", "user_preserved"},
+                     {"normal_uninstall", "preserve"},
+                     {"purge", "explicit_recursive"},
+                     {"kind", "directory_tree"}},
+                    {{"path", external.string()},
+                     {"ownership_class", "external_dependency"},
+                     {"normal_uninstall", "preserve"},
+                     {"purge", "forbidden"},
+                     {"kind", "file"}},
+                })},
+               {"data_paths", json::array()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    const json uninstall_plan =
+        SetupEngine::plan_uninstall(paths, {component_id});
+    static_cast<void>(SetupEngine::uninstall(paths, uninstall_plan, true));
+    const json purge_plan = SetupEngine::plan_purge(paths, {component_id});
+    REQUIRE(purge_plan.at("components").empty());
+    REQUIRE(purge_plan.at("blockers").size() == 1);
+    REQUIRE(fs::is_regular_file(external));
     fs::remove_all(root);
 }

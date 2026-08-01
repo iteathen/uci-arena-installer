@@ -20,6 +20,10 @@
       "pattern": "^[A-Za-z0-9._{}-]+$"
     },
     "data_paths": {"type": "array", "items": {"type": "string"}},
+    "ownership": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/ownership_entry"}
+    },
     "configuration_path": {"type": "string"},
     "service_contract": {
       "oneOf": [
@@ -57,6 +61,37 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ownership_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "ownership_class", "normal_uninstall", "purge", "kind"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "ownership_class": {
+          "enum": ["application_replaceable", "user_preserved", "generated", "migrated", "cache_disposable", "installer_temporary", "external_dependency", "unknown_policy_controlled"]
+        },
+        "normal_uninstall": {"enum": ["remove", "preserve"]},
+        "purge": {"enum": ["explicit_recursive", "exact_identity", "empty_only", "forbidden"]},
+        "kind": {"enum": ["directory_tree", "file"]},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "source": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"purge": {"const": "exact_identity"}}, "required": ["purge"]},
+          "then": {"required": ["size_bytes", "sha256"], "properties": {"kind": {"const": "file"}}}
+        },
+        {
+          "if": {"properties": {"purge": {"enum": ["explicit_recursive", "empty_only"]}}, "required": ["purge"]},
+          "then": {"properties": {"kind": {"const": "directory_tree"}}}
+        },
+        {
+          "if": {"properties": {"ownership_class": {"enum": ["external_dependency", "unknown_policy_controlled"]}}, "required": ["ownership_class"]},
+          "then": {"properties": {"purge": {"const": "forbidden"}}}
+        }
+      ]
+    },
     "standalone_service_receipt": {
       "type": "object",
       "additionalProperties": false,

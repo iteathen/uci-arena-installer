@@ -26,6 +26,7 @@
 
 #include "arena/adapters/uci_process.hpp"
 #include "arena/application/installer/credential_recovery.hpp"
+#include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/process_supervisor.hpp"
 #include "arena/platform/service_control.hpp"
 #include "arena/platform/workspace_permissions.hpp"
@@ -193,7 +194,7 @@ bool manager_service_api_required(const std::string& component_id,
 }
 
 bool valid_bundle_owner(const std::string& value) {
-    return value.size() <= 128 &&
+    return !value.empty() && value.size() <= 128 &&
            std::all_of(value.begin(), value.end(), [](const unsigned char character) {
                return std::isalnum(character) != 0 || character == '.' || character == '_' ||
                       character == '-' || character == '{' || character == '}';
@@ -2329,17 +2330,49 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
     }
 
     json activated_files = json::array();
+    json ownership = json::array();
     for (const auto& file : files) {
-        activated_files.push_back({{"path", (active_root / file.relative).string()},
+        const fs::path path = active_root / file.relative;
+        activated_files.push_back({{"path", path.string()},
                                    {"size_bytes", file.size},
                                    {"sha256", file.sha256}});
+        ownership.push_back({
+            {"path", path.string()},
+            {"ownership_class", "generated"},
+            {"normal_uninstall", "preserve"},
+            {"purge", "exact_identity"},
+            {"kind", "file"},
+            {"size_bytes", file.size},
+            {"sha256", file.sha256},
+            {"source", "managed_copy"},
+        });
     }
+    const fs::path manifest_path = active_root / "arena-component.json";
+    ownership.push_back({
+        {"path", manifest_path.string()},
+        {"ownership_class", "generated"},
+        {"normal_uninstall", "preserve"},
+        {"purge", "exact_identity"},
+        {"kind", "file"},
+        {"size_bytes", fs::file_size(manifest_path)},
+        {"sha256", sha256_file(manifest_path)},
+        {"source", "managed_copy_manifest"},
+    });
+    ownership.push_back({
+        {"path", active_root.string()},
+        {"ownership_class", "generated"},
+        {"normal_uninstall", "preserve"},
+        {"purge", "empty_only"},
+        {"kind", "directory_tree"},
+        {"source", "managed_copy_root"},
+    });
     const json receipt{
         {"schema", "arena_install_receipt_v1"}, {"schema_version", 1},
         {"component_id", component_id},         {"component_version", component_version},
         {"state", "installed_managed"},         {"active_root", active_root.string()},
         {"locator_path", active_root.string()}, {"artifact_sha256", fingerprint},
         {"import_mode", "managed_copy"},        {"activated_files", activated_files},
+        {"ownership", std::move(ownership)},
         {"installed_at", current_utc_iso()},
     };
     const fs::path receipt_path = paths.data_root / "receipts" / (component_id + ".json");
@@ -3111,31 +3144,6 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
     return status;
 }
 
-void remove_managed_component_tree(const fs::path& active_root, const std::string& component_id) {
-    constexpr int attempts = 100;
-    constexpr auto retry_delay = std::chrono::milliseconds(100);
-    std::string failure = "path remains present";
-    for (int attempt = 0; attempt < attempts; ++attempt) {
-        std::error_code remove_error;
-        fs::remove_all(active_root, remove_error);
-        std::error_code exists_error;
-        const bool remains = fs::exists(active_root, exists_error);
-        if (!remove_error && !exists_error && !remains) {
-            return;
-        }
-        if (remove_error) {
-            failure = remove_error.message();
-        } else if (exists_error) {
-            failure = exists_error.message();
-        }
-        if (attempt + 1 < attempts) {
-            std::this_thread::sleep_for(retry_delay);
-        }
-    }
-    throw std::runtime_error("cannot remove managed component " + component_id +
-                             " after shutdown: " + failure);
-}
-
 void rename_managed_component_tree_with_retry(const fs::path& source,
                                               const fs::path& destination,
                                               const std::string& component_id) {
@@ -3155,6 +3163,12 @@ void rename_managed_component_tree_with_retry(const fs::path& source,
     }
     throw std::runtime_error("cannot replace managed component " + component_id +
                              " after shutdown: " + failure);
+}
+
+bool requires_uninstall_startup(const json& receipt) {
+    return (receipt.contains("startup") && receipt.at("startup").is_object() &&
+            receipt.at("startup").value("installed", false)) ||
+           supports_startup_capability(receipt, "startup_uninstall");
 }
 
 } // namespace
@@ -4155,6 +4169,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             }
             journal["actions"].back()["receipt_path"] = receipt_path.string();
             json data_paths = json::array();
+            json ownership = json::array();
             std::string configuration_path;
             if (validated.service_contract.has_value() || id == "book_forge.service" ||
                 id == "uci_arena_evidence.service" || id == "lichess.adapter") {
@@ -4218,6 +4233,27 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     configuration_path = config_path.string();
                 }
                 data_paths.push_back(workspace.string());
+                ownership.push_back({
+                    {"path", workspace.string()},
+                    {"ownership_class", "user_preserved"},
+                    {"normal_uninstall", "preserve"},
+                    {"purge", "explicit_recursive"},
+                    {"kind", "directory_tree"},
+                    {"source", "component_data_path"},
+                });
+            }
+            for (const auto& activated :
+                 knowledge_activation.value("activated_files", json::array())) {
+                ownership.push_back({
+                    {"path", activated.at("path")},
+                    {"ownership_class", "generated"},
+                    {"normal_uninstall", "preserve"},
+                    {"purge", "exact_identity"},
+                    {"kind", "file"},
+                    {"size_bytes", activated.at("size_bytes")},
+                    {"sha256", activated.at("sha256")},
+                    {"source", "activated_managed_file"},
+                });
             }
             json receipt{
                 {"schema", "arena_install_receipt_v1"},
@@ -4231,6 +4267,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 {"installed_at", current_utc_iso()},
                 {"dependencies", action.value("dependencies", json::array())},
                 {"data_paths", std::move(data_paths)},
+                {"ownership", std::move(ownership)},
                 {"configuration_path", configuration_path},
                 {"activated_files", knowledge_activation.value("activated_files", json::array())},
             };
@@ -4510,197 +4547,37 @@ json SetupEngine::verify(const SetupPaths& paths) {
     };
 }
 
-json SetupEngine::uninstall(const SetupPaths& paths, const std::vector<std::string>& component_ids,
-                            const bool confirmed, const bool purge, const bool all) {
-    if (!confirmed) {
-        throw std::runtime_error("uninstall requires explicit confirmation");
-    }
-    if (!paths.bundle_owner.empty() && !valid_bundle_owner(paths.bundle_owner)) {
-        throw std::runtime_error("bundle owner is invalid");
-    }
-    std::map<std::string, json, std::less<>> installed;
-    for (const auto& receipt : receipt_rows(paths)) {
-        if (receipt.value("schema", "") == "arena_install_receipt_v1" &&
-            receipt.contains("component_id") && receipt.at("component_id").is_string()) {
-            installed.emplace(receipt.at("component_id").get<std::string>(), receipt);
-        }
-    }
-    std::vector<std::string> requested = component_ids;
-    std::size_t skipped_foreign_receipts = 0;
-    if (all) {
-        requested.clear();
-        for (const auto& [component_id, receipt] : installed) {
-            if (!paths.bundle_owner.empty() &&
-                receipt.value("bundle_owner", "") != paths.bundle_owner) {
-                ++skipped_foreign_receipts;
-                continue;
-            }
-            requested.push_back(component_id);
-        }
-    }
-    if (!paths.bundle_owner.empty() && !all) {
-        std::erase_if(requested, [&installed, &paths,
-                                  &skipped_foreign_receipts](const std::string& component_id) {
-            const auto receipt = installed.find(component_id);
-            if (receipt == installed.end() ||
-                receipt->second.value("bundle_owner", "") == paths.bundle_owner) {
-                return false;
-            }
-            ++skipped_foreign_receipts;
-            return true;
-        });
-    }
-    if (requested.empty() && paths.bundle_owner.empty()) {
-        throw std::runtime_error("uninstall requires at least one component or --all");
-    }
-    std::set<std::string, std::less<>> selected;
-    std::vector<std::string> unique;
-    for (const auto& id : requested) {
-        if (!valid_identifier(id)) {
-            throw std::runtime_error("invalid component id " + id);
-        }
-        if (selected.insert(id).second) {
-            unique.push_back(id);
-        }
-    }
-    for (const auto& [consumer_id, receipt] : installed) {
-        if (selected.contains(consumer_id)) {
-            continue;
-        }
-        const json dependencies = receipt.value("dependencies", json::array());
-        if (!dependencies.is_array()) {
-            throw std::runtime_error("installed component dependencies are invalid: " +
-                                     consumer_id);
-        }
-        for (const auto& dependency : dependencies) {
-            if (dependency.is_string() && selected.contains(dependency.get<std::string>())) {
-                throw std::runtime_error("cannot uninstall dependency " +
-                                         dependency.get<std::string>() + " while " + consumer_id +
-                                         " remains installed");
-            }
-        }
-    }
-    const auto uninstall_priority = [&installed](const std::string& id) {
-        const auto receipt = installed.find(id);
-        if (receipt != installed.end() &&
-            supports_startup_capability(receipt->second, "startup_uninstall")) {
-            return 0;
-        }
-        if (id == "node_runtime.private") {
-            return 2;
-        }
-        if (id == "manager.core") {
-            return 3;
-        }
-        return 1;
+json SetupEngine::plan_uninstall(
+    const SetupPaths& paths, const std::vector<std::string>& component_ids,
+    const bool all) {
+    RemovalLifecycleHooks hooks;
+    hooks.startup_cleanup_required = [](const json& receipt) {
+        return requires_uninstall_startup(receipt);
     };
-    std::ranges::stable_sort(
-        unique, [&uninstall_priority](const std::string& left, const std::string& right) {
-            return uninstall_priority(left) < uninstall_priority(right);
-        });
-    std::map<std::string, int, std::less<>> visits;
-    std::vector<std::string> ordered;
-    std::function<void(const std::string&)> add = [&](const std::string& id) {
-        if (visits[id] == 1) {
-            throw std::runtime_error("installed component dependency cycle at " + id);
-        }
-        if (visits[id] == 2) {
-            return;
-        }
-        visits[id] = 1;
-        for (const auto& [candidate_id, receipt] : installed) {
-            if (!selected.contains(candidate_id)) {
-                continue;
-            }
-            const json dependencies = receipt.value("dependencies", json::array());
-            if (std::find(dependencies.begin(), dependencies.end(), id) != dependencies.end()) {
-                add(candidate_id);
-            }
-        }
-        visits[id] = 2;
-        ordered.push_back(id);
-    };
-    for (const auto& id : unique) {
-        add(id);
-    }
+    return RemovalLifecycle::plan_uninstall(paths, component_ids, all, hooks);
+}
 
-    json results = json::array();
-    for (const auto& id : ordered) {
-        const fs::path receipt_path = paths.data_root / "receipts" / (id + ".json");
-        if (!fs::is_regular_file(receipt_path)) {
-            results.push_back({{"component_id", id}, {"state", "not_installed"}});
-            continue;
-        }
-        const json receipt = read_json(receipt_path);
-        const fs::path active_root = receipt.at("active_root").get<std::string>();
-        if (!within(paths.install_root / "components", active_root)) {
-            throw std::runtime_error("receipt active root is outside the managed component root");
-        }
-        json startup_cleanup;
-        if (supports_startup_capability(receipt, "startup_uninstall")) {
-            startup_cleanup = invoke_provider_startup(paths, receipt, "uninstall");
-        }
-        remove_managed_component_tree(active_root, id);
-        const fs::path component_directory = active_root.parent_path();
-        const fs::path components_root = paths.install_root / "components";
-        std::error_code component_directory_error;
-        if (within(components_root, component_directory) &&
-            fs::is_directory(component_directory, component_directory_error) &&
-            fs::is_empty(component_directory, component_directory_error)) {
-            fs::remove(component_directory, component_directory_error);
-        }
-        if (component_directory_error) {
-            throw std::runtime_error("cannot remove empty component directory for " + id);
-        }
-        std::error_code error;
-        if (purge) {
-            for (const auto& data_path_value : receipt.value("data_paths", json::array())) {
-                const fs::path data_path = data_path_value.get<std::string>();
-                if (!within(paths.data_root, data_path) &&
-                    !within(paths.workspace_root, data_path)) {
-                    throw std::runtime_error("purge path is outside the managed data root");
-                }
-                fs::remove_all(data_path, error);
-                if (error) {
-                    throw std::runtime_error("cannot purge managed data for " + id);
-                }
-            }
-            for (const auto& activated : receipt.value("activated_files", json::array())) {
-                const fs::path activated_path = activated.at("path").get<std::string>();
-                if (!within(paths.knowledge_root, activated_path)) {
-                    throw std::runtime_error(
-                        "knowledge purge path is outside the managed knowledge root");
-                }
-                if (fs::is_regular_file(activated_path) &&
-                    sha256_file(activated_path) == activated.at("sha256").get<std::string>()) {
-                    fs::remove(activated_path, error);
-                    if (error) {
-                        throw std::runtime_error("cannot purge managed knowledge for " + id);
-                    }
-                }
-            }
-        }
-        fs::remove(receipt_path);
-        json result{
-            {"component_id", id},
-            {"state", "uninstalled"},
-            {"data_preserved", !purge},
-        };
-        if (!startup_cleanup.empty()) {
-            result["startup_cleanup"] = std::move(startup_cleanup);
-        }
-        results.push_back(std::move(result));
-    }
-    json result{
-        {"schema", "arena_install_uninstall_result_v1"},
-        {"all", all},
-        {"skipped_foreign_receipts", skipped_foreign_receipts},
-        {"components", std::move(results)},
+json SetupEngine::uninstall(const SetupPaths& paths, const json& plan,
+                            const bool confirmed) {
+    RemovalLifecycleHooks hooks;
+    hooks.startup_cleanup_required = [](const json& receipt) {
+        return requires_uninstall_startup(receipt);
     };
-    if (!paths.bundle_owner.empty()) {
-        result["bundle_owner"] = paths.bundle_owner;
-    }
-    return result;
+    hooks.uninstall_startup = [&paths](const json& receipt) {
+        return invoke_provider_startup(paths, receipt, "uninstall");
+    };
+    return RemovalLifecycle::uninstall(paths, plan, confirmed, hooks);
+}
+
+json SetupEngine::plan_purge(
+    const SetupPaths& paths, const std::vector<std::string>& component_ids,
+    const bool all) {
+    return RemovalLifecycle::plan_purge(paths, component_ids, all);
+}
+
+json SetupEngine::purge(const SetupPaths& paths, const json& plan,
+                        const bool confirmed) {
+    return RemovalLifecycle::purge(paths, plan, confirmed);
 }
 
 json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& source,
@@ -4767,6 +4644,46 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
     const fs::path receipt_path =
         paths.data_root / "receipts" / (component_id + ".json");
     const bool receipt_existed = fs::is_regular_file(receipt_path);
+    json activated_files = json::array();
+    json ownership = json::array();
+    for (const auto& file : identity_rows) {
+        const fs::path path =
+            active_root / file.at("path").get<std::string>();
+        activated_files.push_back({
+            {"path", path.string()},
+            {"size_bytes", file.at("size_bytes")},
+            {"sha256", file.at("sha256")},
+        });
+        ownership.push_back({
+            {"path", path.string()},
+            {"ownership_class", "generated"},
+            {"normal_uninstall", "preserve"},
+            {"purge", "exact_identity"},
+            {"kind", "file"},
+            {"size_bytes", file.at("size_bytes")},
+            {"sha256", file.at("sha256")},
+            {"source", "managed_copy"},
+        });
+    }
+    const fs::path manifest_path = active_root / "arena-component.json";
+    ownership.push_back({
+        {"path", manifest_path.string()},
+        {"ownership_class", "generated"},
+        {"normal_uninstall", "preserve"},
+        {"purge", "exact_identity"},
+        {"kind", "file"},
+        {"size_bytes", fs::file_size(manifest_path)},
+        {"sha256", sha256_file(manifest_path)},
+        {"source", "managed_copy_manifest"},
+    });
+    ownership.push_back({
+        {"path", active_root.string()},
+        {"ownership_class", "generated"},
+        {"normal_uninstall", "preserve"},
+        {"purge", "empty_only"},
+        {"kind", "directory_tree"},
+        {"source", "managed_copy_root"},
+    });
     const json receipt{
         {"schema", "arena_install_receipt_v1"},
         {"schema_version", 1},
@@ -4778,8 +4695,9 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         {"installed_at", current_utc_iso()},
         {"dependencies", json::array()},
         {"data_paths", json::array()},
+        {"ownership", std::move(ownership)},
         {"configuration_path", ""},
-        {"activated_files", json::array()},
+        {"activated_files", std::move(activated_files)},
     };
     write_json_atomic(receipt_path, receipt);
     return {

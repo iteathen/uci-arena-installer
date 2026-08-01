@@ -212,6 +212,9 @@ interfaces:
   rollback_result: arena_install_rollback_result_v1
   installer_result: arena_installer_result_v1
   windows_launcher_envelope: arena_windows_installer_envelope_v1
+  uninstall_plan: arena_install_uninstall_plan_v1
+  uninstall_preservation: arena_install_uninstall_preservation_v1
+  purge_plan: arena_install_purge_plan_v1
 
 installer_lego_architecture:
   status: required
@@ -254,6 +257,10 @@ installer_lego_architecture:
       owns: [versioned_idempotent_migrations, migration_receipts]
     preservation_manager:
       owns: [ownership_classification, preserved_data_plan, preservation_evidence]
+    removal_lifecycle:
+      owns: [uninstall_plan_projection, uninstall_commit, purge_plan_projection, purge_commit]
+      receives: [normalized_roots, exact_receipt_or_preservation_evidence, startup_adapter_hooks]
+      must_not_own: [provider_startup_implementation, provider_identity_rules, external_file_deletion]
     validators:
       owns: [independent_named_checks, structured_observations, remediation]
     backup_manager:
@@ -304,7 +311,7 @@ installer_lego_architecture:
     - locked
     - development_workspace
     - repair_required
-  modes: [clean_install, upgrade, repair, reinstall, downgrade, replacement, uninstall]
+  modes: [clean_install, upgrade, repair, reinstall, downgrade, replacement, uninstall, purge]
   ownership_classes:
     - application_replaceable
     - user_preserved
@@ -434,7 +441,7 @@ provider_service_contracts:
 
 setup:
   executable: arena-setup
-  operations: [inventory, import, plan, apply, verify, repair, upgrade, uninstall]
+  operations: [inventory, import, plan, apply, verify, repair, upgrade, uninstall-plan, uninstall, purge-plan, purge]
   presets: [complete_arena, manager_only, custom]
   machine_output: json
   elevated_result_handoff:
@@ -1135,6 +1142,31 @@ transaction:
   backup: before_replacement_or_migration
   failure: restore_previous_activation_and_service_state
   normal_uninstall: preserve_user_data
+  uninstall_and_purge_lifecycle:
+    uninstall_plan: arena_install_uninstall_plan_v1
+    preservation_record: arena_install_uninstall_preservation_v1
+    purge_plan: arena_install_purge_plan_v1
+    rules:
+      - Uninstall and purge are distinct modes and commands. Uninstall never
+        accepts a purge flag or performs a destructive user-data operation.
+      - Uninstall builds and validates its complete plan before mutation. The
+        plan removes receipt-owned immutable roots, provider startup authority,
+        installer-owned registrations and integrations, and component receipts.
+      - Before receipt removal, uninstall durably records non-authoritative
+        preservation evidence derived from that exact receipt. Preserved
+        evidence supports a later purge preview but is never installation proof.
+      - Purge requires a separately emitted plan, an exact current preservation
+        evidence identity, and explicit confirmation. A direct purge without a
+        reviewed plan is invalid.
+      - Purge paths are normalized, path-bounded, ownership-classified, and
+        declared by receipt or preservation evidence. Configured root equality,
+        symbolic-link traversal, external ownership, and unknown ownership are
+        never deletion authority.
+      - Digest-owned managed files are removed only when their current size and
+        SHA-256 still match ownership evidence. Modified files are preserved and
+        reported as modified_managed_file; absence is an idempotent skip.
+      - Purge cannot promise rollback after destructive data removal. Every
+        operation and partial failure remains visible in transaction evidence.
   manager_data_root_retention:
     windows_defaults:
       per_user: "%LOCALAPPDATA%\\UCI Arena Manager"
@@ -1152,9 +1184,9 @@ transaction:
         reason: local CLI and browser-pairing continuity after reinstall
         security: preserve file ACLs and never print or export the key
       - path: knowledge/
-        reason: imported or downloaded opening books and tablebases may be large or user-owned
+        reason: downloaded, imported, managed-copy, and Book Forge-generated books, sidecars, manifests, and Syzygy assets may be large or user-owned
       - path: locators/
-        reason: validated path-only references and qualified profile selections
+        reason: validated path-only references plus timing, single-game, capacity, and transport profile selections
       - path: release/
         reason: verified current-platform catalog, TUF metadata, and payloads used by repair
       - path: trust/
@@ -1164,11 +1196,14 @@ transaction:
         authority: non_authoritative_until_digest_reverified
       - path: transactions/
         reason: recovery and audit evidence for completed or interrupted installer operations
+      - path: logs/
+        reason: redacted installer and component lifecycle accountability
       - path: workspaces_outside_data_root
-        reason: provider-owned operational data is not installer payload
+        reason: Book Forge observations, qualification evidence, snapshots, and Evidence raw evidence, datasets, exports, timing profiles, and other provider state are not installer payload
     removed_on_normal_uninstall:
       - every receipt-selected immutable component root
       - every provider startup registration owned by an installed receipt
+      - every installer-owned service, scheduled task, startup registration, and integration
       - every component receipt JSON document
       - the Manager Windows service and MSI-owned program files
     rules:
@@ -1179,11 +1214,18 @@ transaction:
         activated.
       - Normal uninstall does not promise secure erasure. Purge is a separate,
         explicit, previewed operation and may remove only declared paths.
+      - Externally owned token files, in-place books, tablebases, engines, and
+        profiles are preserved by both uninstall and purge.
+      - A retained path, cache entry, locator, workspace, or transaction record
+        is never proof that its former component remains installed. Only a
+        validated active root, registration, and component receipt confer
+        installation authority.
       - Reinstall revalidates retained locators, release media, cache entries,
-        trust state, and qualified profiles before consuming them.
+        trust state, provider workspaces, and qualified profiles before consuming them.
   suite_uninstall:
     command: arena-setup uninstall --all --yes
-    ordering: startup_capable_consumers_before_runtimes_and_dependencies
+    preview_command: arena-setup uninstall-plan --all
+    ordering: reverse_dependency_order_derived_from_receipts
     rules:
       - Provider-owned startup adapters are invoked through their verified
         installed startup, CLI, or adapter entrypoint and private Node runtime
@@ -1205,7 +1247,7 @@ transaction:
         matches the calling bundle. A related older bundle treats an empty
         owner-scoped selection as a successful no-op and cannot remove receipts
         adopted by the newly installed bundle.
-  purge: preview_confirm_optional_export
+  purge: separate_preview_plan_then_confirmed_apply_with_optional_export
   generated_service_configuration:
     owner: arena_setup
     location: selected_service_workspace

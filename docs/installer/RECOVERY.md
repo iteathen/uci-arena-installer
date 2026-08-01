@@ -14,4 +14,15 @@ Installation is transactional where the platform permits:
 
 `RollbackResult` records attempted, completed, failed operation, restored identities, unresolved state, remediation, log location, and backup location. A rollback failure returns the rollback-failed exit category and retains both the original error and recovery error.
 
-Normal uninstall is not secure erase. Purge is separate, previewed, explicit, and limited to declared paths.
+Normal uninstall is not secure erase. It durably writes
+`arena_install_uninstall_preservation_v1` before removing a receipt, so an
+interruption leaves either installed authority or explicit prepared evidence
+for diagnosis. A completed record is non-authoritative: it cannot make a
+component appear installed.
+
+Purge is separate, previewed, explicitly confirmed, and limited to declared
+ownership paths. Destructive purge cannot guarantee rollback, so it records
+each removed, already absent, modified-and-preserved, policy-preserved, or
+failed operation. A partial failure is reported as `purge_failed`; it is never
+collapsed into a generic success. The preservation record remains after purge
+as transaction and accountability evidence.

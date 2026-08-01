@@ -19,4 +19,11 @@ The scope-neutral Windows launcher is only a front door. It selects Personal or 
 
 Package content, entrypoints, dependencies, health checks, preservation, and uninstall ownership belong to `arena_install_catalog_v1` and `arena_install_component_v1`. Policy belongs to the installation contract and versioned configuration. Mechanism belongs to installer components.
 
+Removal is implemented as a separate `RemovalLifecycle` brick behind the
+`SetupEngine` façade. Its contract separates `plan_uninstall` from `uninstall`
+and `plan_purge` from `purge`. Provider startup behavior enters through explicit
+hooks supplied by the composition façade; removal code does not discover or
+interpret a provider implementation. The same brick is directly testable with
+fake hooks and synthetic receipts.
+
 The governing specification is `specs/installation_contract_v1.yaml`. The remaining files in this directory define the focused contracts agents must read before installer work.

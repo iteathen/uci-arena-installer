@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/purge-plan.schema.json",
+  "title": "arena_install_purge_plan_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "plan_id", "mode", "all", "components", "blockers"],
+  "properties": {
+    "schema": {"const": "arena_install_purge_plan_v1"},
+    "schema_version": {"const": 1},
+    "plan_id": {"type": "string", "minLength": 1},
+    "mode": {"const": "purge"},
+    "all": {"type": "boolean"},
+    "bundle_owner": {"type": "string", "pattern": "^[A-Za-z0-9._{}-]+$"},
+    "blockers": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/blocker"}
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component_id", "evidence_path", "evidence_sha256", "operations", "preserved"],
+        "properties": {
+          "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+          "evidence_path": {"type": "string", "minLength": 1},
+          "evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "operations": {
+            "type": "array",
+            "items": {"$ref": "install-receipt.schema.json#/$defs/ownership_entry"}
+          },
+          "preserved": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/preserved_entry"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_id", "reason"],
+      "properties": {
+        "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "preserved_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "ownership_class", "normal_uninstall", "purge", "kind", "reason"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "ownership_class": {"enum": ["application_replaceable", "user_preserved", "generated", "migrated", "cache_disposable", "installer_temporary", "external_dependency", "unknown_policy_controlled"]},
+        "normal_uninstall": {"const": "preserve"},
+        "purge": {"const": "forbidden"},
+        "kind": {"enum": ["directory_tree", "file"]},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source": {"type": "string", "minLength": 1},
+        "reason": {"const": "ownership_policy_forbids_purge"}
+      }
+    }
+  }
+}

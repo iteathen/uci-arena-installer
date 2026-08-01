@@ -6,7 +6,8 @@ Required scenarios:
 
 - clean and repeated clean install;
 - spaces, Unicode, long paths, trailing separators, and unrelated working directory;
-- valid upgrade, invalid downgrade, repair, reinstall, replacement, and uninstall;
+- valid upgrade, invalid downgrade, repair, reinstall, replacement, uninstall,
+  and separately planned purge;
 - missing or corrupt payload and invalid manifest;
 - unsafe, external, missing, size-mismatched, and digest-mismatched retained
   release media rejected before installation mutation;
@@ -16,6 +17,21 @@ Required scenarios:
 - failure after backup and during replacement;
 - rollback success and rollback failure;
 - user-data preservation and application-file replacement;
+- uninstall-plan dry-run with no mutation, confirmation enforcement, and stale
+  receipt-plan rejection;
+- removal of executable/startup/receipt authority while Manager continuity,
+  managed-copy books, provider workspaces, profiles, locators, retained media,
+  caches, logs, and transaction evidence remain;
+- purge preview with no mutation, separate confirmation, root-equality and
+  out-of-bounds rejection, symbolic-link/Windows-reparse rejection, external/unknown ownership
+  preservation, exact-identity deletion, modified-file preservation and
+  reporting, partial failure evidence, and repeated idempotent purge;
+- ambiguous, corrupt, duplicate, or filename-mismatched receipt authority
+  blocking uninstall planning before mutation;
+- recursive purge ownership blocked when it overlaps a protected
+  receipt/preservation root or any explicitly external/unknown path;
+- retained paths never counting as installed authority and reinstall
+  revalidation of preserved state;
 - idempotent configuration, PATH, shortcuts, startup, and migration;
 - post-install health success and failure;
 - arbitrary component identities exercising declarative selection, default

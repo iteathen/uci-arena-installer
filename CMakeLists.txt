@@ -27,6 +27,7 @@ find_package(unofficial-sodium CONFIG REQUIRED)
 add_library(arena_installer_core
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
+  src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
   src/application/process_supervisor.cpp
   src/domain/uuid.cpp

@@ -16,6 +16,7 @@
 | Dependency adapter | Typed platform/tool operations | Arbitrary shell execution |
 | Configuration migrator | Versioned idempotent migrations and receipts | Package acquisition |
 | Preservation manager | Ownership classes and preserved-data evidence | Deployment mechanics |
+| Removal lifecycle | Typed uninstall/purge plan projection and confirmed commit | Provider startup implementation or provider identity rules |
 | Validators | Independent named observations and remediation | Orchestration |
 | Backup manager | Backup identity, creation, retention | Rollback decision |
 | Rollback manager | Prior-state restoration and exact result | Hiding the original failure |
@@ -23,3 +24,9 @@
 | Result reporter | Bounded result and stable exit category | Mutation |
 
 An interface is justified by ownership, change pressure, platform behavior, recovery semantics, or independent testing. Basic language and filesystem operations remain simple implementation details inside their owner.
+
+`RemovalLifecycle` is the removal-mode assembly brick. It receives normalized
+roots and explicit provider-startup hooks, emits immutable typed plans, and
+revalidates receipt/evidence identity before commit. `SetupEngine` delegates to
+it and supplies the installed provider adapter; the lifecycle brick has no
+Book Forge, Evidence, Lichess, Manager, Node, or component-id branches.

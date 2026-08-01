@@ -20,6 +20,12 @@ Every launcher returns the installer engine's exit code unchanged.
 | 14 | internal installer failure |
 | 15 | operator cancelled before mutation |
 
+`uninstall` and `purge` without `--yes` emit the reviewed plan, perform no
+mutation, and return 15. A purge with one or more failed deletion operations
+retains its per-operation evidence and returns 11; preserved-by-policy and
+modified-managed-file outcomes are successful, truthful outcomes rather than
+deployment failures.
+
 `arena_installer_result_v1` includes installer and package versions, selected mode and scope, normalized non-secret paths, plan identity, completed/skipped/failed operation, validator results, backup and rollback results, final state, remediation, log path, and exit category. External commands are logged as structured executable and redacted argument arrays.
 
 Human error text must identify the reporting component, expectation, observation, rollback disposition, logs/backups, and next action. “Installation failed” alone is not actionable.

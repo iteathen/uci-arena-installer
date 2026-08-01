@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <set>
@@ -105,6 +106,19 @@ void print(
         if (!output) {
             throw std::runtime_error("cannot commit the requested setup result file");
         }
+    }
+}
+
+json load_json_document(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("cannot read lifecycle plan: " + path.string());
+    }
+    try {
+        return json::parse(input);
+    } catch (const json::exception& error) {
+        throw std::runtime_error("invalid lifecycle plan JSON: " +
+                                 std::string(error.what()));
     }
 }
 
@@ -226,22 +240,39 @@ int main(int argc, char** argv) {
             app.add_subcommand("verify", "Verify all managed receipts and files");
 
         std::vector<std::string> uninstall_components;
-        bool purge = false;
         bool uninstall_all = false;
+        auto configure_lifecycle_selection =
+            [](CLI::App* command, std::vector<std::string>& selected, bool& all) {
+                auto* selected_option =
+                    command->add_option("--component", selected,
+                                        "Managed component id; may be repeated")
+                        ->expected(-1);
+                auto* all_option = command->add_flag(
+                    "--all", all, "Select every owned component with lifecycle evidence");
+                selected_option->excludes(all_option);
+                all_option->excludes(selected_option);
+            };
+        auto* uninstall_plan_command = app.add_subcommand(
+            "uninstall-plan", "Preview removal of installed software authority");
+        configure_lifecycle_selection(
+            uninstall_plan_command, uninstall_components, uninstall_all);
         auto* uninstall_command =
-            app.add_subcommand("uninstall", "Remove managed component binaries");
-        auto* uninstall_component_option = uninstall_command
-                                               ->add_option("--component", uninstall_components,
-                                                            "Managed component id; may be repeated")
-                                               ->expected(-1);
-        auto* uninstall_all_option = uninstall_command->add_flag(
-            "--all", uninstall_all, "Remove every receipt-selected managed component");
-        uninstall_component_option->excludes(uninstall_all_option);
-        uninstall_all_option->excludes(uninstall_component_option);
-        uninstall_command->add_flag("--yes", yes, "Confirm uninstall");
-        uninstall_command->add_flag("--purge", purge,
-                                    "Also remove only receipt-declared data paths "
-                                    "under the managed data root");
+            app.add_subcommand("uninstall", "Remove installed software authority; preserve data");
+        configure_lifecycle_selection(uninstall_command, uninstall_components, uninstall_all);
+        uninstall_command->add_flag("--yes", yes, "Confirm the generated uninstall plan");
+
+        std::vector<std::string> purge_components;
+        bool purge_all = false;
+        auto* purge_plan_command = app.add_subcommand(
+            "purge-plan", "Preview bounded deletion of preserved component data");
+        configure_lifecycle_selection(purge_plan_command, purge_components, purge_all);
+        fs::path purge_plan_file;
+        auto* purge_command = app.add_subcommand(
+            "purge", "Apply a separately reviewed ownership-aware purge plan");
+        purge_command->add_option("--plan-file", purge_plan_file,
+                                  "Previously reviewed purge-plan JSON")
+            ->required();
+        purge_command->add_flag("--yes", yes, "Confirm destructive purge");
 
         CLI11_PARSE(app, argc, argv);
 
@@ -263,15 +294,49 @@ int main(int argc, char** argv) {
             print(result, json_output, result_file);
             curl_global_cleanup();
             return result.value("ok", false) ? 0 : 4;
+        } else if (*uninstall_plan_command) {
+            if (!uninstall_all && uninstall_components.empty()) {
+                throw std::runtime_error("uninstall-plan requires --component or --all");
+            }
+            const json lifecycle_plan = SetupEngine::plan_uninstall(
+                paths, uninstall_components, uninstall_all);
+            print(lifecycle_plan, json_output, result_file);
+            curl_global_cleanup();
+            return lifecycle_plan.at("blockers").empty() ? 0 : 3;
         } else if (*uninstall_command) {
             if (!uninstall_all && uninstall_components.empty()) {
                 throw std::runtime_error("uninstall requires --component or --all");
             }
-            print(
-                SetupEngine::uninstall(
-                    paths, uninstall_components, yes, purge, uninstall_all),
-                json_output,
-                result_file);
+            const json lifecycle_plan = SetupEngine::plan_uninstall(
+                paths, uninstall_components, uninstall_all);
+            if (!yes) {
+                print(lifecycle_plan, json_output, result_file);
+                curl_global_cleanup();
+                return 15;
+            }
+            print(SetupEngine::uninstall(paths, lifecycle_plan, yes),
+                  json_output, result_file);
+        } else if (*purge_plan_command) {
+            if (!purge_all && purge_components.empty()) {
+                throw std::runtime_error("purge-plan requires --component or --all");
+            }
+            const json lifecycle_plan = SetupEngine::plan_purge(
+                paths, purge_components, purge_all);
+            print(lifecycle_plan, json_output, result_file);
+            curl_global_cleanup();
+            return lifecycle_plan.at("blockers").empty() ? 0 : 3;
+        } else if (*purge_command) {
+            const json lifecycle_plan = load_json_document(purge_plan_file);
+            if (!yes) {
+                print(lifecycle_plan, json_output, result_file);
+                curl_global_cleanup();
+                return 15;
+            }
+            const json purge_result =
+                SetupEngine::purge(paths, lifecycle_plan, yes);
+            print(purge_result, json_output, result_file);
+            curl_global_cleanup();
+            return purge_result.value("ok", false) ? 0 : 11;
         } else {
             if (catalog_option->count() == 0) {
                 const fs::path retained = paths.data_root / "release" / "catalog.json";
@@ -340,8 +405,10 @@ int main(int argc, char** argv) {
                         }
                     }
                     if (!remove.empty()) {
+                        const json uninstall_plan =
+                            SetupEngine::plan_uninstall(paths, remove, false);
                         result["removed_components"] =
-                            SetupEngine::uninstall(paths, remove, true, false);
+                            SetupEngine::uninstall(paths, uninstall_plan, true);
                     } else {
                         result["removed_components"] = json::array();
                     }

@@ -69,9 +69,23 @@ class SetupEngine final {
 
     [[nodiscard]] static nlohmann::json verify(const SetupPaths& paths);
 
-    [[nodiscard]] static nlohmann::json uninstall(const SetupPaths& paths,
-                                                  const std::vector<std::string>& component_ids,
-                                                  bool confirmed, bool purge, bool all = false);
+    [[nodiscard]] static nlohmann::json
+    plan_uninstall(const SetupPaths& paths,
+                   const std::vector<std::string>& component_ids,
+                   bool all = false);
+
+    [[nodiscard]] static nlohmann::json
+    uninstall(const SetupPaths& paths, const nlohmann::json& plan,
+              bool confirmed);
+
+    [[nodiscard]] static nlohmann::json
+    plan_purge(const SetupPaths& paths,
+               const std::vector<std::string>& component_ids,
+               bool all = false);
+
+    [[nodiscard]] static nlohmann::json
+    purge(const SetupPaths& paths, const nlohmann::json& plan,
+          bool confirmed);
 };
 
 } // namespace arena::application::installer

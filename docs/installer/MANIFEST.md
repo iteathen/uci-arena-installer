@@ -10,6 +10,32 @@ An optional `feature_selection` object defines the base preset, exact operator-v
 
 Changing package contents normally changes catalog or component data, not orchestrator control flow. Values must not be duplicated in batch launchers, PowerShell scripts, WiX source, or C++ branches.
 
+## Ownership projection
+
+Each installation receipt may project manifest-owned paths into an `ownership`
+array. Every entry declares an absolute path, ownership class, normal-uninstall
+decision, purge policy, and path kind. Exact-identity managed files also carry
+size and SHA-256. The authoritative policy values are:
+
+- `normal_uninstall: remove|preserve`;
+- `purge: explicit_recursive|exact_identity|empty_only|forbidden`;
+- ownership classes `application_replaceable`, `user_preserved`, `generated`,
+  `migrated`, `cache_disposable`, `installer_temporary`,
+  `external_dependency`, and `unknown`.
+
+Provider workspaces and continuity state are `user_preserved`. External token
+files, in-place books, tablebases, engines, and profiles are
+`external_dependency` with purge forbidden. Managed-copy and generated files
+use exact identity. This is declarative package knowledge; uninstall and purge
+mechanisms contain no Book Forge, Evidence, Lichess, or Manager deletion
+branches.
+
+Legacy receipt `data_paths` and `activated_files` are projected into the same
+ownership contract when preservation evidence is prepared. New
+receipt-producing installation paths emit explicit ownership so future
+preservation changes remain data changes rather than removal-control-flow
+branches.
+
 Provider products may publish a richer product-owned manifest under
 `contracts/component-manifest.json`, but every installable archive also carries
 one generated root `arena-component.json`. That root document is the
