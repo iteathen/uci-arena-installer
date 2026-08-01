@@ -1,0 +1,41 @@
+meta:
+  spec_id: arena_suite_lego_boundaries_v1
+  version: 1
+  status: active
+  owner: suite_architecture
+
+authority_document: docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md
+
+repository_role:
+  name: uci-arena-installer
+  owns:
+    - suite_composition
+    - artifact_and_provenance_verification
+    - installation_lifecycle
+    - preservation_backup_and_rollback
+    - windows_and_linux_release_assembly
+  must_not_own:
+    - engine_behavior
+    - manager_control_plane_behavior
+    - lichess_bot_behavior
+    - book_production_behavior
+    - evidence_production_behavior
+
+mandatory_boundaries:
+  - Provider inputs are immutable artifacts, manifests, checksums, provenance,
+    versions, and compatibility declarations; provider source and build trees
+    are forbidden inputs.
+  - Product or model names never select installer mechanism behavior. Package
+    knowledge belongs to component manifests and composition data.
+  - A new installable component changes its provider manifest and product
+    composition, not installer orchestration control flow.
+  - Cross-repository calls use versioned project-owned contracts and typed
+    operations; private SDK, storage, and arbitrary shell contracts are forbidden.
+  - The full target document is authoritative when a local rule is ambiguous.
+
+governing_tests:
+  - arbitrary_component_identity_substitution
+  - provider_source_tree_absence
+  - manifest_driven_composition
+  - transactional_install_repair_upgrade_uninstall
+  - rollback_and_preservation

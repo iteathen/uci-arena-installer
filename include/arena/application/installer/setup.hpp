@@ -53,6 +53,10 @@ class SetupEngine final {
          bool download_missing_knowledge, bool download_missing_books = false,
          bool download_missing_tablebases = false, bool repair = false);
 
+    [[nodiscard]] static nlohmann::json
+    resolve_feature_selection(const nlohmann::json& catalog,
+                              const std::vector<std::string>& assignments);
+
     [[nodiscard]] static nlohmann::json apply(const nlohmann::json& catalog,
                                               const nlohmann::json& plan, const SetupPaths& paths,
                                               bool confirmed, bool repair);

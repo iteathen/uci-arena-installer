@@ -6,6 +6,10 @@ or Lichess adapter behavior.
 
 ## Required architecture
 
+- Read `specs/suite_lego_boundaries_v1.yaml` and the authoritative
+  `docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md` before changing
+  repository ownership, component contracts, composition, or cross-repository
+  dependencies.
 - Read `specs/00_READ_FIRST.yaml` and `docs/installer/ARCHITECTURE.md` before
   substantive work.
 - Run `node tools/spec-preflight.mjs --task "<task>" --changed-files <paths>`
@@ -21,6 +25,16 @@ or Lichess adapter behavior.
   non-elevated; All users truthfully requires elevation.
 - Do not create automatic pull-request or push CI. Local validation is the
   default; release automation must be manual.
+
+## Mandatory suite boundaries
+
+- This repository owns composition and deployment, not provider behavior.
+- Consume only immutable provider artifacts plus versioned manifests and
+  provenance; provider source and build trees are forbidden inputs.
+- Put product knowledge in manifests/compositions. Product names must not
+  select installer mechanism behavior.
+- A new conforming component must require composition data and tests, not a
+  rewrite of installer control flow.
 
 ## Mandatory validation
 

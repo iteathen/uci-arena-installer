@@ -8,7 +8,6 @@
 #include <set>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "arena/application/installer/setup.hpp"
@@ -291,35 +290,13 @@ int main(int argc, char** argv) {
                 paths.data_root / "trust" / "tuf-versions.json",
                 paths.data_root / "release" /
                     "development-trust.json");
-            std::unordered_map<std::string, bool> feature_state{
-                {"uci_arena.engine", true},
-                {"book_forge.service", true},
-                {"uci_arena_evidence.service", true},
-                {"lichess.adapter", true},
-            };
+            json feature_reconciliation;
             if (!bundle_features.empty()) {
-                for (const auto& feature : bundle_features) {
-                    const auto separator = feature.find('=');
-                    if (separator == std::string::npos ||
-                        (feature.substr(separator + 1) != "0" &&
-                         feature.substr(separator + 1) != "1")) {
-                        throw std::runtime_error(
-                            "bundle feature must be component-id=0 or component-id=1");
-                    }
-                    const std::string id = feature.substr(0, separator);
-                    if (!feature_state.contains(id)) {
-                        throw std::runtime_error("unknown bundle feature " + id);
-                    }
-                    feature_state.at(id) = feature.substr(separator + 1) == "1";
-                }
+                feature_reconciliation =
+                    SetupEngine::resolve_feature_selection(catalog, bundle_features);
                 preset = "custom";
-                components.clear();
-                for (const auto& id : {"uci_arena.engine", "book_forge.service",
-                                       "uci_arena_evidence.service", "lichess.adapter"}) {
-                    if (feature_state.at(id)) {
-                        components.emplace_back(id);
-                    }
-                }
+                components = feature_reconciliation.at("selected_roots")
+                                 .get<std::vector<std::string>>();
             }
             const json resolved = SetupEngine::plan(
                 catalog, paths, preset, components, offline, download_missing_knowledge,
@@ -348,21 +325,13 @@ int main(int argc, char** argv) {
                 result = SetupEngine::apply(catalog, resolved, paths, yes,
                                             *repair_command || *upgrade_command);
                 if (feature_reconcile && result.value("state", "") == "committed") {
-                    std::set<std::string> selected;
-                    for (const auto& action : resolved.at("actions")) {
-                        selected.insert(action.at("component_id").get<std::string>());
-                    }
                     std::vector<std::string> remove;
-                    for (const auto& id :
-                         {"lichess.adapter", "uci_arena_evidence.service",
-                          "book_forge.service", "uci_arena.engine",
-                          "opening_book.standard", "stockfish.engine",
-                          "node_runtime.private"}) {
-                        if (!selected.contains(id) &&
-                            fs::is_regular_file(
-                                paths.data_root / "receipts" /
-                                (std::string(id) + ".json"))) {
-                            remove.emplace_back(id);
+                    for (const auto& value :
+                         feature_reconciliation.at("removal_candidates")) {
+                        const std::string id = value.get<std::string>();
+                        if (fs::is_regular_file(paths.data_root / "receipts" /
+                                                (id + ".json"))) {
+                            remove.push_back(id);
                         }
                     }
                     if (!remove.empty()) {

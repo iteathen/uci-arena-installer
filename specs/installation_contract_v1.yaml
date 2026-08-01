@@ -405,6 +405,14 @@ setup:
       - uci_arena_evidence.service
       - lichess.adapter
     rules:
+      - The catalog owns a feature-selection contract containing one base
+        preset, the exact operator-visible feature component ids, and their
+        default selections. The setup executable derives dependency closure
+        and removal candidates from that data; it contains no compiled list of
+        UCI Arena product component ids.
+      - Feature reconciliation never removes a base-preset component or a
+        component still in the selected dependency closure. Unknown feature
+        assignments fail before mutation.
       - Initial Windows installation presents the named suite components as
         selected by default and permits the operator to clear any optional
         component before commit.

@@ -26,6 +26,24 @@
         "uniqueItems": true
       }
     },
+    "feature_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_preset", "components", "default_selected"],
+      "properties": {
+        "base_preset": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "components": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+          "uniqueItems": true
+        },
+        "default_selected": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+          "uniqueItems": true
+        }
+      }
+    },
     "components": {
       "type": "array",
       "items": {"$ref": "#/$defs/component"},

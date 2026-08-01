@@ -17,3 +17,10 @@ specs:
       - tools/release
       - tests
       - docs/installer
+  - spec_id: arena_suite_lego_boundaries_v1
+    path: specs/suite_lego_boundaries_v1.yaml
+    owner: suite_architecture
+    applies_to:
+      - AGENTS.md
+      - docs/architecture
+      - specs/suite_lego_boundaries_v1.yaml

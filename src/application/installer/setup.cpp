@@ -3390,6 +3390,110 @@ json SetupEngine::save_lichess_token_reference(
     };
 }
 
+json SetupEngine::resolve_feature_selection(
+    const json& catalog, const std::vector<std::string>& assignments) {
+    if (!catalog.contains("feature_selection") ||
+        !catalog.at("feature_selection").is_object()) {
+        throw std::runtime_error(
+            "catalog does not declare installer feature selection");
+    }
+    const json& contract = catalog.at("feature_selection");
+    if (!contract.contains("base_preset") ||
+        !contract.at("base_preset").is_string() ||
+        !contract.contains("components") ||
+        !contract.at("components").is_array() ||
+        !contract.contains("default_selected") ||
+        !contract.at("default_selected").is_array()) {
+        throw std::runtime_error("catalog feature-selection contract is invalid");
+    }
+    const std::string base_preset =
+        contract.at("base_preset").get<std::string>();
+    if (!valid_identifier(base_preset) ||
+        !catalog.at("presets").contains(base_preset)) {
+        throw std::runtime_error(
+            "catalog feature-selection base preset is invalid");
+    }
+
+    std::vector<std::string> feature_ids;
+    std::set<std::string, std::less<>> allowed;
+    for (const auto& value : contract.at("components")) {
+        if (!value.is_string()) {
+            throw std::runtime_error(
+                "catalog feature-selection component id is invalid");
+        }
+        const std::string id = value.get<std::string>();
+        if (!valid_identifier(id) || !allowed.insert(id).second) {
+            throw std::runtime_error(
+                "catalog feature-selection component id is invalid");
+        }
+        static_cast<void>(component_by_id(catalog, id));
+        feature_ids.push_back(id);
+    }
+
+    std::map<std::string, bool, std::less<>> selected;
+    for (const auto& id : feature_ids) {
+        selected.emplace(id, false);
+    }
+    for (const auto& value : contract.at("default_selected")) {
+        if (!value.is_string() ||
+            !selected.contains(value.get<std::string>())) {
+            throw std::runtime_error(
+                "catalog default feature is not operator-selectable");
+        }
+        selected.at(value.get<std::string>()) = true;
+    }
+    for (const auto& assignment : assignments) {
+        const auto separator = assignment.find('=');
+        if (separator == std::string::npos ||
+            (assignment.substr(separator + 1) != "0" &&
+             assignment.substr(separator + 1) != "1")) {
+            throw std::runtime_error(
+                "bundle feature must be component-id=0 or component-id=1");
+        }
+        const std::string id = assignment.substr(0, separator);
+        if (!selected.contains(id)) {
+            throw std::runtime_error("unknown bundle feature " + id);
+        }
+        selected.at(id) = assignment.substr(separator + 1) == "1";
+    }
+
+    std::vector<std::string> roots =
+        catalog.at("presets").at(base_preset).get<std::vector<std::string>>();
+    for (const auto& id : feature_ids) {
+        if (selected.at(id)) {
+            roots.push_back(id);
+        }
+    }
+    const auto selected_closure =
+        selected_ids(catalog, "custom", roots, false, false, false);
+    const auto controlled_closure =
+        selected_ids(catalog, "custom", feature_ids, false, false, false);
+    const auto base_closure =
+        selected_ids(catalog, base_preset, {}, false, false, false);
+    const std::set<std::string, std::less<>> selected_set(
+        selected_closure.begin(), selected_closure.end());
+    const std::set<std::string, std::less<>> base_set(
+        base_closure.begin(), base_closure.end());
+    json removals = json::array();
+    for (const auto& id : controlled_closure) {
+        if (!selected_set.contains(id) && !base_set.contains(id)) {
+            removals.push_back(id);
+        }
+    }
+    json state = json::object();
+    for (const auto& [id, enabled] : selected) {
+        state[id] = enabled;
+    }
+    return {
+        {"schema", "arena_install_feature_selection_v1"},
+        {"base_preset", base_preset},
+        {"state", std::move(state)},
+        {"selected_roots", roots},
+        {"selected_closure", selected_closure},
+        {"removal_candidates", std::move(removals)},
+    };
+}
+
 json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::string& preset,
                        const std::vector<std::string>& selected_components, const bool offline,
                        const bool download_missing_knowledge, const bool download_missing_books,

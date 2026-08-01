@@ -336,6 +336,37 @@ TEST_CASE("setup planner applies catalog roles without product identity knowledg
     fs::remove_all(root);
 }
 
+TEST_CASE("feature reconciliation is catalog-owned and identity agnostic") {
+    const fs::path root = temporary_directory();
+    const json catalog{
+        {"schema", "arena_install_catalog_v1"},
+        {"schema_version", 1},
+        {"suite_version", "1.0.0"},
+        {"presets", {{"base", json::array({"shell.core"})}}},
+        {"feature_selection",
+         {{"base_preset", "base"},
+          {"components", json::array({"feature.alpha", "feature.beta"})},
+          {"default_selected", json::array({"feature.alpha", "feature.beta"})}}},
+        {"components",
+         json::array({component("shell.core"), component("shared.runtime"),
+                      component("feature.alpha", {"shared.runtime"}),
+                      component("feature.beta", {"shared.runtime"})})},
+    };
+
+    const json selection = SetupEngine::resolve_feature_selection(
+        catalog, {"feature.alpha=0", "feature.beta=1"});
+
+    REQUIRE(selection.at("selected_roots") ==
+            json::array({"shell.core", "feature.beta"}));
+    REQUIRE(selection.at("selected_closure") ==
+            json::array({"shell.core", "shared.runtime", "feature.beta"}));
+    REQUIRE(selection.at("removal_candidates") ==
+            json::array({"feature.alpha"}));
+    REQUIRE_THROWS(SetupEngine::resolve_feature_selection(
+        catalog, {"unknown.product=1"}));
+    fs::remove_all(root);
+}
+
 TEST_CASE("repair plan restages components that are already current") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
