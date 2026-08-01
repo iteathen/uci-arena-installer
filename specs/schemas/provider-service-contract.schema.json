@@ -7,6 +7,7 @@
   "required": [
     "schema",
     "service",
+    "invocation",
     "provided_capabilities",
     "required_capabilities",
     "credential_contract",
@@ -39,6 +40,32 @@
         "transport": {"const": "cli_json"},
         "entrypoint": {"$ref": "#/$defs/relative_path"}
       }
+    },
+    "invocation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {"kind": {"const": "direct"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "runtime_component_id", "runtime_entrypoint"],
+          "properties": {
+            "kind": {"const": "dependency_runtime"},
+            "runtime_component_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "runtime_entrypoint": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]+$"
+            }
+          }
+        }
+      ]
     },
     "provided_capabilities": {"$ref": "#/$defs/identifiers"},
     "required_capabilities": {"$ref": "#/$defs/identifiers"},

@@ -405,6 +405,10 @@ provider_service_contracts:
     - The service contract uses CLI JSON transport, publishes bounded typed
       errors, preserves provider-owned data for upgrade, repair, and normal
       uninstall, and declares credential-gated startup explicitly.
+    - The service contract declares direct execution or one dependency-runtime
+      component plus its named entrypoint. A dependency runtime must also be a
+      component-manifest dependency; Installer and Manager never infer an
+      interpreter from a filename, component id, or source layout.
     - The Manager operation catalog is a closed versioned object containing
       fixed argument arrays; it cannot name an executable, working directory,
       shell string, token value, or provider-private storage path.

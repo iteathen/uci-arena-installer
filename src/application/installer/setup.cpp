@@ -936,6 +936,44 @@ json validate_provider_service_contract(const fs::path& root, const json& manife
     }
     static_cast<void>(identifier_set_field(contract, "provided_capabilities"));
     static_cast<void>(identifier_set_field(contract, "required_capabilities"));
+    if (!contract.contains("invocation") ||
+        !contract.at("invocation").is_object()) {
+        throw std::runtime_error("provider invocation contract is missing");
+    }
+    const json& invocation = contract.at("invocation");
+    const std::string invocation_kind = invocation.value("kind", "");
+    if (invocation_kind == "direct") {
+        if (invocation.size() != 1) {
+            throw std::runtime_error("direct provider invocation has unexpected fields");
+        }
+    } else if (invocation_kind == "dependency_runtime") {
+        if (invocation.size() != 3 ||
+            !invocation.contains("runtime_component_id") ||
+            !invocation.at("runtime_component_id").is_string() ||
+            !invocation.contains("runtime_entrypoint") ||
+            !invocation.at("runtime_entrypoint").is_string()) {
+            throw std::runtime_error("provider dependency-runtime invocation is malformed");
+        }
+        const std::string runtime_component =
+            invocation.at("runtime_component_id").get<std::string>();
+        const std::string runtime_entrypoint =
+            invocation.at("runtime_entrypoint").get<std::string>();
+        if (!valid_identifier(runtime_component) ||
+            !valid_identifier(runtime_entrypoint) ||
+            !manifest.contains("dependencies") ||
+            !manifest.at("dependencies").is_array() ||
+            std::ranges::none_of(
+                manifest.at("dependencies"),
+                [&runtime_component](const json& dependency) {
+                    return dependency.is_string() &&
+                           dependency.get_ref<const std::string&>() == runtime_component;
+                })) {
+            throw std::runtime_error(
+                "provider invocation runtime is not a declared component dependency");
+        }
+    } else {
+        throw std::runtime_error("provider invocation kind is incompatible");
+    }
     if (!contract.contains("credential_contract") ||
         !contract.at("credential_contract").is_object() ||
         contract.at("credential_contract").value("input", "") !=

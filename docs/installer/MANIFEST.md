@@ -25,6 +25,11 @@ service contract. Installer validates and receipts those files as opaque typed
 contracts. It does not interpret operation meaning, open provider storage, or
 handle credential contents.
 
+The same contract declares whether its CLI is a direct executable or uses one
+named dependency runtime and entrypoint. A dependency-runtime declaration must
+match a component dependency; executable suffixes and provider identities are
+never interpreter-selection policy.
+
 Before mutation, validation requires:
 
 - supported schema major and target;
