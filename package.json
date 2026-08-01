@@ -1,0 +1,10 @@
+{
+  "name": "uci-arena-installer-release-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spec:check": "node tools/spec-check.mjs",
+    "test": "node --test tools/release/*.test.mjs",
+    "check": "npm run spec:check && npm test"
+  }
+}
