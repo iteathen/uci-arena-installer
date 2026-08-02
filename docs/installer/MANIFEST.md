@@ -122,6 +122,16 @@ installed renderers that declared that locator kind. Thus a new provider or a
 new provider-private configuration field changes package data and provider
 code, not Installer component-id branches.
 
+Startup-capable providers add `arena_provider_startup_control_v1` to the same
+integration object. It declares a digest-verified entrypoint, fixed install and
+uninstall argument arrays, a workspace-relative state path, the configuration
+flag, response envelope, and which install-time evidence must be true. Installer
+uses those fields literally and passes argument arrays without a shell. It does
+not infer Node.js, CLI names, runtime-directory conventions, or provider health
+fields. A credential-gated provider still owns authenticated startup install;
+its credential-free uninstall declaration lets normal removal revoke startup
+authority without exposing a credential to Installer.
+
 Before mutation, validation requires:
 
 - supported schema major and target;

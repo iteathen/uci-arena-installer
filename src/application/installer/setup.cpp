@@ -1177,7 +1177,8 @@ void validate_provider_installer_integration(const json& manifest,
         return;
     }
     const json& integration = manifest.at("installer_integration");
-    if (!integration.is_object() || integration.size() != 9 ||
+    if (!integration.is_object() ||
+        (integration.size() != 9 && integration.size() != 10) ||
         integration.value("schema", "") != "arena_provider_installer_integration_v1" ||
         integration.value("schema_version", 0) != 1 ||
         !integration.contains("entrypoint") ||
@@ -1283,6 +1284,83 @@ void validate_provider_installer_integration(const json& manifest,
             !binding.contains("required") || !binding.at("required").is_boolean()) {
             throw std::runtime_error("provider installer locator binding is invalid");
         }
+    }
+    bool declares_startup = false;
+    const json capabilities = manifest.value("capabilities", json::array());
+    if (!capabilities.is_array()) {
+        throw std::runtime_error("component capabilities are not an array");
+    }
+    for (const auto& capability : capabilities) {
+        if (!capability.is_string() ||
+            !valid_identifier(capability.get_ref<const std::string&>())) {
+            throw std::runtime_error("component capability declaration is invalid");
+        }
+        declares_startup = declares_startup ||
+                           capability == "startup_install" ||
+                           capability == "startup_uninstall";
+    }
+    if (declares_startup != integration.contains("startup_control")) {
+        throw std::runtime_error(
+            "provider startup capability and installer control contract disagree");
+    }
+    if (!declares_startup) {
+        return;
+    }
+    const json& startup = integration.at("startup_control");
+    if (!startup.is_object() || startup.size() != 7 ||
+        startup.value("schema", "") != "arena_provider_startup_control_v1" ||
+        startup.value("schema_version", 0) != 1 ||
+        !startup.contains("entrypoint") || !startup.at("entrypoint").is_string() ||
+        !valid_identifier(startup.at("entrypoint").get<std::string>()) ||
+        !manifest.at("entrypoints").contains(
+            startup.at("entrypoint").get<std::string>()) ||
+        !startup.contains("actions") || !startup.at("actions").is_object() ||
+        startup.at("actions").size() != 2 ||
+        !startup.contains("workspace_argument") ||
+        !startup.at("workspace_argument").is_object() ||
+        startup.at("workspace_argument").size() != 2 ||
+        !startup.contains("configuration_argument") ||
+        !startup.at("configuration_argument").is_string() ||
+        !startup.contains("result") || !startup.at("result").is_object() ||
+        startup.at("result").size() != 3) {
+        throw std::runtime_error("provider startup control contract is invalid");
+    }
+    for (const auto action : {"install", "uninstall"}) {
+        if (!startup.at("actions").contains(action) ||
+            !startup.at("actions").at(action).is_array() ||
+            startup.at("actions").at(action).empty() ||
+            startup.at("actions").at(action).size() > 8) {
+            throw std::runtime_error("provider startup action is invalid");
+        }
+        for (const auto& argument : startup.at("actions").at(action)) {
+            if (!argument.is_string() ||
+                !valid_identifier(argument.get_ref<const std::string&>())) {
+                throw std::runtime_error("provider startup action argument is invalid");
+            }
+        }
+    }
+    const json& workspace_argument = startup.at("workspace_argument");
+    const std::string workspace_flag = workspace_argument.value("flag", "");
+    const fs::path workspace_relative = fs::path(
+        workspace_argument.value("relative_path", "")).lexically_normal();
+    const std::string configuration_flag =
+        startup.at("configuration_argument").get<std::string>();
+    const auto valid_flag = [](const std::string& flag) {
+        return flag.starts_with("--") && flag.size() > 2 &&
+               valid_identifier(flag.substr(2));
+    };
+    const json& result = startup.at("result");
+    const std::string envelope = result.value("envelope", "");
+    if (!valid_flag(workspace_flag) ||
+        (workspace_relative != fs::path(".") &&
+         !safe_relative_path(workspace_relative)) ||
+        !valid_flag(configuration_flag) ||
+        (envelope != "root" && envelope != "startup") ||
+        !result.contains("require_configuration_match_on_install") ||
+        !result.at("require_configuration_match_on_install").is_boolean() ||
+        !result.contains("require_live_on_install") ||
+        !result.at("require_live_on_install").is_boolean()) {
+        throw std::runtime_error("provider startup control values are invalid");
     }
 }
 
@@ -3170,20 +3248,24 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
         validate_component_payload(
             active_root, component_id, receipt.at("component_version").get<std::string>())
             .manifest;
-    const fs::path receipts_root = paths.data_root / "receipts";
-    const fs::path node = installed_entrypoint(receipts_root, "node_runtime.private", "node");
-    const json entrypoints = manifest.at("entrypoints");
-    std::string control_entrypoint;
-    if (entrypoints.contains("startup")) {
-        control_entrypoint = "startup";
-    } else if (entrypoints.contains("cli")) {
-        control_entrypoint = "cli";
-    } else if (entrypoints.contains("adapter")) {
-        control_entrypoint = "adapter";
-    } else {
-        throw std::runtime_error("startup-capable component has no declared control entrypoint: " +
-                                 component_id);
+    if (!manifest.contains("installer_integration") ||
+        !manifest.at("installer_integration").contains("startup_control")) {
+        throw std::runtime_error(
+            "startup-capable component has no Installer startup control contract: " +
+            component_id);
     }
+    if (action != "install" && action != "uninstall") {
+        throw std::runtime_error("provider startup action is unsupported: " + action);
+    }
+    const fs::path receipts_root = paths.data_root / "receipts";
+    const json& integration = manifest.at("installer_integration");
+    const json& invocation = integration.at("invocation");
+    const json& control = integration.at("startup_control");
+    const fs::path runtime = installed_entrypoint(
+        receipts_root, invocation.at("runtime_component_id").get<std::string>(),
+        invocation.at("runtime_entrypoint").get<std::string>());
+    const std::string control_entrypoint =
+        control.at("entrypoint").get<std::string>();
     const fs::path cli = installed_entrypoint(receipts_root, component_id, control_entrypoint);
     const auto data_paths = receipt.value("data_paths", json::array());
     if (data_paths.empty() || !data_paths.at(0).is_string()) {
@@ -3205,31 +3287,44 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
             "startup-capable component workspace is outside the selected workspace "
             "root");
     }
-    std::vector<std::string> arguments{
-        cli.string(),
-        "startup",
-        action,
-    };
-    if (control_entrypoint == "adapter") {
-        arguments.push_back("--runtime-dir");
-        arguments.push_back((workspace / "runtime").string());
-    } else {
-        arguments.push_back("--workspace");
-        arguments.push_back(workspace.string());
+    std::vector<std::string> arguments{cli.string()};
+    for (const auto& argument : control.at("actions").at(action)) {
+        arguments.push_back(argument.get<std::string>());
     }
+    const json& workspace_argument = control.at("workspace_argument");
+    const fs::path workspace_relative = fs::path(
+        workspace_argument.at("relative_path").get<std::string>()).lexically_normal();
+    const fs::path control_workspace = workspace_relative == fs::path(".")
+                                           ? workspace
+                                           : normalized_absolute(workspace / workspace_relative);
+    if (!within(workspace, control_workspace) || contains_symbolic_link(control_workspace)) {
+        throw std::runtime_error(
+            "startup control workspace escapes its provider workspace");
+    }
+    arguments.push_back(workspace_argument.at("flag").get<std::string>());
+    arguments.push_back(control_workspace.string());
     const std::string configuration_path = receipt.value("configuration_path", "");
     if (!configuration_path.empty()) {
         const fs::path configuration = normalized_absolute(configuration_path);
-        if (!within(workspace, configuration) || !fs::is_regular_file(configuration) ||
-            fs::is_symlink(configuration)) {
+        const bool valid_configuration = within(workspace, configuration) &&
+                                         fs::is_regular_file(configuration) &&
+                                         !fs::is_symlink(configuration);
+        if (!valid_configuration && action == "install") {
             throw std::runtime_error("startup-capable component configuration is unavailable");
         }
-        arguments.push_back("--config");
-        arguments.push_back(configuration.string());
+        if (valid_configuration) {
+            arguments.push_back(
+                control.at("configuration_argument").get<std::string>());
+            arguments.push_back(configuration.string());
+        }
     }
     arena::application::ProcessSupervisor process;
-    const json response = process.run_json(node, active_root, arguments, std::chrono::seconds(30));
-    const json status = response.contains("startup") ? response.at("startup") : response;
+    const json response =
+        process.run_json(runtime, active_root, arguments, std::chrono::seconds(30));
+    const json& result_contract = control.at("result");
+    const json status = result_contract.at("envelope") == "startup"
+                            ? response.at("startup")
+                            : response;
     if (!status.is_object() || !status.contains("installed") ||
         !status.at("installed").is_boolean()) {
         throw std::runtime_error("provider startup adapter returned an invalid status: " +
@@ -3240,17 +3335,20 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
         throw std::runtime_error("provider startup adapter did not confirm " + action + ": " +
                                  component_id);
     }
-    if (expected_installed && status.contains("matchesCurrentConfiguration") &&
-        (!status.at("matchesCurrentConfiguration").is_boolean() ||
+    if (expected_installed &&
+        result_contract.at("require_configuration_match_on_install").get<bool>() &&
+        (!status.contains("matchesCurrentConfiguration") ||
+         !status.at("matchesCurrentConfiguration").is_boolean() ||
          !status.at("matchesCurrentConfiguration").get<bool>())) {
         throw std::runtime_error("provider startup adapter configuration does not match: " +
                                  component_id);
     }
-    if (expected_installed && component_id == "uci_arena_evidence.service" &&
+    if (expected_installed &&
+        result_contract.at("require_live_on_install").get<bool>() &&
         (!status.contains("active") || !status.at("active").is_boolean() ||
          !status.at("active").get<bool>())) {
-        throw std::runtime_error(
-            "Evidence Service startup adapter did not confirm a live daemon");
+        throw std::runtime_error("provider startup adapter did not confirm a live daemon: " +
+                                 component_id);
     }
     return status;
 }

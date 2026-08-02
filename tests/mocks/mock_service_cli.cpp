@@ -63,6 +63,19 @@ int main(int argc, char** argv) {
     const bool evidence = cli.find("evidence") != std::string::npos;
     const std::string command = argv[2];
     const std::string operation = argv[3];
+    if (cli.find("installer-integration.fixture") != std::string::npos &&
+        command == "lifecycle" &&
+        (operation == "enable" || operation == "disable")) {
+        std::cout
+            << nlohmann::json{
+                   {"installed", operation == "enable"},
+                   {"matchesCurrentConfiguration", true},
+                   {"active", operation == "enable"},
+               }
+                   .dump()
+            << '\n';
+        return 0;
+    }
     if (command != "api") {
         return 3;
     }

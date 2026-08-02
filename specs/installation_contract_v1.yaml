@@ -488,6 +488,15 @@ provider_installer_integration:
       trusted merely because it exists.
     - Adding or changing provider configuration normally changes only the
       provider renderer and manifest bindings, not Installer control flow.
+    - A startup-capable provider declares arena_provider_startup_control_v1
+      beside its renderer: exact entrypoint, fixed install/uninstall argument
+      arrays, workspace/configuration flags, result envelope, and required
+      configuration-match/live evidence. Installer never guesses these values
+      from component identity, entrypoint names, or implementation language.
+    - Credential-gated startup installation remains provider/operator work;
+      Installer does not receive credential contents. Credential-free startup
+      removal remains declared so normal uninstall can remove startup authority
+      even when Installer did not create it.
 
 setup:
   executable: arena-setup

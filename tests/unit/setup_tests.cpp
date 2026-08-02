@@ -160,6 +160,19 @@ fs::path write_mock_renderer_consumer(const SetupPaths& paths,
          json::array({{{"name", "selected"},
                        {"kind", locator_kind},
                        {"required", false}}})},
+        {"startup_control",
+         {{"schema", "arena_provider_startup_control_v1"},
+          {"schema_version", 1},
+          {"entrypoint", "installer_integration"},
+          {"actions",
+           {{"install", json::array({"lifecycle", "enable"})},
+            {"uninstall", json::array({"lifecycle", "disable"})}}},
+          {"workspace_argument", {{"flag", "--state-root"}, {"relative_path", "runtime"}}},
+          {"configuration_argument", "--settings"},
+          {"result",
+           {{"envelope", "root"},
+            {"require_configuration_match_on_install", true},
+            {"require_live_on_install", true}}}}},
     };
     std::ofstream(active_root / "arena-component.json", std::ios::binary)
         << json{
@@ -168,6 +181,7 @@ fs::path write_mock_renderer_consumer(const SetupPaths& paths,
                {"component_id", component_id},
                {"component_version", "1.0.0"},
                {"entrypoints", {{"installer_integration", "installer-integration.fixture"}}},
+               {"capabilities", json::array({"startup_install", "startup_uninstall"})},
                {"dependencies", json::array({"runtime.host"})},
                {"workspace_name", component_id},
                {"installer_integration", integration},
@@ -1477,6 +1491,26 @@ TEST_CASE("disabled providers refresh through declared locator subscriptions") {
         fs::absolute(transport).lexically_normal().string());
     REQUIRE(updated.at("enabled") == false);
     updated_input.close();
+    fs::remove_all(root);
+}
+
+TEST_CASE("provider startup cleanup uses only the declared startup control") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "replaceable.lifecycle.consumer";
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile");
+    const fs::path workspace = configuration.parent_path();
+    std::ofstream(workspace / "valuable-state.json") << "{}";
+
+    const json plan = SetupEngine::plan_uninstall(paths, {component_id});
+    REQUIRE(plan.at("components").at(0).at("startup_cleanup_required") == true);
+    const json result = SetupEngine::uninstall(paths, plan, true);
+
+    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("installed") ==
+            false);
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id));
+    REQUIRE(fs::is_regular_file(workspace / "valuable-state.json"));
     fs::remove_all(root);
 }
 
