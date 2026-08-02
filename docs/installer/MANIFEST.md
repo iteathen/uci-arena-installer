@@ -1,5 +1,17 @@
 # Package manifest
 
+`arena_product_composition_v1` is the Installer-owned, platform-neutral suite
+bill of materials. It declares the product release, minimum installer version,
+component roles, exact component versions, provider repositories, selection
+policy, and dependency edges. It contains no source-tree paths or platform
+artifact guesses. A platform release lock must realize every selected
+composition entry with immutable artifact, component-manifest, digest, and
+provenance evidence.
+
+The composition and installer engine are versioned independently. Changing a
+provider version or adding a conforming provider changes composition data and
+its lock realization, not transaction control flow.
+
 `arena_install_catalog_v1` selects immutable components. Each `arena_install_component_v1` manifest is the authority for component identity, target, payload files, entrypoints, dependencies, capabilities, startup ownership, public service contract, data paths, and default model metadata.
 
 Catalog presets and explicit custom selections are the only ordinary component-selection authorities. Named `optional_component_groups` map operator requests to exact component ids. Per-component `default_enabled`, `disable_when_workspace_capacity_unavailable`, and `activation_role` fields control planning without product-name or id-prefix branches. Required suite members therefore belong in a preset or dependency edge; the planner never injects one implicitly.

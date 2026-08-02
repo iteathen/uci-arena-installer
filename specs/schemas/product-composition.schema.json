@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/product-composition.schema.json",
+  "title": "UCI Arena product composition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "product_release", "installer", "components"],
+  "properties": {
+    "schema": {"const": "arena_product_composition_v1"},
+    "product_release": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "installer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "minimum_version"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "minimum_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "component_id", "version", "repository", "required", "default_enabled", "requires"],
+        "properties": {
+          "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "component_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+          "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$"},
+          "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "required": {"type": "boolean"},
+          "default_enabled": {"type": "boolean"},
+          "requires": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"}
+          }
+        }
+      }
+    }
+  }
+}

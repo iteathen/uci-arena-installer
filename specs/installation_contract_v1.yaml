@@ -192,6 +192,7 @@ signed_provenance:
       never weakened to satisfy an attestation storage service.
 
 interfaces:
+  product_composition: arena_product_composition_v1
   catalog: arena_install_catalog_v1
   component: arena_install_component_v1
   standalone_service_contract: uci_arena_standalone_service_contract_v1
@@ -833,6 +834,12 @@ components:
     - uci_arena_evidence.service
     - lichess.adapter
   composition_rules:
+    - The Installer-owned product composition declares suite version, exact
+      component versions, source repositories, required/default selection,
+      and dependency edges independently from platform artifact locks. A
+      platform lock realizes that composition with immutable artifact,
+      manifest, digest, and provenance identities; it cannot silently replace
+      a component version or dependency.
     - Presets and explicit custom selection are the only authorities that add
       ordinary components to a plan. The planner never injects manager.core,
       a runtime, or any other product identity implicitly.
