@@ -1,0 +1,26 @@
+schema_version: 1
+specs:
+  - spec_id: arena_installer_foundation_v1
+    path: specs/00_READ_FIRST.yaml
+    owner: installer_governance
+    applies_to:
+      - "*"
+  - spec_id: arena_installation_contract_v1
+    path: specs/installation_contract_v1.yaml
+    owner: release_engineering
+    applies_to:
+      - apps
+      - include
+      - src
+      - release
+      - packaging
+      - tools/release
+      - tests
+      - docs/installer
+  - spec_id: arena_suite_lego_boundaries_v1
+    path: specs/suite_lego_boundaries_v1.yaml
+    owner: suite_architecture
+    applies_to:
+      - AGENTS.md
+      - docs/architecture
+      - specs/suite_lego_boundaries_v1.yaml

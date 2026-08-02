@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-receipt.schema.json",
+  "title": "arena_install_receipt_v1",
+  "type": "object",
+  "required": ["schema", "schema_version", "component_id", "component_version", "state", "active_root", "artifact_sha256"],
+  "properties": {
+    "schema": {"const": "arena_install_receipt_v1"},
+    "schema_version": {"const": 1},
+    "component_id": {"type": "string"},
+    "component_version": {"type": "string"},
+    "state": {"enum": ["installed_managed", "installed_disabled", "broken"]},
+    "active_root": {"type": "string"},
+    "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "installed_at": {"type": "string"},
+    "bundle_owner": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._{}-]+$"
+    },
+    "data_paths": {"type": "array", "items": {"type": "string"}},
+    "ownership": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/ownership_entry"}
+    },
+    "configuration_path": {"type": "string"},
+    "service_contract": {
+      "oneOf": [
+        {"$ref": "#/$defs/standalone_service_receipt"},
+        {"$ref": "#/$defs/provider_service_receipt"}
+      ]
+    },
+    "startup": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["installed"],
+      "properties": {
+        "installed": {"type": "boolean"},
+        "matchesCurrentConfiguration": {"type": "boolean"}
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "activated_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size_bytes"],
+        "properties": {
+          "path": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ownership_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "ownership_class", "normal_uninstall", "purge", "kind"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "ownership_class": {
+          "enum": ["application_replaceable", "user_preserved", "generated", "migrated", "cache_disposable", "installer_temporary", "external_dependency", "unknown_policy_controlled"]
+        },
+        "normal_uninstall": {"enum": ["remove", "preserve"]},
+        "purge": {"enum": ["explicit_recursive", "exact_identity", "empty_only", "forbidden"]},
+        "kind": {"enum": ["directory_tree", "file"]},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "source": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"purge": {"const": "exact_identity"}}, "required": ["purge"]},
+          "then": {"required": ["size_bytes", "sha256"], "properties": {"kind": {"const": "file"}}}
+        },
+        {
+          "if": {"properties": {"purge": {"enum": ["explicit_recursive", "empty_only"]}}, "required": ["purge"]},
+          "then": {"properties": {"kind": {"const": "directory_tree"}}}
+        },
+        {
+          "if": {"properties": {"ownership_class": {"enum": ["external_dependency", "unknown_policy_controlled"]}}, "required": ["ownership_class"]},
+          "then": {"properties": {"purge": {"const": "forbidden"}}}
+        }
+      ]
+    },
+    "standalone_service_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "path", "sha256", "configuration_schema", "status_schema"],
+      "properties": {
+        "schema": {"const": "uci_arena_standalone_service_contract_v1"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "configuration_schema": {"type": "string", "minLength": 1},
+        "status_schema": {"type": "string", "minLength": 1},
+        "manager_integration_api": {"type": "object"}
+      }
+    },
+    "provider_service_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "path",
+        "sha256",
+        "configuration_schema_path",
+        "configuration_schema_sha256",
+        "configuration_update_schema_path",
+        "configuration_update_schema_sha256",
+        "status_schema_path",
+        "status_schema_sha256",
+        "manager_operations_path",
+        "manager_operations_sha256",
+        "credential_gated_startup"
+      ],
+      "properties": {
+        "schema": {"const": "uci_arena_service_contract_v1"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "configuration_schema_path": {"type": "string", "minLength": 1},
+        "configuration_schema_sha256": {"$ref": "#/$defs/digest"},
+        "configuration_update_schema_path": {"type": "string", "minLength": 1},
+        "configuration_update_schema_sha256": {"$ref": "#/$defs/digest"},
+        "status_schema_path": {"type": "string", "minLength": 1},
+        "status_schema_sha256": {"$ref": "#/$defs/digest"},
+        "manager_operations_path": {"type": "string", "minLength": 1},
+        "manager_operations_sha256": {"$ref": "#/$defs/digest"},
+        "credential_gated_startup": {"const": true}
+      }
+    }
+  }
+}

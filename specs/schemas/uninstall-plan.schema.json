@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/uninstall-plan.schema.json",
+  "title": "arena_install_uninstall_plan_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "plan_id", "mode", "all", "components", "blockers", "skipped_foreign_receipts"],
+  "properties": {
+    "schema": {"const": "arena_install_uninstall_plan_v1"},
+    "schema_version": {"const": 1},
+    "plan_id": {"type": "string", "minLength": 1},
+    "mode": {"const": "uninstall"},
+    "all": {"type": "boolean"},
+    "bundle_owner": {"type": "string", "pattern": "^[A-Za-z0-9._{}-]+$"},
+    "skipped_foreign_receipts": {"type": "integer", "minimum": 0},
+    "blockers": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/blocker"}
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component_id", "receipt_path", "receipt_sha256", "active_root", "remove_active_root", "startup_cleanup_required", "preservation_record"],
+        "properties": {
+          "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+          "receipt_path": {"type": "string", "minLength": 1},
+          "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "active_root": {"type": "string", "minLength": 1},
+          "remove_active_root": {"type": "boolean"},
+          "startup_cleanup_required": {"type": "boolean"},
+          "preservation_record": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_id", "reason"],
+      "properties": {
+        "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

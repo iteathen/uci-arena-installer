@@ -1,0 +1,17 @@
+{
+  "name": "uci-arena-installer",
+  "version-semver": "0.1.0",
+  "builtin-baseline": "cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3",
+  "dependencies": [
+    "catch2",
+    "cli11",
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": ["ssl"]
+    },
+    "libarchive",
+    "libsodium",
+    "nlohmann-json"
+  ]
+}

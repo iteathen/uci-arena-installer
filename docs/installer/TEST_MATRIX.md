@@ -1,0 +1,50 @@
+# Installer test matrix
+
+Automated tests use isolated temporary roots, synthetic manifests, fake packages, controlled state trees, and injectable platform adapters. A test asserts filesystem state, ownership, receipts, logs, backups, rollback, final classification, and exit code.
+
+Required scenarios:
+
+- clean and repeated clean install;
+- spaces, Unicode, long paths, trailing separators, and unrelated working directory;
+- valid upgrade, invalid downgrade, repair, reinstall, replacement, uninstall,
+  and separately planned purge;
+- missing or corrupt payload and invalid manifest;
+- unsafe, external, missing, size-mismatched, and digest-mismatched retained
+  release media rejected before installation mutation;
+- missing runtime and failed dependency command;
+- locked destination and partial existing installation;
+- interrupted stage and staged validation failure;
+- failure after backup and during replacement;
+- rollback success and rollback failure;
+- user-data preservation and application-file replacement;
+- uninstall-plan dry-run with no mutation, confirmation enforcement, and stale
+  receipt-plan rejection;
+- removal of executable/startup/receipt authority while Manager continuity,
+  managed-copy books, provider workspaces, profiles, locators, retained media,
+  caches, logs, and transaction evidence remain;
+- purge preview with no mutation, separate confirmation, root-equality and
+  out-of-bounds rejection, symbolic-link/Windows-reparse rejection, external/unknown ownership
+  preservation, exact-identity deletion, modified-file preservation and
+  reporting, partial failure evidence, and repeated idempotent purge;
+- ambiguous, corrupt, duplicate, or filename-mismatched receipt authority
+  blocking uninstall planning before mutation;
+- recursive purge ownership blocked when it overlaps a protected
+  receipt/preservation root or any explicitly external/unknown path;
+- retained paths never counting as installed authority and reinstall
+  revalidation of preserved state;
+- idempotent configuration, PATH, shortcuts, startup, and migration;
+- post-install health success and failure;
+- arbitrary component identities exercising declarative selection, default
+  activation, capacity policy, and knowledge accounting without engine changes;
+- cleanup after success and failure;
+- Personal delegation without elevation;
+- All-users delegation to the elevation-requiring machine bundle;
+- deterministic online and offline launcher envelopes, exact embedded bundle
+  digests, corrupt-envelope rejection, and temporary-child cleanup;
+- installed-scope maintenance and explicit cross-scope block;
+- one startup owner with no duplicate Manager, Book Forge, Evidence, or Lichess daemon;
+- replaceable provider service contracts with independent operation-catalog
+  schema names, exact receipt digests, unknown-major rejection, and tamper
+  detection.
+
+Mandatory focused commands are documented in `AGENTS.md`. Complete Windows acceptance additionally validates the visible bootstrapper, installed scope marker, exact running Manager root, packaged services, output integration, repair/update, and uninstall preservation.
