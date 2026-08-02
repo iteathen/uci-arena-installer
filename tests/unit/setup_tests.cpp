@@ -778,11 +778,6 @@ TEST_CASE("standalone service contracts are identity-bound and receipt-verified"
     REQUIRE(SetupEngine::verify(mismatched_paths).at("ok") == false);
     fs::remove_all(mismatched_root);
 
-    const fs::path missing_root = temporary_directory();
-    const SetupPaths missing_paths = paths_under(missing_root);
-    write_book_forge_service_install(missing_paths, std::nullopt);
-    REQUIRE(SetupEngine::verify(missing_paths).at("ok") == false);
-    fs::remove_all(missing_root);
 }
 
 TEST_CASE("typed provider service and installation contracts are replaceable and receipt-verified") {
@@ -791,6 +786,24 @@ TEST_CASE("typed provider service and installation contracts are replaceable and
     write_provider_service_install(valid_paths);
     REQUIRE(SetupEngine::verify(valid_paths).at("ok") == true);
     fs::remove_all(valid_root);
+
+    const fs::path missing_root = temporary_directory();
+    const SetupPaths missing_paths = paths_under(missing_root);
+    write_provider_service_install(missing_paths);
+    const fs::path missing_manifest =
+        missing_paths.install_root / "components" / "replaceable.provider" / "1.0.0" /
+        "arena-component.json";
+    json missing_contract = json::parse(std::ifstream(missing_manifest));
+    missing_contract.erase("contract_manifest");
+    missing_contract["manager_integration_api"] =
+        manager_service_api({"orchestration_status"});
+    std::ofstream(missing_manifest, std::ios::binary | std::ios::trunc)
+        << missing_contract.dump(2);
+    const json missing_verified = SetupEngine::verify(missing_paths);
+    REQUIRE(missing_verified.at("ok") == false);
+    REQUIRE(missing_verified.at("components").at(0).at("error") ==
+            "integrated provider component is missing its contract manifest");
+    fs::remove_all(missing_root);
 
     const fs::path incompatible_root = temporary_directory();
     const SetupPaths incompatible_paths = paths_under(incompatible_root);

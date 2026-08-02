@@ -116,6 +116,13 @@ at most sixteen workspace-relative JSON documents. Provider field meanings,
 model semantics, profile compatibility, and default policy remain inside the
 provider renderer.
 
+Declaring `manager_integration_api` also requires a payload-owned service
+contract. This rule is role-based: Installer never uses a provider name,
+repository, or component-version threshold to decide whether a contract is
+required. `installer_integration` alone may configure a non-service consumer
+and does not imply Manager-service ownership. When Manager API metadata is
+declared, the component and service-contract projections must match exactly.
+
 Installer owns invocation, path validation, atomic writes, journaling,
 verification, and reverse-order rollback. Saving a locator reruns only the
 installed renderers that declared that locator kind. Thus a new provider or a
@@ -139,7 +146,7 @@ Before mutation, validation requires:
 - exact file size and SHA-256 identity;
 - declared entrypoints naming manifest-owned files;
 - dependency and capability consistency;
-- standalone service contract consistency where required;
+- integrated-provider service contract consistency;
 - sufficient capacity for cache, stage, installation, backup, and operational reserve;
 - and signed provenance for official or complete-development composition.
 

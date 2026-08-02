@@ -132,67 +132,6 @@ bool valid_identifier(const std::string& value) {
            });
 }
 
-std::optional<std::array<std::uint64_t, 3>> semantic_version(const std::string_view value) {
-    std::array<std::uint64_t, 3> parts{};
-    std::size_t part = 0;
-    bool has_digit = false;
-    for (const unsigned char character : value) {
-        if (character == '.') {
-            if (!has_digit || part >= parts.size() - 1) {
-                return std::nullopt;
-            }
-            part += 1;
-            has_digit = false;
-            continue;
-        }
-        if (std::isdigit(character) == 0) {
-            return std::nullopt;
-        }
-        const std::uint64_t digit = character - '0';
-        if (parts[part] >
-            ((std::numeric_limits<std::uint64_t>::max)() - digit) / 10) {
-            return std::nullopt;
-        }
-        parts[part] = parts[part] * 10 + digit;
-        has_digit = true;
-    }
-    if (!has_digit || part != parts.size() - 1) {
-        return std::nullopt;
-    }
-    return parts;
-}
-
-bool standalone_service_component(const std::string_view component_id) {
-    return component_id == "book_forge.service" ||
-           component_id == "uci_arena_evidence.service";
-}
-
-bool standalone_service_contract_required(const std::string& component_id,
-                                          const std::string& component_version) {
-    if (!standalone_service_component(component_id)) {
-        return false;
-    }
-    const auto parsed = semantic_version(component_version);
-    if (!parsed.has_value()) {
-        throw std::runtime_error(
-            "standalone service component version is not semantic: " + component_version);
-    }
-    return parsed->at(0) > 0 || parsed->at(1) >= 2;
-}
-
-bool manager_service_api_required(const std::string& component_id,
-                                  const std::string& component_version) {
-    if (!standalone_service_component(component_id)) {
-        return false;
-    }
-    const auto parsed = semantic_version(component_version);
-    if (!parsed.has_value()) {
-        throw std::runtime_error(
-            "standalone service component version is not semantic: " + component_version);
-    }
-    return parsed->at(0) > 0 || parsed->at(1) >= 3;
-}
-
 bool valid_bundle_owner(const std::string& value) {
     return !value.empty() && value.size() <= 128 &&
            std::all_of(value.begin(), value.end(), [](const unsigned char character) {
@@ -1044,9 +983,9 @@ std::optional<json> validate_standalone_service_contract(
     const std::string component_id = manifest.at("component_id").get<std::string>();
     const std::string component_version = manifest.at("component_version").get<std::string>();
     if (!manifest.contains("contract_manifest")) {
-        if (standalone_service_contract_required(component_id, component_version)) {
+        if (manifest.contains("manager_integration_api")) {
             throw std::runtime_error(
-                "standalone service component is missing its contract manifest");
+                "integrated provider component is missing its contract manifest");
         }
         return std::nullopt;
     }
@@ -1133,8 +1072,6 @@ std::optional<json> validate_standalone_service_contract(
             "standalone service contract does not preserve persistent service data");
     }
     std::optional<json> manager_integration_api;
-    const bool manager_api_required =
-        manager_service_api_required(component_id, component_version);
     if (manifest.contains("manager_integration_api") ||
         contract.contains("manager_integration_api")) {
         if (!manifest.contains("manager_integration_api") ||
@@ -1146,9 +1083,6 @@ std::optional<json> validate_standalone_service_contract(
         }
         manager_integration_api = validate_manager_service_api(
             manifest.at("manager_integration_api"), manifest);
-    } else if (manager_api_required) {
-        throw std::runtime_error(
-            "standalone service component is missing its Manager API declaration");
     }
     json projection{
         {"schema", "uci_arena_standalone_service_contract_v1"},

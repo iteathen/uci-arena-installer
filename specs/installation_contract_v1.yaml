@@ -349,15 +349,15 @@ installer_lego_architecture:
   documentation_root: docs/installer
 
 standalone_service_contracts:
-  components:
-    - book_forge.service
-    - uci_arena_evidence.service
-  required_from_component_version: 0.2.0
-  manager_service_api_required_from_component_version: 0.3.0
-  legacy_compatibility: >
-    Existing 0.1.x provider candidates remain readable without a standalone
-    service contract. A service candidate at or after 0.2.0 fails closed when
-    its component manifest does not name a contract manifest.
+  applicability: >
+    Any component declaring manager_integration_api is an integrated Manager
+    service and must name its service contract. Installer integration alone
+    may belong to a non-service configuration consumer and does not imply a
+    service contract.
+  compatibility: >
+    Contract requirements derive only from declared integration roles. The
+    Installer must not select them from component ids, repository identities,
+    or historical version thresholds.
   validation:
     - The contract path is a safe relative path to a regular, non-symbolic-link
       file listed with its exact size and SHA-256 in arena-component.json.
@@ -372,9 +372,8 @@ standalone_service_contracts:
       smoke is the public status command with exit-zero plus schema validation.
     - Upgrade preserves and migrates service data, while repair and normal
       uninstall preserve it.
-    - At or after component version 0.3.0, the standalone service contract and
-      arena-component.json both contain the same manager_integration_api
-      declaration.
+    - When either the standalone service contract or arena-component.json
+      contains manager_integration_api, both contain the same declaration.
     - The declaration uses uci_arena_manager_service_api_v1 version 1.x over
       CLI JSON, selects the verified cli entrypoint with the argv prefix
       [api], declares all five required operations as a subset, and emits only
