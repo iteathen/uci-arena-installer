@@ -33,9 +33,13 @@ std::optional<IndexedAssetKind> classify(const fs::path& path) {
     if (extension == ".book" || extension == ".bin") {
         return IndexedAssetKind::opening_book;
     }
-    if (filename == "uci_time_profile_v3.json" ||
-        (extension == ".json" && filename.contains("timing") &&
-         filename.contains("profile"))) {
+    const bool named_time_profile =
+        filename.starts_with("uci_time_profile_v") && filename.ends_with(".json");
+    const bool descriptive_time_profile =
+        extension == ".json" && filename.find("profile") != std::string::npos &&
+        (filename.find("timing") != std::string::npos ||
+         filename.find("time") != std::string::npos);
+    if (named_time_profile || descriptive_time_profile) {
         return IndexedAssetKind::timing_profile;
     }
     return std::nullopt;
