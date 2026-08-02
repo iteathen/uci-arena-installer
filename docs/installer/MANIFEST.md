@@ -52,6 +52,24 @@ literally; component ids and filename prefixes never select a resource kind.
 The declaration is read-only evidence and provides no activation or lifecycle
 authority.
 
+Installable knowledge components separately publish an `activation` array. Each
+entry declares `kind`, a safe component-relative `source_path`, the fixed
+`knowledge_root` destination authority, and a safe relative `destination_path`.
+The source must contain digest-listed payload, the destination must remain below
+the Installer-owned knowledge root, resource kinds and destinations must be
+unique, and the same resource must have a matching component-path discovery
+entry. A component name, filename prefix, or consumption capability never grants
+write authority.
+
+Before the first knowledge destination changes, the transaction journal records
+every candidate, prior-destination backup, and expected prior state. Each atomic
+swap is checkpointed. Receipts project the committed result through
+`activated_resources` (`kind`, absolute `path`, and exact `activated_files`) and
+retain the schema-v1 flat `activated_files` union for removal compatibility.
+Inventory and receipt discovery use the resource declaration rather than the
+component id. Normal uninstall preserves these files; explicit purge remains
+digest-aware and ownership-bounded.
+
 `arena_install_catalog_v1` selects immutable components. Each `arena_install_component_v1` manifest is the authority for component identity, target, payload files, entrypoints, dependencies, capabilities, startup ownership, public service contract, data paths, and default model metadata.
 
 Catalog presets and explicit custom selections are the only ordinary component-selection authorities. Named `optional_component_groups` map operator requests to exact component ids. Per-component `default_enabled`, `disable_when_workspace_capacity_unavailable`, and `activation_role` fields control planning without product-name or id-prefix branches. Required suite members therefore belong in a preset or dependency edge; the planner never injects one implicitly.
@@ -73,7 +91,7 @@ size and SHA-256. The authoritative policy values are:
 - `purge: explicit_recursive|exact_identity|empty_only|forbidden`;
 - ownership classes `application_replaceable`, `user_preserved`, `generated`,
   `migrated`, `cache_disposable`, `installer_temporary`,
-  `external_dependency`, and `unknown`.
+  `external_dependency`, and `unknown_policy_controlled`.
 
 Provider workspaces and continuity state are `user_preserved`. External token
 files, in-place books, tablebases, engines, and profiles are
@@ -82,8 +100,8 @@ use exact identity. This is declarative package knowledge; uninstall and purge
 mechanisms contain no Book Forge, Evidence, Lichess, or Manager deletion
 branches.
 
-Legacy receipt `data_paths` and `activated_files` are projected into the same
-ownership contract when preservation evidence is prepared. New
+Legacy receipt `data_paths` and the schema-v1 flat `activated_files` projection
+are projected into the same ownership contract when preservation evidence is prepared. New
 receipt-producing installation paths emit explicit ownership so future
 preservation changes remain data changes rather than removal-control-flow
 branches.

@@ -1005,22 +1005,57 @@ knowledge_assets:
       operational workspace.
     - A user may select download, import an existing directory, or continue in degraded mode.
     - Inventory reports an activated knowledge asset as installed_managed only
-      when an installed-managed receipt owns activation files that still exist
-      under the configured knowledge root with their recorded sizes. Full
-      content integrity remains the verify command's responsibility.
+      when an installed-managed receipt declares that resource kind and owns
+      activation files that still exist under the configured knowledge root
+      with their recorded sizes. Full content integrity remains the verify
+      command's responsibility.
     - Inventory projects a validated saved or bounded-discovery opening-book or
       Syzygy locator into the knowledge summary as detected_unmanaged when no
       installed-managed activation is present. Syzygy counts and bytes cover
       only regular .rtbw and .rtbz files directly inside the selected directory;
       the projection never recurses, follows links, copies, or modifies files.
-    - Dedicated opening_book.* and syzygy.* component identities alone own
-      knowledge-file activation; an engine capability named opening_book or
-      syzygy describes consumption support and never makes the engine payload
-      an activation source.
-    - When a signed opening_book.* or syzygy.* component activates and no
-      explicit saved locator exists, arena-setup transactionally saves the
-      verified activation directory as the selected locator before generating
-      consumer configuration. An explicit imported locator always wins.
+    - Component identity, filename prefixes, and consumption capabilities never
+      grant knowledge-file activation authority. An installable component must
+      publish a validated activation declaration whose resource kind, source,
+      and destination are independent of its component id.
+    - When a signed component activates declared knowledge and no explicit saved
+      locator exists, arena-setup transactionally saves the verified activation
+      directory as the selected locator before generating consumer
+      configuration. An explicit imported locator always wins.
+
+knowledge_activation:
+  component_manifest_contract:
+    field: activation
+    maximum_entries: 4
+    destination_roots: [knowledge_root]
+    kinds: [opening_book, syzygy]
+    required_fields: [kind, source_path, destination_root, destination_path]
+    rules:
+      - Source and destination paths are safe relative paths. Every source
+        contains at least one digest-listed payload file, and each destination
+        is strictly beneath the Installer-owned knowledge root.
+      - Each resource kind and destination is unique within a component. Source
+        and destination trees may not overlap another declaration.
+      - Each activated resource has a matching read-only discovery declaration
+        for the same kind and component-relative source. Discovery remains
+        evidence only and does not grant mutation authority.
+      - The complete activation plan, including prior-destination evidence and
+        rollback locations, is durably journaled before the first destination
+        changes. Each applied destination is checkpointed independently.
+      - Commit cleanup and rollback traverse every declared activation. Rollback
+        removes candidates and new destinations and restores prior destinations
+        in reverse activation order.
+  receipt_contract:
+    field: activated_resources
+    fields: [kind, path, activated_files]
+    rules:
+      - Receipt resource declarations, not component ids, select managed
+        inventory state and installed-resource discovery.
+      - The legacy flat activated_files projection remains during schema v1 for
+        uninstall/purge compatibility and contains the exact union of every
+        activated resource file.
+      - Normal uninstall removes component authority while preserving activated
+        knowledge. Explicit purge remains exact-identity and ownership-aware.
 
 discovery:
   interface: arena_setup_discovery_v1

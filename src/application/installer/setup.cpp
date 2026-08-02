@@ -565,7 +565,7 @@ json stage_file_set(const fs::path& manifest_path, const json& catalog_artifact,
             !within(stage, stage / relative)) {
             throw std::runtime_error("file-set manifest contains an unsafe or duplicate path");
         }
-        if (component_id.rfind("syzygy.", 0) == 0) {
+        if (provider_syzygy) {
             const auto generic = relative.generic_string();
             const auto extension = relative.extension().string();
             if (!generic.starts_with("tablebases/") ||
@@ -632,8 +632,16 @@ json stage_file_set(const fs::path& manifest_path, const json& catalog_artifact,
         component_manifest["discovery"] = json::array(
             {{{"kind", "syzygy"},
               {"locator", {{"source", "component_path"}, {"path", "tablebases"}}}}});
+        component_manifest["activation"] = json::array(
+            {{{"kind", "syzygy"},
+              {"source_path", "tablebases"},
+              {"destination_root", "knowledge_root"},
+              {"destination_path", "tablebases"}}});
     } else if (file_set.contains("discovery")) {
         component_manifest["discovery"] = file_set.at("discovery");
+    }
+    if (!provider_syzygy && file_set.contains("activation")) {
+        component_manifest["activation"] = file_set.at("activation");
     }
     write_json_atomic(stage / "arena-component.json", component_manifest);
     return component_manifest;
@@ -1114,6 +1122,10 @@ struct ValidatedComponentPayload {
 
 bool valid_discovery_kind(std::string_view kind);
 
+bool valid_knowledge_activation_kind(const std::string_view kind) {
+    return kind == "opening_book" || kind == "syzygy";
+}
+
 void validate_provider_installer_integration(const json& manifest,
                                              const std::set<fs::path>& listed_files) {
     if (!manifest.contains("installer_integration")) {
@@ -1369,6 +1381,90 @@ void validate_component_discovery(const json& manifest,
     }
 }
 
+void validate_component_activation(const json& manifest,
+                                    const std::set<fs::path>& listed_files) {
+    if (!manifest.contains("activation")) {
+        return;
+    }
+    const json& declarations = manifest.at("activation");
+    if (!declarations.is_array() || declarations.empty() || declarations.size() > 4) {
+        throw std::runtime_error("component activation declaration is invalid");
+    }
+    const auto overlaps = [](const fs::path& left, const fs::path& right) {
+        const fs::path normalized_left = left.lexically_normal();
+        const fs::path normalized_right = right.lexically_normal();
+        const auto is_prefix = [](const fs::path& prefix, const fs::path& candidate) {
+            auto prefix_it = prefix.begin();
+            auto candidate_it = candidate.begin();
+            for (; prefix_it != prefix.end(); ++prefix_it, ++candidate_it) {
+                if (candidate_it == candidate.end() || *prefix_it != *candidate_it) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        return is_prefix(normalized_left, normalized_right) ||
+               is_prefix(normalized_right, normalized_left);
+    };
+    std::set<std::string> kinds;
+    std::vector<fs::path> sources;
+    std::vector<fs::path> destinations;
+    for (const auto& declaration : declarations) {
+        if (!declaration.is_object() || declaration.size() != 4 ||
+            !declaration.contains("kind") || !declaration.at("kind").is_string() ||
+            !valid_knowledge_activation_kind(declaration.at("kind").get<std::string>()) ||
+            !kinds.insert(declaration.at("kind").get<std::string>()).second ||
+            !declaration.contains("source_path") ||
+            !declaration.at("source_path").is_string() ||
+            declaration.value("destination_root", "") != "knowledge_root" ||
+            !declaration.contains("destination_path") ||
+            !declaration.at("destination_path").is_string()) {
+            throw std::runtime_error("component activation entry is invalid");
+        }
+        const fs::path source =
+            fs::path(declaration.at("source_path").get<std::string>()).lexically_normal();
+        const fs::path destination =
+            fs::path(declaration.at("destination_path").get<std::string>()).lexically_normal();
+        if (!safe_relative_path(source) || !safe_relative_path(destination)) {
+            throw std::runtime_error("component activation path is unsafe");
+        }
+        const std::string source_prefix = source.generic_string() + "/";
+        if (!std::ranges::any_of(listed_files, [&](const fs::path& file) {
+                return file.generic_string().starts_with(source_prefix);
+            })) {
+            throw std::runtime_error("component activation source has no listed payload");
+        }
+        if (std::ranges::any_of(sources, [&](const fs::path& existing) {
+                return overlaps(existing, source);
+            }) ||
+            std::ranges::any_of(destinations, [&](const fs::path& existing) {
+                return overlaps(existing, destination);
+            })) {
+            throw std::runtime_error("component activation paths overlap");
+        }
+        const bool matching_discovery =
+            manifest.contains("discovery") && manifest.at("discovery").is_array() &&
+            std::ranges::any_of(manifest.at("discovery"), [&](const json& discovery) {
+                if (!discovery.is_object() ||
+                    discovery.value("kind", "") != declaration.at("kind").get<std::string>() ||
+                    !discovery.contains("locator") ||
+                    !discovery.at("locator").is_object()) {
+                    return false;
+                }
+                const json& locator = discovery.at("locator");
+                return locator.value("source", "") == "component_path" &&
+                       locator.contains("path") && locator.at("path").is_string() &&
+                       fs::path(locator.at("path").get<std::string>()).lexically_normal() == source;
+            });
+        if (!matching_discovery) {
+            throw std::runtime_error(
+                "component activation has no matching discovery declaration");
+        }
+        sources.push_back(source);
+        destinations.push_back(destination);
+    }
+}
+
 ValidatedComponentPayload validate_component_payload(const fs::path& root,
                                                      const std::string& expected_id,
                                                      const std::string& expected_version) {
@@ -1422,6 +1518,7 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
     }
     validate_provider_installer_integration(manifest, listed_files);
     validate_component_discovery(manifest, listed_files);
+    validate_component_activation(manifest, listed_files);
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
         if (entry.is_symlink()) {
             throw std::runtime_error("component payload contains a symbolic link");
@@ -1467,68 +1564,177 @@ void copy_directory_contents(const fs::path& source, const fs::path& destination
     }
 }
 
-json activate_knowledge(const fs::path& component_root, const json& manifest,
-                        const SetupPaths& paths, const std::string& transaction_id,
-                        const std::string& component_id) {
-    std::optional<std::pair<fs::path, fs::path>> mapping;
-    if (component_id.rfind("opening_book.", 0) == 0) {
-        mapping =
-            std::pair{component_root / "opening_books", paths.knowledge_root / "opening_books"};
-    } else if (component_id.rfind("syzygy.", 0) == 0) {
-        mapping = std::pair{component_root / "tablebases", paths.knowledge_root / "tablebases"};
+json declared_knowledge_resources(const fs::path& component_root, const json& manifest,
+                                  const SetupPaths& paths) {
+    json resources = json::array();
+    for (const auto& declaration : manifest.value("activation", json::array())) {
+        const fs::path source_relative =
+            fs::path(declaration.at("source_path").get<std::string>()).lexically_normal();
+        const fs::path destination_relative =
+            fs::path(declaration.at("destination_path").get<std::string>()).lexically_normal();
+        const fs::path source = normalized_absolute(component_root / source_relative);
+        const fs::path destination = normalized_absolute(paths.knowledge_root / destination_relative);
+        if (!within(component_root, source) || !within(paths.knowledge_root, destination)) {
+            throw std::runtime_error("knowledge activation path escapes its declared root");
+        }
+        json activated_files = json::array();
+        const std::string source_prefix = source_relative.generic_string() + "/";
+        for (const auto& file : manifest.at("files")) {
+            const fs::path relative =
+                fs::path(file.at("path").get<std::string>()).lexically_normal();
+            if (!relative.generic_string().starts_with(source_prefix)) {
+                continue;
+            }
+            const fs::path resource_relative = relative.lexically_relative(source_relative);
+            activated_files.push_back({
+                {"path", normalized_absolute(destination / resource_relative).string()},
+                {"sha256", file.at("sha256")},
+                {"size_bytes", file.at("size_bytes")},
+            });
+        }
+        resources.push_back({
+            {"kind", declaration.at("kind")},
+            {"source_path", source.string()},
+            {"path", destination.string()},
+            {"activated_files", std::move(activated_files)},
+        });
     }
-    if (!mapping.has_value()) {
-        return json::object();
-    }
+    return resources;
+}
 
-    const auto& [source, destination] = *mapping;
-    fs::create_directories(destination.parent_path());
-    const fs::path candidate =
-        destination.parent_path() /
-        (destination.filename().string() + ".staging-" + transaction_id + "-" + component_id);
-    const fs::path backup =
-        destination.parent_path() /
-        (destination.filename().string() + ".rollback-" + transaction_id + "-" + component_id);
-    std::error_code ignored;
-    fs::remove_all(candidate, ignored);
-    fs::remove_all(backup, ignored);
-    std::vector<fs::path> copied_files;
-    if (fs::exists(destination)) {
-        copy_directory_contents(destination, candidate, copied_files);
-        copied_files.clear();
+json plan_knowledge_activation(const fs::path& component_root, const json& manifest,
+                               const SetupPaths& paths, const std::string& transaction_id,
+                               const std::string& component_id) {
+    json plan = declared_knowledge_resources(component_root, manifest, paths);
+    for (auto& activation : plan) {
+        const fs::path source = activation.at("source_path").get<std::string>();
+        const fs::path destination = activation.at("path").get<std::string>();
+        if (!fs::is_directory(source) || contains_symbolic_link(source)) {
+            throw std::runtime_error("knowledge activation source is unavailable or unsafe");
+        }
+        fs::create_directories(destination.parent_path());
+        if (contains_symbolic_link(destination.parent_path()) ||
+            (fs::exists(destination) &&
+             (!fs::is_directory(destination) || contains_symbolic_link(destination)))) {
+            throw std::runtime_error("knowledge activation destination is unsafe");
+        }
+        const std::string suffix = transaction_id + "-" + component_id + "-" +
+                                   activation.at("kind").get<std::string>();
+        activation["candidate_path"] =
+            (destination.parent_path() /
+             (destination.filename().string() + ".staging-" + suffix))
+                .string();
+        activation["backup_path"] =
+            (destination.parent_path() /
+             (destination.filename().string() + ".rollback-" + suffix))
+                .string();
+        activation["had_existing"] = fs::exists(destination);
+        activation["state"] = "planned";
     }
-    copy_directory_contents(source, candidate, copied_files);
-    const bool had_existing = fs::exists(destination);
-    if (had_existing) {
-        fs::rename(destination, backup);
-    }
-    try {
+    return plan;
+}
+
+void apply_knowledge_activation(
+    json& plan, const std::function<void(const json&)>& checkpoint) {
+    for (auto& activation : plan) {
+        const fs::path source = activation.at("source_path").get<std::string>();
+        const fs::path destination = activation.at("path").get<std::string>();
+        const fs::path candidate = activation.at("candidate_path").get<std::string>();
+        const fs::path backup = activation.at("backup_path").get<std::string>();
+        const bool had_existing = activation.at("had_existing").get<bool>();
+        if (fs::exists(destination) != had_existing) {
+            throw std::runtime_error(
+                "knowledge activation destination changed after planning");
+        }
+        std::error_code error;
+        fs::remove_all(candidate, error);
+        if (error) {
+            throw std::runtime_error("cannot clear knowledge activation candidate: " +
+                                     error.message());
+        }
+        fs::remove_all(backup, error);
+        if (error) {
+            throw std::runtime_error("cannot clear knowledge activation rollback path: " +
+                                     error.message());
+        }
+        std::vector<fs::path> copied_files;
+        if (had_existing) {
+            copy_directory_contents(destination, candidate, copied_files);
+            copied_files.clear();
+        }
+        copy_directory_contents(source, candidate, copied_files);
+        activation["state"] = "prepared";
+        checkpoint(plan);
+        if (had_existing) {
+            fs::rename(destination, backup);
+            activation["state"] = "prior_saved";
+            checkpoint(plan);
+        }
         fs::rename(candidate, destination);
-    } catch (...) {
-        if (had_existing && fs::exists(backup) && !fs::exists(destination)) {
-            fs::rename(backup, destination);
-        }
-        throw;
+        activation["state"] = "activated";
+        checkpoint(plan);
     }
+}
 
-    json activated_files = json::array();
-    const std::string manifest_prefix = source.filename().generic_string() + "/";
-    for (const auto& file : manifest.at("files")) {
-        const std::string relative = file.at("path").get<std::string>();
-        if (relative.rfind(manifest_prefix, 0) != 0) {
-            continue;
-        }
-        activated_files.push_back(
-            {{"path", (destination / fs::path(relative.substr(manifest_prefix.size()))).string()},
-             {"sha256", file.at("sha256")},
-             {"size_bytes", file.at("size_bytes")}});
+json receipt_activated_resources(const json& plan) {
+    json resources = json::array();
+    for (const auto& activation : plan) {
+        resources.push_back({
+            {"kind", activation.at("kind")},
+            {"path", activation.at("path")},
+            {"activated_files", activation.at("activated_files")},
+        });
     }
-    return {
-        {"path", destination.string()},
-        {"backup_path", had_existing ? backup.string() : ""},
-        {"had_existing", had_existing},
+    return resources;
+}
+
+json flattened_activated_files(const json& resources) {
+    json files = json::array();
+    for (const auto& resource : resources) {
+        for (const auto& file : resource.at("activated_files")) {
+            files.push_back(file);
+        }
+    }
+    return files;
+}
+
+json expected_receipt_knowledge_resources(const fs::path& active_root, const json& manifest,
+                                          const SetupPaths& paths, const json& receipt) {
+    json declared = declared_knowledge_resources(active_root, manifest, paths);
+    if (!declared.empty()) {
+        return receipt_activated_resources(declared);
+    }
+    json resources = json::array();
+    if (receipt.value("import_mode", "") != "managed_copy") {
+        return resources;
+    }
+    const json declarations = manifest.value("discovery", json::array());
+    const auto discovery = std::ranges::find_if(
+        declarations, [](const json& declaration) {
+            return declaration.is_object() &&
+                   valid_knowledge_activation_kind(declaration.value("kind", "")) &&
+                   declaration.contains("locator") && declaration.at("locator").is_object() &&
+                   declaration.at("locator").value("source", "") == "active_root";
+        });
+    if (discovery == declarations.end() || !within(paths.knowledge_root, active_root)) {
+        return resources;
+    }
+    json activated_files = json::array();
+    for (const auto& file : manifest.at("files")) {
+        const fs::path relative =
+            fs::path(file.at("path").get<std::string>()).lexically_normal();
+        activated_files.push_back({
+            {"path", normalized_absolute(active_root / relative).string()},
+            {"sha256", file.at("sha256")},
+            {"size_bytes", file.at("size_bytes")},
+        });
+    }
+    resources.push_back({
+        {"kind", discovery->at("kind")},
+        {"path", normalized_absolute(active_root).string()},
         {"activated_files", std::move(activated_files)},
-    };
+    });
+    return resources;
 }
 
 std::vector<std::string> selected_ids(const json& catalog, const std::string& preset,
@@ -1597,16 +1803,23 @@ json receipt_rows(const SetupPaths& paths) {
     if (!fs::is_directory(directory) || contains_symbolic_link(directory)) {
         return rows;
     }
+    std::vector<fs::path> receipt_paths;
     for (const auto& entry : fs::directory_iterator(directory)) {
         if (entry.is_regular_file() && !entry.is_symlink() && entry.path().extension() == ".json") {
-            try {
-                rows.push_back(read_json(entry.path()));
-            } catch (const std::exception& error) {
-                rows.push_back({{"schema", "arena_install_receipt_v1"},
-                                {"state", "broken"},
-                                {"receipt", entry.path().string()},
-                                {"error", error.what()}});
-            }
+            receipt_paths.push_back(entry.path());
+        }
+    }
+    std::ranges::sort(receipt_paths, {}, [](const fs::path& path) {
+        return path.filename().generic_string();
+    });
+    for (const auto& receipt_path : receipt_paths) {
+        try {
+            rows.push_back(read_json(receipt_path));
+        } catch (const std::exception& error) {
+            rows.push_back({{"schema", "arena_install_receipt_v1"},
+                            {"state", "broken"},
+                            {"receipt", receipt_path.string()},
+                            {"error", error.what()}});
         }
     }
     return rows;
@@ -1985,8 +2198,41 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             }
             const auto listed_files = manifest_listed_files(manifest);
             validate_component_discovery(manifest, listed_files);
+            validate_component_activation(manifest, listed_files);
+            const json activated_resources =
+                expected_receipt_knowledge_resources(active_root, manifest, paths, receipt);
+            if (receipt.value("activated_resources", json::array()) != activated_resources ||
+                (!activated_resources.empty() &&
+                 receipt.value("activated_files", json::array()) !=
+                     flattened_activated_files(activated_resources))) {
+                throw std::runtime_error(
+                    "receipt knowledge activation evidence does not match the manifest");
+            }
+            std::set<std::string> activated_kinds;
+            for (const auto& resource : activated_resources) {
+                const std::string kind = resource.at("kind").get<std::string>();
+                const fs::path resource_path = resource.at("path").get<std::string>();
+                bool healthy = within(paths.knowledge_root, resource_path) &&
+                               fs::is_directory(resource_path) &&
+                               !contains_symbolic_link(resource_path);
+                for (const auto& file : resource.at("activated_files")) {
+                    const fs::path path = file.at("path").get<std::string>();
+                    healthy = healthy && within(resource_path, path) && fs::is_regular_file(path) &&
+                              !fs::is_symlink(path) &&
+                              fs::file_size(path) == integer_field(file, "size_bytes");
+                }
+                append_discovery_candidate(
+                    rows, seen, kind, "install_receipt", resource_path,
+                    healthy ? state : "broken",
+                    {{"component_id", receipt.value("component_id", "")},
+                     {"component_version", receipt.value("component_version", "")}});
+                activated_kinds.insert(kind);
+            }
             for (const auto& declaration : manifest.value("discovery", json::array())) {
                 const std::string kind = declaration.at("kind").get<std::string>();
+                if (activated_kinds.contains(kind)) {
+                    continue;
+                }
                 const fs::path locator =
                     component_discovery_locator(active_root, manifest, declaration);
                 const bool healthy = fs::exists(locator) && !contains_symbolic_link(locator);
@@ -2807,6 +3053,10 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
         {"state", "installed_managed"},         {"active_root", active_root.string()},
         {"locator_path", active_root.string()}, {"artifact_sha256", fingerprint},
         {"import_mode", "managed_copy"},        {"activated_files", activated_files},
+        {"activated_resources",
+         json::array({{{"kind", "opening_book"},
+                       {"path", normalized_absolute(active_root).string()},
+                       {"activated_files", activated_files}}})},
         {"ownership", std::move(ownership)},
         {"installed_at", current_utc_iso()},
     };
@@ -2825,40 +3075,6 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
         {"_active_root_existed", active_root_existed},
         {"_receipt_existed", receipt_existed},
     };
-}
-
-json managed_knowledge_components(const SetupPaths& paths,
-                                  const std::string_view component_prefix) {
-    json components = json::array();
-    for (const auto& receipt : receipt_rows(paths)) {
-        const std::string component_id = receipt.value("component_id", "");
-        if (receipt.value("schema", "") != "arena_install_receipt_v1" ||
-            receipt.value("state", "") != "installed_managed" ||
-            component_id.rfind(component_prefix, 0) != 0 || !receipt.contains("activated_files") ||
-            !receipt.at("activated_files").is_array() || receipt.at("activated_files").empty()) {
-            continue;
-        }
-        bool present = true;
-        for (const auto& activated : receipt.at("activated_files")) {
-            if (!activated.contains("path") || !activated.at("path").is_string() ||
-                !activated.contains("size_bytes") ||
-                !activated.at("size_bytes").is_number_unsigned()) {
-                present = false;
-                break;
-            }
-            const fs::path path = activated.at("path").get<std::string>();
-            if (!within(paths.knowledge_root, path) || !fs::is_regular_file(path) ||
-                fs::is_symlink(path) ||
-                fs::file_size(path) != integer_field(activated, "size_bytes")) {
-                present = false;
-                break;
-            }
-        }
-        if (present) {
-            components.push_back(component_id);
-        }
-    }
-    return components;
 }
 
 fs::path installed_entrypoint(const fs::path& receipts_root, const std::string& component_id,
@@ -3746,6 +3962,20 @@ json SetupEngine::inventory(const SetupPaths& paths,
           {"dtz_files", 0},
           {"bytes", 0}}},
     };
+    json discovery = discovery_rows(paths, extra_roots, search_index);
+    const auto managed_components = [&discovery](const std::string& kind) {
+        std::set<std::string> ids;
+        for (const auto& candidate : discovery.at(kind).at("candidates")) {
+            if (candidate.value("source", "") == "install_receipt" &&
+                candidate.value("state", "") == "installed_managed" &&
+                candidate.contains("details") && candidate.at("details").is_object() &&
+                candidate.at("details").contains("component_id") &&
+                candidate.at("details").at("component_id").is_string()) {
+                ids.insert(candidate.at("details").at("component_id").get<std::string>());
+            }
+        }
+        return json(ids);
+    };
     const fs::path book_root = paths.knowledge_root / "opening_books";
     const std::array<const char*, 4> book_files{
         "strong_rare_v1.bin",
@@ -3761,11 +3991,6 @@ json SetupEngine::inventory(const SetupPaths& paths,
     if (knowledge["opening_book"]["missing_files"].empty()) {
         knowledge["opening_book"]["state"] = "detected_unmanaged";
         knowledge["opening_book"]["path"] = book_root.string();
-        const json managed = managed_knowledge_components(paths, "opening_book.");
-        if (!managed.empty()) {
-            knowledge["opening_book"]["state"] = "installed_managed";
-            knowledge["opening_book"]["managed_components"] = managed;
-        }
     }
     const fs::path tablebase_root = paths.knowledge_root / "tablebases";
     if (fs::is_directory(tablebase_root) && !contains_symbolic_link(tablebase_root)) {
@@ -3788,43 +4013,57 @@ json SetupEngine::inventory(const SetupPaths& paths,
         if (knowledge["syzygy"]["wdl_files"].get<std::uint64_t>() > 0) {
             knowledge["syzygy"]["state"] = "detected_unmanaged";
             knowledge["syzygy"]["path"] = tablebase_root.string();
-            const json managed = managed_knowledge_components(paths, "syzygy.");
-            if (!managed.empty()) {
-                knowledge["syzygy"]["state"] = "installed_managed";
-                knowledge["syzygy"]["managed_components"] = managed;
-            }
         }
     }
-    json discovery = discovery_rows(paths, extra_roots, search_index);
-    if (knowledge["opening_book"]["state"] == "missing") {
-        const json& selection = discovery.at("opening_book").at("selection");
-        if (selection.value("state", "") != "unresolved" &&
-            selection.value("state", "") != "broken" && selection.contains("path") &&
-            selection.at("path").is_string()) {
+    const json& book_selection = discovery.at("opening_book").at("selection");
+    const bool managed_book_selection =
+        book_selection.value("source", "") == "install_receipt" &&
+        book_selection.value("state", "") == "installed_managed";
+    if (knowledge["opening_book"]["state"] == "missing" || managed_book_selection) {
+        if (book_selection.value("state", "") != "unresolved" &&
+            book_selection.value("state", "") != "broken" &&
+            book_selection.contains("path") && book_selection.at("path").is_string()) {
             try {
-                const fs::path selected = selection.at("path").get<std::string>();
+                const fs::path selected = book_selection.at("path").get<std::string>();
                 knowledge["opening_book"]["validation"] = validate_book_locator(selected);
-                knowledge["opening_book"]["state"] = "detected_unmanaged";
+                knowledge["opening_book"]["state"] =
+                    managed_book_selection ? "installed_managed" : "detected_unmanaged";
                 knowledge["opening_book"]["path"] = normalized_absolute(selected).string();
-                knowledge["opening_book"]["source"] = selection.value("source", "discovered");
+                knowledge["opening_book"]["source"] =
+                    book_selection.value("source", "discovered");
+                if (managed_book_selection && book_selection.contains("details") &&
+                    book_selection.at("details").contains("component_id")) {
+                    knowledge["opening_book"]["managed_components"] =
+                        managed_components("opening_book");
+                }
             } catch (const std::exception&) {
             }
         }
     }
-    if (knowledge["syzygy"]["state"] == "missing") {
-        const json& selection = discovery.at("syzygy").at("selection");
-        if (selection.value("state", "") != "unresolved" &&
-            selection.value("state", "") != "broken" && selection.contains("path") &&
-            selection.at("path").is_string()) {
+    const json& syzygy_selection = discovery.at("syzygy").at("selection");
+    const bool managed_syzygy_selection =
+        syzygy_selection.value("source", "") == "install_receipt" &&
+        syzygy_selection.value("state", "") == "installed_managed";
+    if (knowledge["syzygy"]["state"] == "missing" || managed_syzygy_selection) {
+        if (syzygy_selection.value("state", "") != "unresolved" &&
+            syzygy_selection.value("state", "") != "broken" &&
+            syzygy_selection.contains("path") && syzygy_selection.at("path").is_string()) {
             try {
-                const fs::path selected = selection.at("path").get<std::string>();
+                const fs::path selected = syzygy_selection.at("path").get<std::string>();
                 const json validation = validate_syzygy_locator(selected);
-                knowledge["syzygy"]["state"] = "detected_unmanaged";
+                knowledge["syzygy"]["state"] =
+                    managed_syzygy_selection ? "installed_managed" : "detected_unmanaged";
                 knowledge["syzygy"]["path"] = normalized_absolute(selected).string();
-                knowledge["syzygy"]["source"] = selection.value("source", "discovered");
+                knowledge["syzygy"]["source"] =
+                    syzygy_selection.value("source", "discovered");
                 knowledge["syzygy"]["wdl_files"] = validation.at("wdl_files");
                 knowledge["syzygy"]["dtz_files"] = validation.at("dtz_files");
                 knowledge["syzygy"]["bytes"] = validation.at("bytes");
+                if (managed_syzygy_selection && syzygy_selection.contains("details") &&
+                    syzygy_selection.at("details").contains("component_id")) {
+                    knowledge["syzygy"]["managed_components"] =
+                        managed_components("syzygy");
+                }
             } catch (const std::exception&) {
             }
         }
@@ -4395,21 +4634,28 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["actions"].back()["state"] = "target_activated";
             write_json_atomic(journal_path, journal);
 
-            const json knowledge_activation =
-                activate_knowledge(target, manifest, paths, transaction_id, id);
-            if (!knowledge_activation.empty()) {
-                journal["actions"].back()["knowledge_activation"] = knowledge_activation;
-                const std::string locator_kind =
-                    id.rfind("opening_book.", 0) == 0
-                        ? "opening_book"
-                        : id.rfind("syzygy.", 0) == 0 ? "syzygy" : "";
-                if (!locator_kind.empty()) {
+            json knowledge_activations =
+                plan_knowledge_activation(target, manifest, paths, transaction_id, id);
+            json activated_resources = json::array();
+            json activated_files = json::array();
+            if (!knowledge_activations.empty()) {
+                journal["actions"].back()["knowledge_activations"] = knowledge_activations;
+                write_json_atomic(journal_path, journal);
+                apply_knowledge_activation(
+                    knowledge_activations, [&](const json& checkpoint) {
+                        journal["actions"].back()["knowledge_activations"] = checkpoint;
+                        write_json_atomic(journal_path, journal);
+                    });
+                activated_resources = receipt_activated_resources(knowledge_activations);
+                activated_files = flattened_activated_files(activated_resources);
+                json created_locators = json::array();
+                for (const auto& resource : activated_resources) {
+                    const std::string locator_kind = resource.at("kind").get<std::string>();
                     const fs::path locator_path =
                         paths.data_root / "locators" / (locator_kind + ".json");
                     if (!fs::exists(locator_path)) {
                         const fs::path activation_path =
-                            normalized_absolute(
-                                knowledge_activation.at("path").get<std::string>());
+                            normalized_absolute(resource.at("path").get<std::string>());
                         const json validation =
                             validate_import_locator(locator_kind, activation_path);
                         const json locator{
@@ -4422,11 +4668,12 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             {"saved_at", current_utc_iso()},
                         };
                         write_json_atomic(locator_path, locator);
-                        journal["actions"].back()["created_knowledge_locator"] =
-                            locator_path.string();
+                        created_locators.push_back(locator_path.string());
+                        journal["actions"].back()["created_knowledge_locators"] =
+                            created_locators;
+                        write_json_atomic(journal_path, journal);
                     } else {
-                        static_cast<void>(
-                            saved_locator_path(paths.data_root, locator_kind));
+                        static_cast<void>(saved_locator_path(paths.data_root, locator_kind));
                     }
                 }
                 journal["actions"].back()["state"] = "knowledge_activated";
@@ -4519,8 +4766,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     {"source", "component_data_path"},
                 });
             }
-            for (const auto& activated :
-                 knowledge_activation.value("activated_files", json::array())) {
+            for (const auto& activated : activated_files) {
                 ownership.push_back({
                     {"path", activated.at("path")},
                     {"ownership_class", "generated"},
@@ -4546,7 +4792,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 {"data_paths", std::move(data_paths)},
                 {"ownership", std::move(ownership)},
                 {"configuration_path", configuration_path},
-                {"activated_files", knowledge_activation.value("activated_files", json::array())},
+                {"activated_files", activated_files},
+                {"activated_resources", activated_resources},
             };
             if (!paths.bundle_owner.empty()) {
                 receipt["bundle_owner"] = paths.bundle_owner;
@@ -4595,12 +4842,14 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 fs::remove(action.at("receipt_backup").get<std::string>(), ignored);
                 ignored.clear();
             }
-            if (action.contains("knowledge_activation")) {
-                const std::string backup =
-                    action.at("knowledge_activation").value("backup_path", "");
-                if (!backup.empty()) {
-                    fs::remove_all(backup, ignored);
-                    ignored.clear();
+            for (const auto& activation :
+                 action.value("knowledge_activations", json::array())) {
+                for (const auto field : {"backup_path", "candidate_path"}) {
+                    const std::string path = activation.value(field, "");
+                    if (!path.empty()) {
+                        fs::remove_all(path, ignored);
+                        ignored.clear();
+                    }
                 }
             }
             if (action.contains("configuration_backup")) {
@@ -4620,6 +4869,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     } catch (const std::exception& error) {
         std::error_code rollback_error;
         std::string startup_rollback_failure;
+        std::string knowledge_rollback_failure;
         const auto append_startup_rollback_failure =
             [&startup_rollback_failure](const std::string& failure) {
                 if (!startup_rollback_failure.empty()) {
@@ -4648,21 +4898,61 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             if (preserve_action) {
                 continue;
             }
-            if (action->contains("knowledge_activation")) {
-                const auto& activation = action->at("knowledge_activation");
-                const fs::path destination = activation.at("path").get<std::string>();
-                fs::remove_all(destination, rollback_error);
-                rollback_error.clear();
-                const std::string backup = activation.value("backup_path", "");
-                if (!backup.empty() && fs::exists(backup)) {
-                    fs::rename(backup, destination, rollback_error);
-                    rollback_error.clear();
+            if (action->contains("knowledge_activations")) {
+                const auto& activations = action->at("knowledge_activations");
+                for (auto activation = activations.rbegin(); activation != activations.rend();
+                     ++activation) {
+                    const fs::path destination = activation->at("path").get<std::string>();
+                    const fs::path candidate =
+                        activation->at("candidate_path").get<std::string>();
+                    const fs::path backup = activation->at("backup_path").get<std::string>();
+                    const bool candidate_existed = fs::exists(candidate);
+                    fs::remove_all(candidate, rollback_error);
+                    if (rollback_error) {
+                        knowledge_rollback_failure +=
+                            (knowledge_rollback_failure.empty() ? "" : "; ") +
+                            std::string("cannot remove candidate ") + candidate.string() + ": " +
+                            rollback_error.message();
+                        rollback_error.clear();
+                    }
+                    if (fs::exists(backup)) {
+                        fs::remove_all(destination, rollback_error);
+                        if (rollback_error) {
+                            knowledge_rollback_failure +=
+                                (knowledge_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot clear destination ") + destination.string() +
+                                ": " + rollback_error.message();
+                            rollback_error.clear();
+                            continue;
+                        }
+                        fs::rename(backup, destination, rollback_error);
+                        if (rollback_error) {
+                            knowledge_rollback_failure +=
+                                (knowledge_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot restore destination ") + destination.string() +
+                                ": " + rollback_error.message();
+                            rollback_error.clear();
+                        }
+                    } else if (!activation->value("had_existing", false) &&
+                               (activation->value("state", "planned") == "activated" ||
+                                (activation->value("state", "planned") == "prepared" &&
+                                 !candidate_existed))) {
+                        fs::remove_all(destination, rollback_error);
+                        if (rollback_error) {
+                            knowledge_rollback_failure +=
+                                (knowledge_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot remove new destination ") +
+                                destination.string() + ": " + rollback_error.message();
+                            rollback_error.clear();
+                        }
+                    }
                 }
             }
-            if (action->contains("created_knowledge_locator")) {
-                fs::remove(
-                    action->at("created_knowledge_locator").get<std::string>(),
-                    rollback_error);
+            const json created_locators =
+                action->value("created_knowledge_locators", json::array());
+            for (auto locator = created_locators.rbegin(); locator != created_locators.rend();
+                 ++locator) {
+                fs::remove(locator->get<std::string>(), rollback_error);
                 rollback_error.clear();
             }
             if (state != "staging" && action->contains("target")) {
@@ -4735,13 +5025,22 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             }
         }
         fs::remove_all(staging_root / transaction_id, rollback_error);
-        journal["state"] = startup_rollback_failure.empty() ? "rolled_back" : "rollback_failed";
-        journal["error"] = startup_rollback_failure.empty()
-                               ? error.what()
-                               : std::string(error.what()) +
-                                     "; startup rollback failed: " + startup_rollback_failure;
-        write_json_atomic(journal_path, journal);
+        std::string rollback_failure;
         if (!startup_rollback_failure.empty()) {
+            rollback_failure = "startup: " + startup_rollback_failure;
+        }
+        if (!knowledge_rollback_failure.empty()) {
+            rollback_failure += (rollback_failure.empty() ? "" : "; ") +
+                                std::string("knowledge activation: ") +
+                                knowledge_rollback_failure;
+        }
+        journal["state"] = rollback_failure.empty() ? "rolled_back" : "rollback_failed";
+        journal["error"] = rollback_failure.empty()
+                               ? error.what()
+                               : std::string(error.what()) + "; rollback failed: " +
+                                     rollback_failure;
+        write_json_atomic(journal_path, journal);
+        if (!rollback_failure.empty()) {
             throw std::runtime_error(journal.at("error").get<std::string>());
         }
         throw;
@@ -4776,6 +5075,15 @@ json SetupEngine::verify(const SetupPaths& paths) {
                  receipt.at("service_contract") != *validated.service_contract)) {
                 throw std::runtime_error(
                     "installed service contract receipt evidence does not match the payload");
+            }
+            const json expected_resources = expected_receipt_knowledge_resources(
+                receipt.at("active_root").get<std::string>(), validated.manifest, paths, receipt);
+            if (receipt.value("activated_resources", json::array()) != expected_resources ||
+                (!expected_resources.empty() &&
+                 receipt.value("activated_files", json::array()) !=
+                     flattened_activated_files(expected_resources))) {
+                throw std::runtime_error(
+                    "installed knowledge activation receipt evidence does not match the payload");
             }
             for (const auto& activated : receipt.value("activated_files", json::array())) {
                 const fs::path path = activated.at("path").get<std::string>();

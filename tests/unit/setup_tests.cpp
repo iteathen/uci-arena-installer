@@ -921,36 +921,6 @@ TEST_CASE("inventory reports actionable missing and present knowledge assets") {
     REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "detected_unmanaged");
     REQUIRE(inventory.at("knowledge").at("syzygy").at("wdl_files") == 1);
 
-    const fs::path receipts = paths.data_root / "receipts";
-    fs::create_directories(receipts);
-    const auto activated = [](const fs::path& path) {
-        return json{
-            {"path", path.string()},
-            {"size_bytes", fs::file_size(path)},
-            {"sha256", std::string(64, '0')},
-        };
-    };
-    std::ofstream(receipts / "opening_book.standard.json")
-        << json{
-               {"schema", "arena_install_receipt_v1"},
-               {"component_id", "opening_book.standard"},
-               {"state", "installed_managed"},
-               {"activated_files",
-                json::array({activated(book_root / "strong_rare_v1.bin")})},
-           }
-               .dump();
-    std::ofstream(receipts / "syzygy.wdl.3-4-5.json")
-        << json{
-               {"schema", "arena_install_receipt_v1"},
-               {"component_id", "syzygy.wdl.3-4-5"},
-               {"state", "installed_managed"},
-               {"activated_files",
-                json::array({activated(tablebase_root / "KQvK.rtbw")})},
-           }
-               .dump();
-    inventory = SetupEngine::inventory(paths);
-    REQUIRE(inventory.at("knowledge").at("opening_book").at("state") == "installed_managed");
-    REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "installed_managed");
     fs::remove_all(root);
 }
 
@@ -958,16 +928,15 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     const fs::path root = temporary_directory();
     SetupPaths paths = paths_under(root);
     paths.bundle_owner = "{11111111-1111-1111-1111-111111111111}";
-    constexpr const char* manifest_digest =
-        "e23ab1788826a7bb5ef78e29553aadf1e429a9b2fccecf2087c6ca9beaa4f447";
-    constexpr const char* manifest =
-        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"syzygy.wdl.3-4-5","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
+    constexpr const char* component_id = "replacement.tables";
+    const std::string manifest =
+        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"replacement.tables","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
     std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
     std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
 
     const json artifact{
         {"type", "file_set"},        {"source", "syzygy.file-set.json"},
-        {"sha256", manifest_digest}, {"size_bytes", 312},
+        {"sha256", sha256_text(manifest)}, {"size_bytes", manifest.size()},
         {"file_count", 1},           {"total_size_bytes", 11},
     };
     const json plan{
@@ -976,7 +945,7 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
         {"offline", true},
         {"catalog_directory", root.string()},
         {"actions", json::array({{{"action", "install"},
-                                  {"component_id", "syzygy.wdl.3-4-5"},
+                                  {"component_id", component_id},
                                   {"version", "1.0.0"},
                                   {"enabled", true},
                                   {"artifact", artifact}}})},
@@ -984,6 +953,13 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     const json applied = SetupEngine::apply(json::object(), plan, paths, true, false);
     REQUIRE(applied.at("state") == "committed");
     REQUIRE(applied.at("components").at(0).at("bundle_owner") == paths.bundle_owner);
+    REQUIRE(applied.at("components").at(0).at("component_id") == component_id);
+    REQUIRE(applied.at("components").at(0).at("activated_resources").at(0).at("kind") ==
+            "syzygy");
+    const json inventory = SetupEngine::inventory(paths);
+    REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "installed_managed");
+    REQUIRE(inventory.at("knowledge").at("syzygy").at("managed_components") ==
+            json::array({component_id}));
     REQUIRE(fs::is_regular_file(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
     REQUIRE(fs::file_size(paths.knowledge_root / "tablebases" / "KQvK.rtbw") == 11);
     const fs::path locator_path = paths.data_root / "locators" / "syzygy.json";
@@ -994,7 +970,17 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     REQUIRE(fs::path(locator.at("path").get<std::string>()) ==
             fs::absolute(paths.knowledge_root / "tablebases").lexically_normal());
     locator_stream.close();
-    REQUIRE(SetupEngine::verify(paths).at("ok") == true);
+    const json verified = SetupEngine::verify(paths);
+    INFO(verified.dump(2));
+    REQUIRE(verified.at("ok") == true);
+    const json uninstall_plan = SetupEngine::plan_uninstall(paths, {component_id});
+    const json uninstall = SetupEngine::uninstall(paths, uninstall_plan, true);
+    REQUIRE(uninstall.at("components").size() == 1);
+    REQUIRE(fs::is_regular_file(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
+    REQUIRE(fs::is_regular_file(locator_path));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts" /
+                             (std::string(component_id) + ".json")));
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id / "1.0.0"));
 
     fs::remove_all(root);
 }
@@ -1002,8 +988,8 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
 TEST_CASE("file-set catalog totals fail closed before activation") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    constexpr const char* manifest =
-        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"syzygy.wdl.3-4-5","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
+    const std::string manifest =
+        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"opening_book.misleading","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
     std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
     std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
     const json plan{
@@ -1012,21 +998,74 @@ TEST_CASE("file-set catalog totals fail closed before activation") {
         {"offline", true},
         {"catalog_directory", root.string()},
         {"actions", json::array({{{"action", "install"},
-                                  {"component_id", "syzygy.wdl.3-4-5"},
+                                  {"component_id", "opening_book.misleading"},
                                   {"version", "1.0.0"},
                                   {"enabled", true},
                                   {"artifact",
                                    {{"type", "file_set"},
                                     {"source", "syzygy.file-set.json"},
-                                    {"sha256", "e23ab1788826a7bb5ef78e29553aadf1e429a9b2fcc"
-                                               "ecf2087c6ca9beaa4f447"},
-                                    {"size_bytes", 312},
+                                     {"sha256", sha256_text(manifest)},
+                                     {"size_bytes", manifest.size()},
                                     {"file_count", 1},
                                     {"total_size_bytes", 12}}}}})},
     };
     REQUIRE_THROWS(SetupEngine::apply(json::object(), plan, paths, true, false));
     REQUIRE_FALSE(fs::exists(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
     REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "syzygy.json"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("later failure restores prior knowledge and removes activation authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path tablebases = paths.knowledge_root / "tablebases";
+    fs::create_directories(tablebases);
+    std::ofstream(tablebases / "existing.rtbw", std::ios::binary) << "operator-state";
+    const std::string manifest =
+        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"replacement.tables","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
+    std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
+    std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array(
+             {{{"action", "install"},
+               {"component_id", "replacement.tables"},
+               {"version", "1.0.0"},
+               {"enabled", true},
+               {"artifact",
+                {{"type", "file_set"},
+                 {"source", "syzygy.file-set.json"},
+                 {"sha256", sha256_text(manifest)},
+                 {"size_bytes", manifest.size()},
+                 {"file_count", 1},
+                 {"total_size_bytes", 11}}}},
+              {{"action", "install"},
+               {"component_id", "later.failure"},
+               {"version", "1.0.0"},
+               {"enabled", true},
+               {"artifact",
+                {{"type", "file_set"},
+                 {"source", "missing.file-set.json"},
+                 {"sha256", std::string(64, '0')},
+                 {"size_bytes", 1},
+                 {"file_count", 1},
+                 {"total_size_bytes", 1}}}}})},
+    };
+    REQUIRE_THROWS(SetupEngine::apply(json::object(), plan, paths, true, false));
+    REQUIRE(fs::is_regular_file(tablebases / "existing.rtbw"));
+    std::ifstream prior(tablebases / "existing.rtbw", std::ios::binary);
+    REQUIRE(std::string(std::istreambuf_iterator<char>(prior),
+                        std::istreambuf_iterator<char>()) == "operator-state");
+    prior.close();
+    REQUIRE_FALSE(fs::exists(tablebases / "KQvK.rtbw"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "syzygy.json"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts" / "replacement.tables.json"));
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / "replacement.tables" /
+                             "1.0.0"));
     fs::remove_all(root);
 }
 
@@ -1420,6 +1459,42 @@ TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
     fs::remove_all(root);
 }
 
+TEST_CASE("component names do not grant knowledge activation authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string payload = "ordinary";
+    const std::string manifest =
+        std::string(R"({"schema":"arena_install_file_set_v1","schema_version":1,"component_id":"syzygy.misleading","component_version":"1.0.0","total_size_bytes":8,"files":[{"path":"payload.dat","size_bytes":8,"sha256":")") +
+        sha256_text(payload) + R"(","source":"payload.dat"}]})";
+    std::ofstream(root / "payload.dat", std::ios::binary) << payload;
+    std::ofstream(root / "generic.file-set.json", std::ios::binary) << manifest;
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions", json::array({{{"action", "install"},
+                                  {"component_id", "syzygy.misleading"},
+                                  {"version", "1.0.0"},
+                                  {"enabled", true},
+                                  {"artifact",
+                                   {{"type", "file_set"},
+                                    {"source", "generic.file-set.json"},
+                                    {"sha256", sha256_text(manifest)},
+                                    {"size_bytes", manifest.size()},
+                                    {"file_count", 1},
+                                    {"total_size_bytes", payload.size()}}}}})},
+    };
+    const json applied = SetupEngine::apply(json::object(), plan, paths, true, false);
+    REQUIRE(applied.at("components").at(0).at("activated_resources").empty());
+    REQUIRE_FALSE(fs::exists(paths.knowledge_root / "tablebases" / "payload.dat"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "syzygy.json"));
+    const json verified = SetupEngine::verify(paths);
+    INFO(verified.dump(2));
+    REQUIRE(verified.at("ok") == true);
+    fs::remove_all(root);
+}
+
 TEST_CASE("Book Forge credential recovery accepts only typed ready responses") {
     const auto ready = assess_book_forge_credential_recovery({
         {"ok", true},
@@ -1770,6 +1845,8 @@ TEST_CASE("managed copy is restricted to small flat opening books") {
     const json inventory = SetupEngine::inventory(paths);
     REQUIRE(inventory.at("discovery").at("opening_book").at("selection").at("source") ==
             "install_receipt");
+    REQUIRE(inventory.at("knowledge").at("opening_book").at("state") ==
+            "installed_managed");
     const fs::path managed_root = imported.at("path").get<std::string>();
     const std::string managed_id =
         imported.at("receipt").at("component_id").get<std::string>();

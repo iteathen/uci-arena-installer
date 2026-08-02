@@ -36,6 +36,11 @@ Required scenarios:
 - post-install health success and failure;
 - arbitrary component identities exercising declarative selection, default
   activation, capacity policy, and knowledge accounting without engine changes;
+- declarative knowledge activation with an unrelated component identity,
+  misleading knowledge-shaped identity without activation authority, bounded
+  source/destination validation, receipt-consistent managed inventory, prior
+  destination restoration after later failure, and normal-uninstall
+  preservation after receipt and binary authority are removed;
 - cleanup after success and failure;
 - Manager artifact byte/manifest mismatch and version-drift rejection before
   MSI generation;
