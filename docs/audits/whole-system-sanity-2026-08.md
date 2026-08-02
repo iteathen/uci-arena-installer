@@ -101,6 +101,24 @@ specifications and before inspecting the provider implementation.
 | Status and startup | Startup registration, desired state, live process identity, stream health, readiness, slot occupancy, and blockers are distinct. Stale runtime files never imply activity, and one provider daemon owns one workspace. |
 | Release artifact | The component archive contains only the declared runtime closure and provider-owned contracts, carries exact inventory/digests/provenance, contains no test simulator or credential material, and is independently consumable by Installer. |
 
+### Frozen Book Forge seam expectations
+
+These provider-specific expectations were recorded after reading the governing
+specifications and before inspecting the provider implementation.
+
+| Seam | Expected answer before implementation inspection |
+|---|---|
+| Acquisition | Explorer requests are bounded, single-flight, rate-limited, abortable within two seconds of resource revocation, validated before atomic replacement, and cannot double-count PGN observations in the authoritative overlap domain. |
+| Credential gate | Only the Explorer transport adapter reads an explicitly supplied external token file. Tests, release tools, Manager operations, status, logs, receipts, and package construction never read, hash, copy, or expose credential contents. |
+| Durable workspace | Observation shards, source lifecycle, analysis evidence, snapshots, publication history, configuration, and control state are provider-owned persistent data outside immutable binaries and survive repair, upgrade, and normal uninstall. Retained data does not imply installed or running authority. |
+| Analysis | Persistent Stockfish workers pass `uciok`, `readyok`, required-option, and legal `bestmove` interrogation; analysis cache reuse is bound to exact engine, NNUE, option, and node-tier identity; failures clean up workers and remain recoverable at a cycle boundary. |
+| Publication | Integration and qualified channels have distinct authority. Every snapshot is deterministic, immutable, legal, digest-bound, mutually validated, atomically activated, rollback-safe, and retention-bounded; fixture data can never become strength-qualified. |
+| Resource control | Heavy ingestion, Stockfish analysis, and maintenance require the shared fair background lease. Foreground work revokes background authority promptly; courtesy acquisition/status/publication remain available without competing for heavy authority; no GPU work is introduced. |
+| Manager boundary | Manager discovers a fixed typed CLI-JSON API only from a verified component manifest, consumes bounded status/config/output envelopes, and never opens the Book Forge catalog, scans its workspace, infers snapshots from filenames, or invokes arbitrary commands. |
+| Output discovery | Listing validates at most the current immutable snapshot per channel and uses a catalog-derived cursor. Exact inspection addresses one output id with latency independent of retained history; paths are normalized and bounded to the declared snapshot root. |
+| Startup and health | One daemon lock owns one workspace. Per-user Windows and Linux startup registrations use the installed package root, have no secret values, distinguish registration from live fresh health, and uninstall only startup authority and evidence. |
+| Release artifact | Service and bootstrap-book artifacts contain only declared runtime files and contracts, exact inventories/digests/SBOM/test receipts/provenance, no source-tree dependency, no credentials, and no suite-composition authority. |
+
 ## Required question ledger
 
 The final ledger follows all 37 operator-supplied sections in order. Each
