@@ -100,6 +100,28 @@ named dependency runtime and entrypoint. A dependency-runtime declaration must
 match a component dependency; executable suffixes and provider identities are
 never interpreter-selection policy.
 
+## Provider-owned installation integration
+
+An installable provider that needs generated configuration declares one
+`arena_provider_installer_integration_v1` object. It names a payload-owned
+renderer entrypoint, the exact dependency runtime used to invoke it, its
+workspace, whether disabled installation still produces safe configuration,
+and bounded dependency and saved-locator bindings.
+
+Installer passes one `arena_provider_install_context_v1` document. The context
+contains only receipt-verified roots or entrypoints and validated locator paths;
+it never contains credential contents. The provider returns one closed
+`arena_provider_install_result_v1` document containing its configuration and
+at most sixteen workspace-relative JSON documents. Provider field meanings,
+model semantics, profile compatibility, and default policy remain inside the
+provider renderer.
+
+Installer owns invocation, path validation, atomic writes, journaling,
+verification, and reverse-order rollback. Saving a locator reruns only the
+installed renderers that declared that locator kind. Thus a new provider or a
+new provider-private configuration field changes package data and provider
+code, not Installer component-id branches.
+
 Before mutation, validation requires:
 
 - supported schema major and target;

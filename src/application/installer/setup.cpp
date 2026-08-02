@@ -25,7 +25,6 @@
 #include <tuple>
 
 #include "arena/adapters/uci_process.hpp"
-#include "arena/application/installer/credential_recovery.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/process_supervisor.hpp"
 #include "arena/ports/asset_search_index.hpp"
@@ -1170,6 +1169,123 @@ struct ValidatedComponentPayload {
     std::optional<json> service_contract;
 };
 
+bool valid_discovery_kind(std::string_view kind);
+
+void validate_provider_installer_integration(const json& manifest,
+                                             const std::set<fs::path>& listed_files) {
+    if (!manifest.contains("installer_integration")) {
+        return;
+    }
+    const json& integration = manifest.at("installer_integration");
+    if (!integration.is_object() || integration.size() != 9 ||
+        integration.value("schema", "") != "arena_provider_installer_integration_v1" ||
+        integration.value("schema_version", 0) != 1 ||
+        !integration.contains("entrypoint") ||
+        !integration.at("entrypoint").is_string() ||
+        !valid_identifier(integration.at("entrypoint").get<std::string>()) ||
+        integration.value("arguments", json::array()) != json::array({"--context"}) ||
+        !integration.contains("workspace_name") ||
+        !integration.at("workspace_name").is_string() ||
+        !valid_identifier(integration.at("workspace_name").get<std::string>()) ||
+        integration.value("workspace_name", "") != manifest.value("workspace_name", "") ||
+        !integration.contains("configure_when_disabled") ||
+        !integration.at("configure_when_disabled").is_boolean() ||
+        !integration.contains("dependency_bindings") ||
+        !integration.at("dependency_bindings").is_array() ||
+        integration.at("dependency_bindings").size() > 32 ||
+        !integration.contains("locator_bindings") ||
+        !integration.at("locator_bindings").is_array() ||
+        integration.at("locator_bindings").size() > 32) {
+        throw std::runtime_error("provider installer-integration contract is invalid");
+    }
+    const std::string integration_entrypoint =
+        integration.at("entrypoint").get<std::string>();
+    if (!manifest.contains("entrypoints") ||
+        !manifest.at("entrypoints").contains(integration_entrypoint) ||
+        !manifest.at("entrypoints").at(integration_entrypoint).is_string()) {
+        throw std::runtime_error("provider installer-integration entrypoint is unavailable");
+    }
+    const fs::path integration_relative = fs::path(
+        manifest.at("entrypoints").at(integration_entrypoint).get<std::string>())
+                                               .lexically_normal();
+    if (!safe_relative_path(integration_relative) ||
+        !listed_files.contains(integration_relative)) {
+        throw std::runtime_error("provider installer-integration entrypoint is unlisted");
+    }
+    if (!manifest.contains("dependencies") || !manifest.at("dependencies").is_array()) {
+        throw std::runtime_error("provider installer-integration dependencies are unavailable");
+    }
+    std::set<std::string> dependencies;
+    for (const auto& dependency : manifest.at("dependencies")) {
+        if (!dependency.is_string() ||
+            !valid_identifier(dependency.get_ref<const std::string&>()) ||
+            !dependencies.insert(dependency.get<std::string>()).second) {
+            throw std::runtime_error("component dependency declaration is invalid");
+        }
+    }
+    const json& invocation = integration.at("invocation");
+    if (!invocation.is_object() || invocation.size() != 3 ||
+        invocation.value("kind", "") != "dependency_runtime" ||
+        !invocation.contains("runtime_component_id") ||
+        !invocation.at("runtime_component_id").is_string() ||
+        !invocation.contains("runtime_entrypoint") ||
+        !invocation.at("runtime_entrypoint").is_string() ||
+        !valid_identifier(invocation.at("runtime_component_id").get<std::string>()) ||
+        !valid_identifier(invocation.at("runtime_entrypoint").get<std::string>()) ||
+        !dependencies.contains(invocation.at("runtime_component_id").get<std::string>())) {
+        throw std::runtime_error("provider installer-integration invocation is invalid");
+    }
+    std::set<std::string> binding_names;
+    for (const auto& binding : integration.at("dependency_bindings")) {
+        if (!binding.is_object() || !binding.contains("name") ||
+            !binding.at("name").is_string() ||
+            !valid_identifier(binding.at("name").get<std::string>()) ||
+            !binding_names.insert(binding.at("name").get<std::string>()).second ||
+            !binding.contains("component_id") ||
+            !binding.at("component_id").is_string() ||
+            !valid_identifier(binding.at("component_id").get<std::string>()) ||
+            !binding.contains("required") || !binding.at("required").is_boolean()) {
+            throw std::runtime_error("provider installer dependency binding is invalid");
+        }
+        const std::string source = binding.value("source", "");
+        if (source == "entrypoint") {
+            if (binding.size() != 5 || !binding.contains("entrypoint") ||
+                !binding.at("entrypoint").is_string() ||
+                !valid_identifier(binding.at("entrypoint").get<std::string>())) {
+                throw std::runtime_error(
+                    "provider installer entrypoint binding is invalid");
+            }
+        } else if (source == "component_path") {
+            if (binding.size() != 5 || !binding.contains("path") ||
+                !binding.at("path").is_string() ||
+                !safe_relative_path(binding.at("path").get<std::string>())) {
+                throw std::runtime_error("provider installer path binding is invalid");
+            }
+        } else if (source != "active_root" || binding.size() != 4) {
+            throw std::runtime_error("provider installer dependency source is invalid");
+        }
+        if (binding.at("required").get<bool>() &&
+            !dependencies.contains(binding.at("component_id").get<std::string>())) {
+            throw std::runtime_error(
+                "required provider installer binding is not a component dependency");
+        }
+    }
+    std::set<std::string> locator_names;
+    std::set<std::string> locator_kinds;
+    for (const auto& binding : integration.at("locator_bindings")) {
+        if (!binding.is_object() || binding.size() != 3 ||
+            !binding.contains("name") || !binding.at("name").is_string() ||
+            !valid_identifier(binding.at("name").get<std::string>()) ||
+            !locator_names.insert(binding.at("name").get<std::string>()).second ||
+            !binding.contains("kind") || !binding.at("kind").is_string() ||
+            !valid_discovery_kind(binding.at("kind").get<std::string>()) ||
+            !locator_kinds.insert(binding.at("kind").get<std::string>()).second ||
+            !binding.contains("required") || !binding.at("required").is_boolean()) {
+            throw std::runtime_error("provider installer locator binding is invalid");
+        }
+    }
+}
+
 ValidatedComponentPayload validate_component_payload(const fs::path& root,
                                                      const std::string& expected_id,
                                                      const std::string& expected_version) {
@@ -1221,6 +1337,7 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
                 "component configuration template is unsafe or unlisted");
         }
     }
+    validate_provider_installer_integration(manifest, listed_files);
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
         if (entry.is_symlink()) {
             throw std::runtime_error("component payload contains a symbolic link");
@@ -2689,317 +2806,147 @@ std::optional<fs::path> saved_locator_path(const fs::path& data_root, const std:
     return path;
 }
 
-json timing_profile_uci_options(const json& profile) {
-    const json search = profile.at("identity").at("search");
-    json options = search.value("extra_engine_options", json::object());
-    if (!options.is_object()) {
-        throw std::runtime_error("timing profile extra engine options are invalid");
-    }
-    options["SearchCore"] = search.at("search_core");
-    options["Threads"] = search.at("threads");
-    options["RootWorkers"] = search.at("root_workers");
-    options["V2SplitDepth"] = search.at("split_depth");
-    options["BackgroundSearch"] = search.at("background_search");
-    options["NNSpeculation"] = search.at("nn_speculation");
-    options["NNBatchSize"] = search.at("batch_size_effective");
-    options["NNBatchWaitUs"] = search.at("batch_wait_us_effective");
-    options["OnnxProvider"] = search.at("provider_effective");
-    return options;
-}
+struct ProviderInstallResult {
+    json configuration;
+    json generated_documents;
+};
 
-std::string installed_engine_sha256(const fs::path& engine) {
-    if (!fs::is_regular_file(engine) || contains_symbolic_link(engine)) {
-        throw std::runtime_error("installed UCI Arena engine is unavailable");
-    }
-    return "sha256:" + sha256_file(engine);
-}
-
-json installed_checkpoint_identity(const fs::path& model_root) {
-    const fs::path manifest_path = model_root / "checkpoint_manifest.json";
-    if (!fs::is_regular_file(manifest_path) || contains_symbolic_link(manifest_path)) {
-        throw std::runtime_error("installed UCI Arena checkpoint manifest is unavailable");
-    }
-    const json manifest = read_json(manifest_path);
-    const std::string model_id =
-        manifest.value("model_id", manifest.value("active_model_id", ""));
-    const std::string checkpoint_hash = manifest.value("checkpoint_hash", "");
-    if (!valid_identifier(model_id) || checkpoint_hash.size() != 64) {
-        throw std::runtime_error("installed UCI Arena checkpoint identity is incomplete");
-    }
-    return {{"model_id", model_id}, {"checkpoint_hash", checkpoint_hash}};
-}
-
-void require_exact_timing_profile(const json& profile, const std::string& engine_sha256,
-                                  const json& checkpoint) {
-    const json identity = profile.value("identity", json::object());
-    if (profile.value("schema", "") != "uci_time_profile_v3" ||
-        !profile.value("qualified", false) ||
-        identity.value("engine", json::object()).value("executable_sha256", "") !=
-            engine_sha256 ||
-        identity.value("model", json::object()).value("model_id", "") !=
-            checkpoint.at("model_id").get<std::string>()) {
-        throw std::runtime_error(
-            "selected timing profile does not match the exact installed engine and model");
-    }
-}
-
-void require_exact_lichess_profiles(const fs::path& timing_path,
-                                    const fs::path& single_path,
-                                    const fs::path& capacity_path,
-                                    const std::string& engine_sha256,
-                                    const json& checkpoint,
-                                    const std::uint64_t configured_capacity) {
-    const json timing = read_json(timing_path);
-    require_exact_timing_profile(timing, engine_sha256, checkpoint);
-    const json single = read_json(single_path);
-    if (single.value("schema", "") != "uci_arena_single_game_profile_v1" ||
-        !single.value("qualified", false) ||
-        single.value("engine_build_fingerprint", "") != engine_sha256 ||
-        single.value("model_id", "") != checkpoint.at("model_id").get<std::string>() ||
-        single.value("checkpoint_hash", "") !=
-            checkpoint.at("checkpoint_hash").get<std::string>()) {
-        throw std::runtime_error(
-            "selected Lichess single-game profile does not match the exact installed "
-            "engine and model");
-    }
-    const json timing_model = timing.at("identity").at("model");
-    const json timing_provider = timing.at("identity").at("provider");
-    if (single.value("model_fingerprint", "") !=
-            timing_model.value("model_fingerprint", "") ||
-        single.value("adapter_id", "") != timing_model.value("adapter_id", "") ||
-        single.value("provider", "") !=
-            timing.at("identity").at("search").value("provider_effective", "") ||
-        single.value("provider_numeric_fingerprint", "") !=
-            timing_provider.value("provider_numeric_fingerprint", "") ||
-        single.value("hardware_driver_fingerprint", "") !=
-            timing_provider.value("hardware_driver_fingerprint", "") ||
-        single.value("onnx_runtime_version", "") !=
-            timing_provider.value("onnx_runtime_version", "")) {
-        throw std::runtime_error(
-            "selected timing and Lichess single-game profiles have different runtime "
-            "identities");
-    }
-    const json capacity = read_json(capacity_path);
-    if (capacity.value("schema", "") !=
-            "uci_arena_lichess_capacity_profile_v1" ||
-        !capacity.value("qualified", false) ||
-        capacity.value("engine_build_fingerprint", "") != engine_sha256 ||
-        capacity.value("single_game_profile_sha256", "") !=
-            "sha256:" + sha256_file(single_path) ||
-        capacity.value("model_id", "") != single.value("model_id", "") ||
-        capacity.value("model_fingerprint", "") !=
-            single.value("model_fingerprint", "") ||
-        capacity.value("provider", "") != single.value("provider", "") ||
-        capacity.value("provider_numeric_fingerprint", "") !=
-            single.value("provider_numeric_fingerprint", "") ||
-        capacity.value("hardware_driver_fingerprint", "") !=
-            single.value("hardware_driver_fingerprint", "") ||
-        capacity.value("maximum_concurrency", 0ULL) < configured_capacity) {
-        throw std::runtime_error(
-            "selected Lichess capacity profile does not match the exact single-game "
-            "profile and configured capacity");
-    }
-}
-
-json installed_engine_locator_options(const fs::path& data_root) {
-    json options = json::object();
-    if (const auto syzygy = saved_locator_path(data_root, "syzygy"); syzygy.has_value()) {
-        options["SyzygyPath"] = syzygy->string();
-    }
-    const auto opening_book = saved_locator_path(data_root, "opening_book");
-    if (!opening_book.has_value()) {
-        return options;
-    }
-
-    fs::path book_file;
-    if (fs::is_regular_file(*opening_book)) {
-        book_file = *opening_book;
-    } else {
-        const fs::path canonical = *opening_book / "strong_rare_v1.bin";
-        if (fs::is_regular_file(canonical) && !fs::is_symlink(canonical)) {
-            book_file = canonical;
-        } else {
-            std::vector<fs::path> candidates;
-            for (const auto& entry : fs::directory_iterator(*opening_book)) {
-                if (!entry.is_regular_file() || entry.is_symlink()) {
-                    continue;
-                }
-                std::string extension = entry.path().extension().string();
-                std::ranges::transform(extension, extension.begin(),
-                                       [](const unsigned char character) {
-                                           return static_cast<char>(std::tolower(character));
-                                       });
-                if (extension == ".bin" || extension == ".book") {
-                    candidates.push_back(entry.path());
+ProviderInstallResult render_provider_installation(
+    const SetupPaths& paths, const json& manifest, const fs::path& component_root,
+    const fs::path& workspace, const bool enabled) {
+    const json& integration = manifest.at("installer_integration");
+    const fs::path receipts_root = paths.data_root / "receipts";
+    json bindings = json::object();
+    for (const auto& binding : integration.at("dependency_bindings")) {
+        const std::string name = binding.at("name").get<std::string>();
+        const std::string component_id = binding.at("component_id").get<std::string>();
+        const bool required = binding.at("required").get<bool>();
+        try {
+            const std::string source = binding.at("source").get<std::string>();
+            if (source == "entrypoint") {
+                bindings[name] = installed_entrypoint(
+                    receipts_root, component_id,
+                    binding.at("entrypoint").get<std::string>())
+                                     .string();
+            } else {
+                const fs::path active_root =
+                    installed_active_root(receipts_root, component_id);
+                if (source == "active_root") {
+                    bindings[name] = active_root.string();
+                } else {
+                    const fs::path relative = fs::path(
+                        binding.at("path").get<std::string>()).lexically_normal();
+                    const fs::path selected = normalized_absolute(active_root / relative);
+                    if (!within(active_root, selected) || !fs::exists(selected) ||
+                        contains_symbolic_link(selected)) {
+                        throw std::runtime_error(
+                            "installed component-path binding is unavailable: " + name);
+                    }
+                    bindings[name] = selected.string();
                 }
             }
-            std::ranges::sort(candidates);
-            if (candidates.size() != 1) {
-                throw std::runtime_error("opening-book directory is ambiguous; import the intended "
-                                         "book file explicitly");
-            }
-            book_file = candidates.front();
-        }
-    }
-    options["OwnBook"] = true;
-    options["BookFile"] = normalized_absolute(book_file).string();
-    const fs::path stats = book_file.parent_path() / (book_file.stem().string() + ".ffstats");
-    if (fs::is_regular_file(stats) && !fs::is_symlink(stats)) {
-        options["BookStatsFile"] = normalized_absolute(stats).string();
-    }
-    const fs::path policy = book_file.parent_path() / (book_file.stem().string() + ".policy");
-    if (fs::is_regular_file(policy) && !fs::is_symlink(policy)) {
-        options["BookPolicyFile"] = normalized_absolute(policy).string();
-    }
-    return options;
-}
-
-json generated_component_config(const std::string& component_id, const fs::path& receipts_root,
-                                const fs::path& workspace, const fs::path& component_root) {
-    const fs::path data_root = receipts_root.parent_path();
-    if (component_id == "book_forge.service") {
-        json config{
-            {"schema", "uci_arena_book_forge_config_v1"},
-            {"stockfish",
-             installed_entrypoint(receipts_root, "stockfish.engine", "stockfish").string()},
-        };
-        if (const auto token_path = saved_locator_path(data_root, "lichess_token_path");
-            token_path.has_value()) {
-            config["acquisition"] = {{"tokenFile", token_path->string()}};
-        }
-        return config;
-    }
-    if (component_id == "uci_arena_evidence.service") {
-        const fs::path engine = installed_entrypoint(receipts_root, "uci_arena.engine", "uci");
-        const fs::path evidence_runtime =
-            installed_active_root(receipts_root, "uci_arena_evidence.runtime");
-        const fs::path model_root =
-            installed_active_root(receipts_root, "uci_arena.engine") / "models" / "default";
-        if (!fs::is_directory(model_root) || contains_symbolic_link(model_root)) {
-            throw std::runtime_error("installed UCI Arena model root is unavailable");
-        }
-        const std::string engine_sha256 = installed_engine_sha256(engine);
-        json config{
-            {"schema", "uci_arena_evidence_service_config_v1"},
-            {"workspace", workspace.string()},
-            {"runtimeRoot", evidence_runtime.string()},
-            {"activeModelPointer",
-             (workspace / "runtime-models" / "active_model_runtime.json").string()},
-            {"runtimeModelsRoot", (workspace / "runtime-models").string()},
-            {"profileImports", json::array()},
-            {"engine", engine.string()},
-            {"stockfish",
-             installed_entrypoint(receipts_root, "stockfish.engine", "stockfish").string()},
-            {"referee",
-             installed_entrypoint(receipts_root, "uci_arena_evidence.runtime", "referee")
-                 .string()},
-        };
-        if (const auto profile_path = saved_locator_path(data_root, "timing_profile");
-            profile_path.has_value()) {
-            const json profile = read_json(*profile_path);
-            const json identity = profile.at("identity");
-            config["profileImports"].push_back(profile_path->string());
-            config["model_id"] = identity.at("model").at("model_id");
-            config["model_fingerprint"] = identity.at("model").at("model_fingerprint");
-            config["model_root"] = model_root.string();
-            config["provider"] = identity.at("search").at("provider_effective");
-            config["hardware_driver_fingerprint"] =
-                identity.at("provider").value("hardware_driver_fingerprint", "");
-            config["engine_path"] = engine.string();
-            config["engine_sha256"] = engine_sha256;
-            config["uci_options"] = timing_profile_uci_options(profile);
-        }
-        return config;
-    }
-    if (component_id == "lichess.adapter") {
-        const json component_manifest = read_json(component_root / "arena-component.json");
-        fs::path template_relative =
-            fs::path("deploy") / "lichess" / "config.uci_arena.template.yml";
-        if (component_manifest.contains("configuration_template")) {
-            if (!component_manifest.at("configuration_template").is_string()) {
-                throw std::runtime_error(
-                    "installed Lichess adapter configuration-template contract is invalid");
-            }
-            template_relative = fs::path(
-                component_manifest.at("configuration_template").get<std::string>())
-                                    .lexically_normal();
-        }
-        if (!safe_relative_path(template_relative)) {
-            throw std::runtime_error(
-                "installed Lichess adapter configuration-template path is unsafe");
-        }
-        const fs::path template_path = component_root / template_relative;
-        json config = read_json(template_path);
-        if (config.value("schema", "") != "uci_arena_lichess_adapter_v6") {
-            throw std::runtime_error("installed Lichess adapter template is incompatible");
-        }
-        const fs::path engine = installed_entrypoint(receipts_root, "uci_arena.engine", "uci");
-        const fs::path engine_root = installed_active_root(receipts_root, "uci_arena.engine");
-        const fs::path model_root = engine_root / "models" / "default";
-        const std::string engine_sha256 = installed_engine_sha256(engine);
-        const json checkpoint = installed_checkpoint_identity(model_root);
-        config["engine"]["executable"] = engine.string();
-        config["engine"]["working_directory"] = engine_root.string();
-        config["engine"]["uci_options"]["ModelRoot"] = model_root.string();
-        const auto timing_path = saved_locator_path(data_root, "timing_profile");
-        const auto single_path =
-            saved_locator_path(data_root, "lichess_single_game_profile");
-        const auto capacity_path =
-            saved_locator_path(data_root, "lichess_capacity_profile");
-        bool exact_profile_set = false;
-        if (timing_path.has_value() && single_path.has_value() &&
-            capacity_path.has_value()) {
-            try {
-                require_exact_lichess_profiles(
-                    *timing_path, *single_path, *capacity_path, engine_sha256, checkpoint,
-                    config.at("capacity").at("total_slots").get<std::uint64_t>());
-                exact_profile_set = true;
-            } catch (const std::exception&) {
-                // Locator imports are individually transactional. Keep the adapter safely
-                // disabled while an operator replaces a multi-file qualification set.
+        } catch (const std::exception&) {
+            if (required) {
+                throw;
             }
         }
-        if (exact_profile_set) {
-            config["engine"]["time_profile"] = timing_path->string();
-            config["engine"]["single_game_profile"] = single_path->string();
-            config["capacity"]["capacity_profile"] = capacity_path->string();
-        } else {
-            config["engine"].erase("time_profile");
-            config["engine"].erase("single_game_profile");
-            config["capacity"].erase("capacity_profile");
-            config["scheduler"]["enabled"] = false;
-            config["capacity"]["bot"]["target_active"] = 0;
-        }
-        if (const auto profile_path =
-                saved_locator_path(data_root, "lichess_transport_profile");
-            profile_path.has_value()) {
-            config["timing"]["transport_profile_path"] = profile_path->string();
-        }
-        const json locator_options = installed_engine_locator_options(data_root);
-        for (const auto& [name, value] : locator_options.items()) {
-            config["engine"]["uci_options"][name] = value;
-        }
-        return config;
     }
-    return json();
-}
-
-std::optional<json> generated_evidence_active_model_pointer(const json& config) {
-    if (config.value("schema", "") != "uci_arena_evidence_service_config_v1" ||
-        !config.contains("model_id")) {
-        return std::nullopt;
+    json locators = json::object();
+    for (const auto& binding : integration.at("locator_bindings")) {
+        const std::string name = binding.at("name").get<std::string>();
+        const std::string kind = binding.at("kind").get<std::string>();
+        try {
+            const auto selected = saved_locator_path(paths.data_root, kind);
+            if (selected.has_value()) {
+                locators[name] = selected->string();
+            } else if (binding.at("required").get<bool>()) {
+                throw std::runtime_error("required saved locator is unavailable: " + kind);
+            }
+        } catch (const std::exception&) {
+            if (binding.at("required").get<bool>()) {
+                throw;
+            }
+        }
     }
-    return json{
-        {"schema", "arena_installed_active_model_runtime_v1"},
-        {"model_id", config.at("model_id")},
-        {"model_root", config.at("model_root")},
-        {"model_fingerprint", config.at("model_fingerprint")},
-        {"provider", config.at("provider")},
-        {"hardware_driver_fingerprint", config.value("hardware_driver_fingerprint", "")},
-        {"engine_path", config.at("engine_path")},
-        {"engine_sha256", config.at("engine_sha256")},
-        {"uci_options", config.at("uci_options")},
+    const std::string component_id = manifest.at("component_id").get<std::string>();
+    const std::string component_version = manifest.at("component_version").get<std::string>();
+    const json context{
+        {"schema", "arena_provider_install_context_v1"},
+        {"schema_version", 1},
+        {"component",
+         {{"id", component_id},
+          {"version", component_version},
+          {"root", component_root.string()}}},
+        {"workspace", workspace.string()},
+        {"enabled", enabled},
+        {"bindings", std::move(bindings)},
+        {"locators", std::move(locators)},
     };
+    const fs::path context_root = paths.cache_root / "provider-context";
+    fs::create_directories(context_root);
+    if (!within(paths.cache_root, context_root) || contains_symbolic_link(context_root)) {
+        throw std::runtime_error(
+            "provider installer context root contains a symbolic-link boundary");
+    }
+    const auto nonce = std::chrono::system_clock::now().time_since_epoch().count();
+    const fs::path context_path =
+        context_root / (component_id + ".installer-context-" +
+                        std::to_string(nonce) + ".json");
+    if (!within(context_root, context_path) || fs::exists(context_path)) {
+        throw std::runtime_error("provider installer context path is unsafe or occupied");
+    }
+    write_json_atomic(context_path, context);
+    json response;
+    try {
+        const json& invocation = integration.at("invocation");
+        const fs::path runtime = installed_entrypoint(
+            receipts_root, invocation.at("runtime_component_id").get<std::string>(),
+            invocation.at("runtime_entrypoint").get<std::string>());
+        const std::string entrypoint_name =
+            integration.at("entrypoint").get<std::string>();
+        const fs::path renderer = component_root /
+            manifest.at("entrypoints").at(entrypoint_name).get<std::string>();
+        arena::application::ProcessSupervisor process;
+        response = process.run_json(
+            runtime, component_root,
+            {renderer.string(), "--context", context_path.string()},
+            std::chrono::seconds(15));
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(context_path, ignored);
+        throw;
+    }
+    std::error_code ignored;
+    fs::remove(context_path, ignored);
+    if (!response.is_object() || response.size() != 4 ||
+        response.value("schema", "") != "arena_provider_install_result_v1" ||
+        response.value("schema_version", 0) != 1 ||
+        !response.contains("configuration") ||
+        !response.at("configuration").is_object() ||
+        !response.contains("generated_documents") ||
+        !response.at("generated_documents").is_array() ||
+        response.at("generated_documents").size() > 16) {
+        throw std::runtime_error(
+            "provider installer-integration result is incompatible: " + component_id);
+    }
+    std::set<fs::path> generated_paths;
+    for (const auto& generated : response.at("generated_documents")) {
+        if (!generated.is_object() || generated.size() != 2 ||
+            !generated.contains("path") || !generated.at("path").is_string() ||
+            !generated.contains("document") || !generated.at("document").is_object()) {
+            throw std::runtime_error(
+                "provider installer generated-document contract is invalid");
+        }
+        const fs::path relative =
+            fs::path(generated.at("path").get<std::string>()).lexically_normal();
+        if (!safe_relative_path(relative) ||
+            !generated_paths.insert(relative).second ||
+            !within(workspace, workspace / relative)) {
+            throw std::runtime_error(
+                "provider installer generated-document path is unsafe");
+        }
+    }
+    return {response.at("configuration"), response.at("generated_documents")};
 }
 
 struct ImportWrite {
@@ -3008,84 +2955,64 @@ struct ImportWrite {
     json document;
 };
 
-json invoke_book_forge_retry_auth(const SetupPaths& paths, const json& receipt) {
-    if (receipt.value("component_id", "") != "book_forge.service") {
-        throw std::runtime_error("Book Forge credential recovery received the wrong receipt");
-    }
-    const fs::path active_root =
-        normalized_absolute(receipt.at("active_root").get<std::string>());
-    static_cast<void>(validate_component_payload(
-        active_root, "book_forge.service",
-        receipt.at("component_version").get<std::string>()));
-    const fs::path receipts_root = paths.data_root / "receipts";
-    const fs::path node = installed_entrypoint(receipts_root, "node_runtime.private", "node");
-    const fs::path cli = installed_entrypoint(receipts_root, "book_forge.service", "cli");
-    const auto data_paths = receipt.value("data_paths", json::array());
-    const std::string configuration_path = receipt.value("configuration_path", "");
-    if (data_paths.empty() || !data_paths.at(0).is_string() ||
-        configuration_path.empty()) {
-        throw std::runtime_error("Book Forge credential recovery has no managed workspace");
-    }
-    const fs::path workspace =
-        normalized_absolute(data_paths.at(0).get<std::string>());
-    const fs::path configuration = normalized_absolute(configuration_path);
-    if (!within(paths.workspace_root, workspace) ||
-        !within(workspace, configuration) || !fs::is_regular_file(configuration) ||
-        contains_symbolic_link(configuration)) {
-        throw std::runtime_error(
-            "Book Forge credential recovery configuration is unavailable");
-    }
-    arena::application::ProcessSupervisor process;
-    return recover_book_forge_credential(
-        [&] {
-            return process.run_json(
-                node, active_root,
-                {cli.string(), "acquisition", "retry-auth", "--workspace", workspace.string(),
-                 "--config", configuration.string(), "--json"},
-                std::chrono::seconds(10));
-        },
-        3, std::chrono::milliseconds(250));
-}
-
 json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) {
-    std::vector<std::string> affected;
-    if (kind == "timing_profile") {
-        affected = {"uci_arena_evidence.service", "lichess.adapter"};
-    } else if (kind == "opening_book" || kind == "syzygy" ||
-               kind == "lichess_single_game_profile" ||
-               kind == "lichess_capacity_profile" ||
-               kind == "lichess_transport_profile") {
-        affected = {"lichess.adapter"};
-    } else if (kind == "lichess_token_path") {
-        affected = {"book_forge.service"};
-    } else {
-        return json::array();
-    }
-
     const fs::path receipts_root = paths.data_root / "receipts";
     std::vector<ImportWrite> writes;
     std::set<std::string> refreshed_components;
-    for (const auto& component_id : affected) {
-        const fs::path receipt_path = receipts_root / (component_id + ".json");
-        if (!fs::is_regular_file(receipt_path)) {
+    if (!fs::is_directory(receipts_root)) {
+        return json::array();
+    }
+    std::vector<fs::path> receipt_paths;
+    for (const auto& entry : fs::directory_iterator(receipts_root)) {
+        if (entry.is_regular_file() && !entry.is_symlink() &&
+            entry.path().extension() == ".json" &&
+            entry.path().filename().string().find(".rollback-") == std::string::npos) {
+            receipt_paths.push_back(entry.path());
+        }
+    }
+    if (receipt_paths.size() > 256) {
+        throw std::runtime_error("installed receipt inventory exceeds its bounded limit");
+    }
+    std::ranges::sort(receipt_paths);
+    for (const auto& receipt_path : receipt_paths) {
+        json receipt;
+        try {
+            receipt = read_json(receipt_path);
+        } catch (const std::exception&) {
             continue;
         }
-        const json receipt = read_json(receipt_path);
-        const std::string receipt_state =
-            receipt.value("state", "");
-        const bool refresh_disabled_lichess =
-            component_id == "lichess.adapter" &&
-            receipt_state == "installed_disabled";
+        const std::string component_id = receipt.value("component_id", "");
+        const std::string receipt_state = receipt.value("state", "");
         if (receipt.value("schema", "") != "arena_install_receipt_v1" ||
-            receipt.value("component_id", "") != component_id ||
+            !valid_identifier(component_id) ||
             (receipt_state != "installed_managed" &&
-             !refresh_disabled_lichess)) {
+             receipt_state != "installed_disabled") ||
+            !receipt.contains("active_root") ||
+            !receipt.at("active_root").is_string() ||
+            !receipt.contains("component_version") ||
+            !receipt.at("component_version").is_string()) {
             continue;
         }
         const fs::path component_root =
             normalized_absolute(receipt.at("active_root").get<std::string>());
-        static_cast<void>(validate_component_payload(
-            component_root, component_id, receipt.at("component_version").get<std::string>()));
+        ValidatedComponentPayload validated;
+        try {
+            validated = validate_component_payload(
+                component_root, component_id,
+                receipt.at("component_version").get<std::string>());
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!validated.manifest.contains("installer_integration")) {
+            continue;
+        }
+        const json& integration = validated.manifest.at("installer_integration");
+        if (std::ranges::none_of(
+                integration.at("locator_bindings"), [&kind](const json& binding) {
+                    return binding.value("kind", "") == kind;
+                })) {
+            continue;
+        }
         const std::string configured = receipt.value("configuration_path", "");
         if (configured.empty()) {
             throw std::runtime_error("installed consumer has no generated configuration: " +
@@ -3098,19 +3025,21 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
             throw std::runtime_error(
                 "installed consumer configuration escapes the selected workspace");
         }
-        const json generated =
-            generated_component_config(component_id, receipts_root, workspace, component_root);
-        if (const auto pointer = generated_evidence_active_model_pointer(generated);
-            pointer.has_value()) {
-            const fs::path pointer_path =
-                normalized_absolute(generated.at("activeModelPointer").get<std::string>());
-            if (!within(workspace, pointer_path)) {
+        const ProviderInstallResult generated = render_provider_installation(
+            paths, validated.manifest, component_root, workspace,
+            receipt_state == "installed_managed");
+        for (const auto& document : generated.generated_documents) {
+            const fs::path document_path = normalized_absolute(
+                workspace /
+                fs::path(document.at("path").get<std::string>()).lexically_normal());
+            if (!within(workspace, document_path)) {
                 throw std::runtime_error(
-                    "generated Evidence active-model pointer escapes its workspace");
+                    "generated provider document escapes its workspace");
             }
-            writes.push_back({component_id, pointer_path, *pointer});
+            writes.push_back(
+                {component_id, document_path, document.at("document")});
         }
-        writes.push_back({component_id, configuration_path, generated});
+        writes.push_back({component_id, configuration_path, generated.configuration});
         refreshed_components.insert(component_id);
     }
 
@@ -3124,6 +3053,11 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
         std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     try {
         for (const auto& write : writes) {
+            if (contains_symbolic_link(write.path.parent_path()) ||
+                (fs::exists(write.path) && fs::is_symlink(write.path))) {
+                throw std::runtime_error(
+                    "generated import consumer path contains a symbolic-link boundary");
+            }
             fs::create_directories(write.path.parent_path());
             const bool existed = fs::is_regular_file(write.path);
             const fs::path backup = write.path.string() + ".import-rollback-" + transaction_id;
@@ -3138,12 +3072,6 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
                 throw std::runtime_error(
                     "generated import consumer configuration verification failed");
             }
-        }
-        if (kind == "lichess_token_path" &&
-            refreshed_components.contains("book_forge.service") &&
-            fs::is_regular_file(receipts_root / "node_runtime.private.json")) {
-            static_cast<void>(invoke_book_forge_retry_auth(
-                paths, read_json(receipts_root / "book_forge.service.json")));
         }
     } catch (...) {
         std::error_code ignored;
@@ -4356,65 +4284,70 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             json data_paths = json::array();
             json ownership = json::array();
             std::string configuration_path;
-            if (validated.service_contract.has_value() || id == "book_forge.service" ||
-                id == "uci_arena_evidence.service" || id == "lichess.adapter") {
-                std::string workspace_name;
-                if (validated.manifest.contains("workspace_name") &&
-                    validated.manifest.at("workspace_name").is_string()) {
-                    workspace_name =
-                        validated.manifest.at("workspace_name").get<std::string>();
-                    if (!valid_identifier(workspace_name)) {
-                        throw std::runtime_error(
-                            "component workspace name is not a safe identifier");
-                    }
-                } else {
-                    workspace_name = id == "book_forge.service" ? "book-forge"
-                                     : id == "uci_arena_evidence.service"
-                                         ? "evidence-service"
-                                         : "lichess-adapter";
-                }
+            if (validated.manifest.contains("installer_integration")) {
+                const json& integration =
+                    validated.manifest.at("installer_integration");
+                const std::string workspace_name =
+                    integration.at("workspace_name").get<std::string>();
                 const fs::path workspace = paths.workspace_root / workspace_name;
-                if (action.value("enabled", true) ||
-                    id == "lichess.adapter") {
+                const bool enabled = action.value("enabled", true);
+                if (enabled ||
+                    integration.at("configure_when_disabled").get<bool>()) {
                     fs::create_directories(workspace);
+                    if (contains_symbolic_link(workspace)) {
+                        throw std::runtime_error(
+                            "provider workspace contains a symbolic-link boundary");
+                    }
                     arena::platform::grant_manager_workspace_access(
                         workspace, paths.manager_service_access);
                     const fs::path config_path = workspace / "manager-config.json";
                     journal["actions"].back()["configuration_path"] = config_path.string();
                     if (fs::is_regular_file(config_path)) {
+                        if (fs::is_symlink(config_path)) {
+                            throw std::runtime_error(
+                                "provider configuration cannot be a symbolic link");
+                        }
                         const fs::path backup =
                             workspace / ("manager-config.rollback-" + transaction_id + ".json");
                         fs::copy_file(config_path, backup, fs::copy_options::overwrite_existing);
                         journal["actions"].back()["configuration_backup"] = backup.string();
                     }
-                    const json generated_config =
-                        generated_component_config(id, receipts_root, workspace, target);
-                    if (const auto active_pointer =
-                            generated_evidence_active_model_pointer(generated_config);
-                        active_pointer.has_value()) {
-                        const fs::path pointer_path =
-                            generated_config.at("activeModelPointer").get<std::string>();
-                        if (!within(workspace, pointer_path)) {
+                    const ProviderInstallResult generated =
+                        render_provider_installation(
+                            paths, validated.manifest, target, workspace, enabled);
+                    json generated_writes = json::array();
+                    for (const auto& document : generated.generated_documents) {
+                        const fs::path relative =
+                            fs::path(document.at("path").get<std::string>())
+                                .lexically_normal();
+                        const fs::path document_path =
+                            normalized_absolute(workspace / relative);
+                        if (!within(workspace, document_path) ||
+                            contains_symbolic_link(document_path.parent_path())) {
                             throw std::runtime_error(
-                                "generated Evidence active-model pointer escapes its "
-                                "workspace");
+                                "provider generated-document path escapes its workspace");
                         }
-                        fs::create_directories(pointer_path.parent_path());
-                        journal["actions"].back()["active_model_pointer_path"] =
-                            pointer_path.string();
-                        if (fs::is_regular_file(pointer_path)) {
+                        fs::create_directories(document_path.parent_path());
+                        const bool existed = fs::is_regular_file(document_path);
+                        json write{{"path", document_path.string()}, {"existed", existed}};
+                        if (existed) {
+                            if (fs::is_symlink(document_path)) {
+                                throw std::runtime_error(
+                                    "provider generated document cannot replace a link");
+                            }
                             const fs::path backup =
-                                pointer_path.parent_path() /
-                                ("active_model_runtime.rollback-" + transaction_id + ".json");
-                            fs::copy_file(pointer_path, backup,
+                                document_path.string() + ".rollback-" + transaction_id;
+                            fs::copy_file(document_path, backup,
                                           fs::copy_options::overwrite_existing);
-                            journal["actions"].back()["active_model_pointer_backup"] =
-                                backup.string();
+                            write["backup"] = backup.string();
                         }
+                        generated_writes.push_back(std::move(write));
+                        journal["actions"].back()["generated_document_writes"] =
+                            generated_writes;
                         write_json_atomic(journal_path, journal);
-                        write_json_atomic(pointer_path, *active_pointer);
+                        write_json_atomic(document_path, document.at("document"));
                     }
-                    write_json_atomic(config_path, generated_config);
+                    write_json_atomic(config_path, generated.configuration);
                     configuration_path = config_path.string();
                 }
                 data_paths.push_back(workspace.string());
@@ -4463,13 +4396,10 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 receipt["service_contract"] = *validated.service_contract;
             }
             write_json_atomic(receipt_path, receipt);
-            if (action.value("enabled", true) && id == "book_forge.service" &&
-                saved_locator_path(paths.data_root, "lichess_token_path").has_value()) {
-                receipt["credential_recovery"] =
-                    invoke_book_forge_retry_auth(paths, receipt);
-                write_json_atomic(receipt_path, receipt);
-            }
-            if (action.value("enabled", true) && id != "lichess.adapter" &&
+            const bool credential_gated_startup =
+                validated.service_contract.has_value() &&
+                validated.service_contract->value("credential_gated_startup", false);
+            if (action.value("enabled", true) && !credential_gated_startup &&
                 supports_startup_capability(receipt, "startup_install")) {
                 const json startup = invoke_provider_startup(paths, receipt, "install");
                 journal["actions"].back()["startup_installed"] = true;
@@ -4518,9 +4448,13 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 fs::remove(action.at("configuration_backup").get<std::string>(), ignored);
                 ignored.clear();
             }
-            if (action.contains("active_model_pointer_backup")) {
-                fs::remove(action.at("active_model_pointer_backup").get<std::string>(), ignored);
-                ignored.clear();
+            for (const auto& write :
+                 action.value("generated_document_writes", json::array())) {
+                const std::string backup = write.value("backup", "");
+                if (!backup.empty()) {
+                    fs::remove(backup, ignored);
+                    ignored.clear();
+                }
             }
         }
         fs::remove_all(staging_root / transaction_id, ignored);
@@ -4608,15 +4542,21 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     }
                 }
             }
-            if (action->contains("active_model_pointer_path")) {
-                const fs::path pointer = action->at("active_model_pointer_path").get<std::string>();
-                fs::remove(pointer, rollback_error);
-                rollback_error.clear();
-                if (action->contains("active_model_pointer_backup")) {
-                    const fs::path backup =
-                        action->at("active_model_pointer_backup").get<std::string>();
-                    if (fs::exists(backup)) {
-                        fs::rename(backup, pointer, rollback_error);
+            if (action->contains("generated_document_writes")) {
+                const auto& writes = action->at("generated_document_writes");
+                for (auto write = writes.rbegin(); write != writes.rend(); ++write) {
+                    const fs::path path = write->at("path").get<std::string>();
+                    fs::remove(path, rollback_error);
+                    rollback_error.clear();
+                    const std::string backup_value = write->value("backup", "");
+                    if (write->value("existed", false) && !backup_value.empty()) {
+                        const fs::path backup = backup_value;
+                        if (fs::is_regular_file(backup)) {
+                            fs::rename(backup, path, rollback_error);
+                            rollback_error.clear();
+                        }
+                    } else if (!backup_value.empty()) {
+                        fs::remove(backup_value, rollback_error);
                         rollback_error.clear();
                     }
                 }
@@ -4694,21 +4634,29 @@ json SetupEngine::verify(const SetupPaths& paths) {
                     !fs::is_regular_file(configuration) || contains_symbolic_link(configuration)) {
                     throw std::runtime_error("generated component configuration is unavailable");
                 }
-                const json expected = generated_component_config(
-                    receipt.at("component_id").get<std::string>(), paths.data_root / "receipts",
-                    configuration.parent_path(), receipt.at("active_root").get<std::string>());
-                if (read_json(configuration) != expected) {
+                if (!validated.manifest.contains("installer_integration")) {
+                    throw std::runtime_error(
+                        "generated component configuration has no owning integration contract");
+                }
+                const ProviderInstallResult expected = render_provider_installation(
+                    paths, validated.manifest,
+                    receipt.at("active_root").get<std::string>(),
+                    configuration.parent_path(),
+                    receipt.value("state", "") == "installed_managed");
+                if (read_json(configuration) != expected.configuration) {
                     throw std::runtime_error("generated component configuration drifted from its "
                                              "verified installer inputs");
                 }
-                if (const auto expected_pointer = generated_evidence_active_model_pointer(expected);
-                    expected_pointer.has_value()) {
-                    const fs::path pointer = expected.at("activeModelPointer").get<std::string>();
-                    if (!within(configuration.parent_path(), pointer) ||
-                        !fs::is_regular_file(pointer) || contains_symbolic_link(pointer) ||
-                        read_json(pointer) != *expected_pointer) {
-                        throw std::runtime_error("generated Evidence active-model pointer drifted "
-                                                 "from its verified installer inputs");
+                for (const auto& document : expected.generated_documents) {
+                    const fs::path generated_path = normalized_absolute(
+                        configuration.parent_path() /
+                        fs::path(document.at("path").get<std::string>()).lexically_normal());
+                    if (!within(configuration.parent_path(), generated_path) ||
+                        !fs::is_regular_file(generated_path) ||
+                        contains_symbolic_link(generated_path) ||
+                        read_json(generated_path) != document.at("document")) {
+                        throw std::runtime_error(
+                            "provider generated document drifted from its verified inputs");
                     }
                 }
             }

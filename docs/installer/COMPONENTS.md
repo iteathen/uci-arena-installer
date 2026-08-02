@@ -17,6 +17,7 @@
 | Deployment adapter | Atomic activation and replaceable-file operations | Preservation policy |
 | Dependency adapter | Typed platform/tool operations | Arbitrary shell execution |
 | Configuration migrator | Versioned idempotent migrations and receipts | Package acquisition |
+| Provider installation adapter | Versioned context/result invocation, declared dependency and locator binding, bounded workspace writes | Provider configuration semantics, model/profile interpretation, credential contents |
 | Preservation manager | Ownership classes and preserved-data evidence | Deployment mechanics |
 | Removal lifecycle | Typed uninstall/purge plan projection and confirmed commit | Provider startup implementation or provider identity rules |
 | Validators | Independent named observations and remediation | Orchestration |

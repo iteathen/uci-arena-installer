@@ -1,4 +1,6 @@
+#include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 
@@ -32,6 +34,32 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string cli = argv[1];
+    if (std::string_view(argv[2]) == "--context") {
+        std::ifstream input(argv[3], std::ios::binary);
+        if (!input) {
+            return 5;
+        }
+        const nlohmann::json context = nlohmann::json::parse(input);
+        std::cout
+            << nlohmann::json{
+                   {"schema", "arena_provider_install_result_v1"},
+                   {"schema_version", 1},
+                   {"configuration",
+                    {{"schema", "replaceable_provider_configuration_v1"},
+                     {"enabled", context.at("enabled")},
+                     {"bindings", context.at("bindings")},
+                     {"locators", context.at("locators")}}},
+                   {"generated_documents",
+                    nlohmann::json::array(
+                        {{{"path", "generated/context-projection.json"},
+                          {"document",
+                           {{"schema", "replaceable_provider_projection_v1"},
+                            {"locators", context.at("locators")}}}}})},
+               }
+                   .dump()
+            << '\n';
+        return 0;
+    }
     const bool evidence = cli.find("evidence") != std::string::npos;
     const std::string command = argv[2];
     const std::string operation = argv[3];

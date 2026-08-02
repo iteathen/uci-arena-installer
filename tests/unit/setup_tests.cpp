@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <optional>
 #include <sodium.h>
 #include <string>
@@ -80,6 +81,120 @@ std::string sha256_text(const std::string_view value) {
     std::array<char, crypto_hash_sha256_BYTES * 2 + 1> encoded{};
     sodium_bin2hex(encoded.data(), encoded.size(), digest.data(), digest.size());
     return encoded.data();
+}
+
+std::string sha256_path(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    const std::string contents{
+        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    return sha256_text(contents);
+}
+
+void write_mock_renderer_runtime(const SetupPaths& paths) {
+    const fs::path source = ARENA_MOCK_SERVICE_PATH;
+    const fs::path active_root =
+        paths.install_root / "components" / "runtime.host" / "1.0.0";
+    const fs::path relative = fs::path("bin") / source.filename();
+    const fs::path executable = active_root / relative;
+    fs::create_directories(executable.parent_path());
+    fs::create_directories(paths.data_root / "receipts");
+    fs::copy_file(source, executable, fs::copy_options::overwrite_existing);
+    const auto size = fs::file_size(executable);
+    const std::string digest = sha256_path(executable);
+    std::ofstream(active_root / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", "runtime.host"},
+               {"component_version", "1.0.0"},
+               {"entrypoints", {{"execute", relative.generic_string()}}},
+               {"dependencies", json::array()},
+               {"files",
+                json::array({{{"path", relative.generic_string()},
+                              {"size_bytes", size},
+                              {"sha256", digest}}})},
+           }
+               .dump(2);
+    std::ofstream(paths.data_root / "receipts" / "runtime.host.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", "runtime.host"},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array()},
+               {"configuration_path", ""},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+}
+
+fs::path write_mock_renderer_consumer(const SetupPaths& paths,
+                                      const std::string& component_id,
+                                      const std::string& locator_kind) {
+    write_mock_renderer_runtime(paths);
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path renderer = active_root / "installer-integration.fixture";
+    const fs::path workspace = paths.workspace_root / component_id;
+    const fs::path configuration = workspace / "manager-config.json";
+    fs::create_directories(active_root);
+    fs::create_directories(workspace);
+    std::ofstream(renderer, std::ios::binary) << "renderer";
+    const json integration{
+        {"schema", "arena_provider_installer_integration_v1"},
+        {"schema_version", 1},
+        {"entrypoint", "installer_integration"},
+        {"invocation",
+         {{"kind", "dependency_runtime"},
+          {"runtime_component_id", "runtime.host"},
+          {"runtime_entrypoint", "execute"}}},
+        {"arguments", json::array({"--context"})},
+        {"workspace_name", component_id},
+        {"configure_when_disabled", true},
+        {"dependency_bindings", json::array()},
+        {"locator_bindings",
+         json::array({{{"name", "selected"},
+                       {"kind", locator_kind},
+                       {"required", false}}})},
+    };
+    std::ofstream(active_root / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"entrypoints", {{"installer_integration", "installer-integration.fixture"}}},
+               {"dependencies", json::array({"runtime.host"})},
+               {"workspace_name", component_id},
+               {"installer_integration", integration},
+               {"files",
+                json::array({{{"path", "installer-integration.fixture"},
+                              {"size_bytes", 8},
+                              {"sha256", sha256_text("renderer")}}})},
+           }
+               .dump(2);
+    std::ofstream(configuration, std::ios::binary) << R"({"schema":"old"})";
+    std::ofstream(paths.data_root / "receipts" / (component_id + ".json"),
+                  std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_disabled"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array({"runtime.host"})},
+               {"data_paths", json::array({workspace.string()})},
+               {"configuration_path", configuration.string()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    return configuration;
 }
 
 json manager_service_api(
@@ -333,6 +448,8 @@ void write_provider_service_install(const SetupPaths& paths,
     constexpr std::string_view component_version = "1.0.0";
     constexpr std::string_view cli_relative = "provider.mjs";
     constexpr std::string_view cli_contents = "provider";
+    constexpr std::string_view renderer_relative = "installer-integration.mjs";
+    constexpr std::string_view renderer_contents = "renderer";
     constexpr std::string_view contract_relative = "contracts/service-contract.json";
     constexpr std::string_view operations_relative = "contracts/manager-operations.json";
     constexpr std::string_view configuration_relative = "contracts/configuration-schema.json";
@@ -344,6 +461,7 @@ void write_provider_service_install(const SetupPaths& paths,
     fs::create_directories(active_root / "contracts");
     fs::create_directories(paths.data_root / "receipts");
     std::ofstream(active_root / cli_relative, std::ios::binary) << cli_contents;
+    std::ofstream(active_root / renderer_relative, std::ios::binary) << renderer_contents;
 
     const json closed_schema{
         {"$schema", "https://json-schema.org/draft/2020-12/schema"},
@@ -415,23 +533,46 @@ void write_provider_service_install(const SetupPaths& paths,
     json files = json::array(
         {{{"path", cli_relative},
           {"size_bytes", cli_contents.size()},
-          {"sha256", sha256_text(cli_contents)}}});
+          {"sha256", sha256_text(cli_contents)}},
+         {{"path", renderer_relative},
+          {"size_bytes", renderer_contents.size()},
+          {"sha256", sha256_text(renderer_contents)}}});
     for (const auto& [relative, contents] : documents) {
         std::ofstream(active_root / relative, std::ios::binary) << contents;
         files.push_back({{"path", relative.generic_string()},
                          {"size_bytes", contents.size()},
                          {"sha256", sha256_text(contents)}});
     }
+    const json installer_integration{
+        {"schema", "arena_provider_installer_integration_v1"},
+        {"schema_version", 1},
+        {"entrypoint", "installer_integration"},
+        {"invocation",
+         {{"kind", "dependency_runtime"},
+          {"runtime_component_id", "runtime.host"},
+          {"runtime_entrypoint", "execute"}}},
+        {"arguments", json::array({"--context"})},
+        {"workspace_name", "replaceable-provider"},
+        {"configure_when_disabled", false},
+        {"dependency_bindings", json::array()},
+        {"locator_bindings",
+         json::array({{{"name", "timing_profile"},
+                       {"kind", "timing_profile"},
+                       {"required", false}}})},
+    };
     std::ofstream(active_root / "arena-component.json", std::ios::binary)
         << json{
                {"schema", "arena_install_component_v1"},
                {"schema_version", 1},
                {"component_id", component_id},
                {"component_version", component_version},
-               {"entrypoints", {{"cli", cli_relative}}},
+               {"entrypoints",
+                {{"cli", cli_relative}, {"installer_integration", renderer_relative}}},
                {"contract_manifest", contract_relative},
                {"capabilities", json::array({"provider_status"})},
-               {"dependencies", json::array()},
+               {"dependencies", json::array({"runtime.host"})},
+               {"workspace_name", "replaceable-provider"},
+               {"installer_integration", installer_integration},
                {"startup", startup},
                {"data_paths", json::array({"workspace"})},
                {"files", files},
@@ -454,7 +595,7 @@ void write_provider_service_install(const SetupPaths& paths,
                {"state", "installed_disabled"},
                {"active_root", active_root.string()},
                {"artifact_sha256", std::string(64, 'a')},
-               {"dependencies", json::array()},
+               {"dependencies", json::array({"runtime.host"})},
                {"data_paths", json::array()},
                {"configuration_path", ""},
                {"activated_files", json::array()},
@@ -630,7 +771,7 @@ TEST_CASE("standalone service contracts are identity-bound and receipt-verified"
     fs::remove_all(missing_root);
 }
 
-TEST_CASE("typed provider service contracts are replaceable and receipt-verified") {
+TEST_CASE("typed provider service and installation contracts are replaceable and receipt-verified") {
     const fs::path valid_root = temporary_directory();
     const SetupPaths valid_paths = paths_under(valid_root);
     write_provider_service_install(valid_paths);
@@ -1195,94 +1336,30 @@ TEST_CASE("dashboard token reference save persists only path metadata") {
     fs::remove_all(root);
 }
 
-TEST_CASE("Lichess token path imports refresh installed Book Forge configuration") {
+TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const fs::path receipts = paths.data_root / "receipts";
-    const fs::path stockfish_root =
-        paths.install_root / "components" / "stockfish.engine" / "1.0.0";
-    const fs::path book_forge_root =
-        paths.install_root / "components" / "book_forge.service" / "0.1.0";
-    const fs::path stockfish = stockfish_root / "bin" / "stockfish.exe";
-    const fs::path book_forge_cli = book_forge_root / "tools" / "book_forge" / "cli.mjs";
-    const fs::path book_forge_config =
-        paths.workspace_root / "book-forge" / "manager-config.json";
-    fs::create_directories(stockfish.parent_path());
-    fs::create_directories(book_forge_cli.parent_path());
-    fs::create_directories(book_forge_config.parent_path());
-    fs::create_directories(receipts);
-    std::ofstream(stockfish, std::ios::binary) << "stockfish";
-    std::ofstream(book_forge_cli, std::ios::binary) << "book-forge";
-    std::ofstream(stockfish_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "stockfish.engine"},
-               {"component_version", "1.0.0"},
-               {"entrypoints", {{"executable", "bin/stockfish.exe"}}},
-               {"files",
-                json::array(
-                    {{{"path", "bin/stockfish.exe"},
-                      {"size_bytes", 9},
-                      {"sha256",
-                       "92126dfcf0d4176dec9631a2a00a6d840ca672b62eccb67f637850e70aa9be8a"}}})},
-           }
-               .dump(2);
-    std::ofstream(book_forge_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "book_forge.service"},
-               {"component_version", "0.1.0"},
-               {"entrypoints", {{"cli", "tools/book_forge/cli.mjs"}}},
-               {"files",
-                json::array(
-                    {{{"path", "tools/book_forge/cli.mjs"},
-                      {"size_bytes", 10},
-                      {"sha256",
-                       "f7628bf86d7b79dab3847e8f5101b3f82224d7bdf694a9817cc0bfc710d553ad"}}})},
-           }
-               .dump(2);
-    const auto write_receipt = [&](const std::string& id, const fs::path& active_root,
-                                   const std::string& configuration_path = "",
-                                   const std::string& component_version = "1.0.0") {
-        std::ofstream(receipts / (id + ".json"))
-            << json{
-                   {"schema", "arena_install_receipt_v1"},
-                   {"schema_version", 1},
-                   {"component_id", id},
-                   {"component_version", component_version},
-                   {"state", "installed_managed"},
-                   {"active_root", active_root.string()},
-                   {"artifact_sha256", std::string(64, 'a')},
-                   {"dependencies", json::array()},
-                   {"data_paths", json::array()},
-                   {"configuration_path", configuration_path},
-                   {"activated_files", json::array()},
-               }
-                   .dump(2);
-    };
-    write_receipt("stockfish.engine", stockfish_root);
-    write_receipt("book_forge.service", book_forge_root, book_forge_config.string(), "0.1.0");
-    std::ofstream(book_forge_config)
-        << json{
-               {"schema", "uci_arena_book_forge_config_v1"},
-               {"stockfish", stockfish.string()},
-           }
-               .dump(2);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.token.consumer", "lichess_token_path");
 
     const fs::path token = root / "lichess-token.txt";
     const std::string token_contents = "TEST_TOKEN_CONTENT_MUST_NOT_ESCAPE";
     std::ofstream(token) << token_contents;
     const json imported = SetupEngine::import_path(paths, "lichess_token_path", token);
-    REQUIRE(imported.at("refreshed_consumers") == json::array({"book_forge.service"}));
-    std::ifstream generated_input(book_forge_config);
+    REQUIRE(imported.at("refreshed_consumers") ==
+            json::array({"replaceable.token.consumer"}));
+    std::ifstream generated_input(configuration);
     json generated;
     generated_input >> generated;
-    REQUIRE(generated.at("acquisition").at("tokenFile") ==
+    REQUIRE(generated.at("locators").at("selected") ==
             fs::absolute(token).lexically_normal().string());
-    REQUIRE(generated.at("stockfish") == fs::absolute(stockfish).lexically_normal().string());
     REQUIRE(generated.dump().find(token_contents) == std::string::npos);
+    const fs::path projection = configuration.parent_path() /
+                                "generated" / "context-projection.json";
+    REQUIRE(fs::is_regular_file(projection));
+    REQUIRE(json::parse(std::ifstream(projection))
+                .at("locators")
+                .at("selected") == fs::absolute(token).lexically_normal().string());
     generated_input.close();
     fs::remove_all(root);
 }
@@ -1374,126 +1451,11 @@ TEST_CASE("Book Forge credential recovery retries only a well-formed blocked sta
     REQUIRE(calls == 3);
 }
 
-TEST_CASE("profile imports refresh a safely disabled installed Lichess adapter") {
+TEST_CASE("disabled providers refresh through declared locator subscriptions") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const fs::path receipts = paths.data_root / "receipts";
-    const fs::path engine_root =
-        paths.install_root / "components" / "uci_arena.engine" / "1.0.0";
-    const fs::path adapter_root =
-        paths.install_root / "components" / "lichess.adapter" / "1.0.0";
-    const fs::path engine = engine_root / "bin" / "uci_arena_engine";
-    const fs::path checkpoint =
-        engine_root / "models" / "default" / "checkpoint_manifest.json";
-    const fs::path adapter = adapter_root / "app" / "adapter.mjs";
-    const fs::path adapter_template =
-        adapter_root / "deploy" / "lichess" /
-        "config.uci_arena.template.yml";
-    const fs::path configuration =
-        paths.workspace_root / "lichess-adapter" / "manager-config.json";
-    fs::create_directories(engine.parent_path());
-    fs::create_directories(checkpoint.parent_path());
-    fs::create_directories(adapter.parent_path());
-    fs::create_directories(adapter_template.parent_path());
-    fs::create_directories(configuration.parent_path());
-    fs::create_directories(receipts);
-    std::ofstream(engine, std::ios::binary) << "fixture";
-    std::ofstream(checkpoint, std::ios::binary)
-        << R"({"checkpoint_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","model_id":"model-1"})";
-    std::ofstream(adapter, std::ios::binary) << "fixture";
-    std::ofstream(adapter_template, std::ios::binary)
-        << R"({"schema":"uci_arena_lichess_adapter_v6","engine":{"uci_options":{}},"capacity":{"total_slots":1,"bot":{"target_active":0}},"scheduler":{"enabled":false},"timing":{}})";
-    std::ofstream(engine_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "uci_arena.engine"},
-               {"component_version", "1.0.0"},
-               {"entrypoints", {{"uci", "bin/uci_arena_engine"}}},
-               {"files",
-                json::array({
-                    {
-                        {"path", "bin/uci_arena_engine"},
-                        {"size_bytes", 7},
-                        {"sha256",
-                         "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"},
-                    },
-                    {
-                        {"path", "models/default/checkpoint_manifest.json"},
-                        {"size_bytes", 107},
-                        {"sha256",
-                         "63d67d4aa35ea116824e4b267866f5a3e3a797f1a94ebb2e34eded84d479a511"},
-                    },
-                })},
-           }
-               .dump(2);
-    std::ofstream(adapter_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "lichess.adapter"},
-               {"component_version", "1.0.0"},
-               {"entrypoints", {{"adapter", "app/adapter.mjs"}}},
-               {"files",
-                json::array({
-                    {
-                        {"path", "app/adapter.mjs"},
-                        {"size_bytes", 7},
-                        {"sha256",
-                         "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"},
-                    },
-                    {
-                        {"path",
-                         "deploy/lichess/config.uci_arena.template.yml"},
-                        {"size_bytes", 166},
-                        {"sha256",
-                         "93c4b2eb1b64db5a021d92316ab162cdefd433ff2c19e19b62ca69294d29694b"},
-                    },
-                })},
-           }
-               .dump(2);
-    const auto write_receipt = [&receipts](
-                                   const std::string& id,
-                                   const fs::path& active_root,
-                                   const std::string& state,
-                                   const fs::path& configuration_path =
-                                       fs::path{}) {
-        std::ofstream(receipts / (id + ".json"))
-            << json{
-                   {"schema", "arena_install_receipt_v1"},
-                   {"schema_version", 1},
-                   {"component_id", id},
-                   {"component_version", "1.0.0"},
-                   {"state", state},
-                   {"active_root", active_root.string()},
-                   {"artifact_sha256", std::string(64, 'a')},
-                   {"dependencies", json::array()},
-                   {"data_paths", json::array()},
-                   {"configuration_path", configuration_path.string()},
-                   {"activated_files", json::array()},
-               }
-                   .dump(2);
-    };
-    write_receipt(
-        "uci_arena.engine", engine_root, "installed_managed");
-    write_receipt(
-        "lichess.adapter",
-        adapter_root,
-        "installed_disabled",
-        configuration);
-    std::ofstream(configuration)
-        << json{
-               {"schema", "uci_arena_lichess_adapter_v6"},
-               {"engine", {{"uci_options", json::object()}}},
-               {"capacity",
-                {
-                    {"total_slots", 1},
-                    {"bot", {{"target_active", 0}}},
-                }},
-               {"scheduler", {{"enabled", false}}},
-               {"timing", json::object()},
-           }
-               .dump(2);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.profile.consumer", "lichess_transport_profile");
 
     const fs::path transport = root / "transport_profile_v2.json";
     std::ofstream(transport)
@@ -1507,12 +1469,13 @@ TEST_CASE("profile imports refresh a safely disabled installed Lichess adapter")
             paths, "lichess_transport_profile", transport);
     REQUIRE(
         imported.at("refreshed_consumers") ==
-        json::array({"lichess.adapter"}));
+        json::array({"replaceable.profile.consumer"}));
     std::ifstream updated_input(configuration);
     const json updated = json::parse(updated_input);
     REQUIRE(
-        updated.at("timing").at("transport_profile_path") ==
+        updated.at("locators").at("selected") ==
         fs::absolute(transport).lexically_normal().string());
+    REQUIRE(updated.at("enabled") == false);
     updated_input.close();
     fs::remove_all(root);
 }
@@ -1559,131 +1522,6 @@ TEST_CASE("timing profile imports require qualified exact runtime identity") {
     const fs::path drifted_profile_path = root / "drifted-profile.json";
     std::ofstream(drifted_profile_path) << profile.dump(2);
     REQUIRE_THROWS(SetupEngine::import_path(paths, "timing_profile", drifted_profile_path));
-    fs::remove_all(root);
-}
-
-TEST_CASE("Evidence configuration binds the installed Evidence Runtime root and referee") {
-    const fs::path root = temporary_directory();
-    const SetupPaths paths = paths_under(root);
-    const fs::path receipts = paths.data_root / "receipts";
-    fs::create_directories(receipts);
-
-    const auto install_component = [&](const std::string& id, const std::string& version,
-                                       const json& entrypoints,
-                                       const std::vector<std::pair<fs::path, std::string>>& files) {
-        const fs::path active_root = paths.install_root / "components" / id / version;
-        json listed_files = json::array();
-        for (const auto& [relative, contents] : files) {
-            const fs::path target = active_root / relative;
-            fs::create_directories(target.parent_path());
-            std::ofstream(target, std::ios::binary) << contents;
-            listed_files.push_back({
-                {"path", relative.generic_string()},
-                {"size_bytes", contents.size()},
-                {"sha256", sha256_text(contents)},
-            });
-        }
-        std::ofstream(active_root / "arena-component.json", std::ios::binary)
-            << json{
-                   {"schema", "arena_install_component_v1"},
-                   {"schema_version", 1},
-                   {"component_id", id},
-                   {"component_version", version},
-                   {"entrypoints", entrypoints},
-                   {"files", listed_files},
-               }
-                   .dump(2);
-        std::ofstream(receipts / (id + ".json"), std::ios::binary)
-            << json{
-                   {"schema", "arena_install_receipt_v1"},
-                   {"schema_version", 1},
-                   {"component_id", id},
-                   {"component_version", version},
-                   {"state", "installed_managed"},
-                   {"active_root", active_root.string()},
-                   {"artifact_sha256", std::string(64, 'a')},
-                   {"dependencies", json::array()},
-                   {"data_paths", json::array()},
-                   {"configuration_path", ""},
-                   {"activated_files", json::array()},
-               }
-                   .dump(2);
-        return active_root;
-    };
-
-    const fs::path engine_root = install_component(
-        "uci_arena.engine", "1.0.0", {{"uci", "bin/uci_arena_engine.exe"}},
-        {{"bin/uci_arena_engine.exe", "engine"},
-         {"models/default/checkpoint_manifest.json",
-          R"({"model_id":"model-1","checkpoint_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})"}});
-    static_cast<void>(install_component(
-        "stockfish.engine", "1.0.0", {{"stockfish", "bin/stockfish.exe"}},
-        {{"bin/stockfish.exe", "stockfish"}}));
-    const fs::path runtime_root = install_component(
-        "uci_arena_evidence.runtime", "1.0.0",
-        {{"referee", "bin/uci_arena_complete_game_referee.exe"}},
-        {{"bin/uci_arena_complete_game_referee.exe", "referee"}});
-    write_manager_api_service_install(paths, manager_service_api());
-
-    const fs::path configuration =
-        paths.workspace_root / "evidence-service" / "manager-config.json";
-    const fs::path evidence_receipt_path =
-        receipts / "uci_arena_evidence.service.json";
-    std::ifstream evidence_receipt_input(evidence_receipt_path, std::ios::binary);
-    json evidence_receipt = json::parse(evidence_receipt_input);
-    evidence_receipt_input.close();
-    evidence_receipt["configuration_path"] = configuration.string();
-    evidence_receipt["data_paths"] = json::array({configuration.parent_path().string()});
-    std::ofstream(evidence_receipt_path, std::ios::binary)
-        << evidence_receipt.dump(2);
-
-    const json identity{
-        {"engine",
-         {{"executable_sha256",
-           "sha256:" + sha256_text("engine")}}},
-        {"model", {{"model_id", "model-1"}, {"model_fingerprint", "model-fingerprint"}}},
-        {"provider", {{"hardware_driver_fingerprint", "cpu-fixture"}}},
-        {"search",
-         {{"search_core", "mcgs"},
-          {"threads", 1},
-          {"root_workers", 1},
-          {"split_depth", 2},
-          {"background_search", true},
-          {"nn_speculation", false},
-          {"batch_size_effective", 1},
-          {"batch_wait_us_effective", 0},
-          {"provider_effective", "cpu"},
-          {"extra_engine_options", json::object()}}},
-    };
-    const fs::path profile_path = root / "uci_time_profile_v3.json";
-    std::ofstream(profile_path, std::ios::binary)
-        << json{
-               {"schema", "uci_time_profile_v3"},
-               {"qualified", true},
-               {"gates", {{"passed", true}}},
-               {"permissions",
-                {{"provider_safety_qualified", true},
-                 {"forecast_shadow_qualified", false},
-                 {"adaptive_play_qualified", false}}},
-               {"identity", identity},
-               {"identity_sha256", "sha256:" + sha256_text(identity.dump())},
-           }
-               .dump(2);
-
-    const json imported = SetupEngine::import_path(paths, "timing_profile", profile_path);
-    REQUIRE(imported.at("refreshed_consumers") ==
-            json::array({"uci_arena_evidence.service"}));
-    std::ifstream configuration_input(configuration, std::ios::binary);
-    const json generated = json::parse(configuration_input);
-    REQUIRE(fs::path(generated.at("runtimeRoot").get<std::string>()) ==
-            fs::absolute(runtime_root).lexically_normal());
-    REQUIRE(fs::path(generated.at("referee").get<std::string>()) ==
-            fs::absolute(runtime_root / "bin/uci_arena_complete_game_referee.exe")
-                .lexically_normal());
-    REQUIRE_FALSE(fs::path(generated.at("referee").get<std::string>())
-                      .string()
-                      .starts_with(fs::absolute(engine_root).lexically_normal().string()));
-    configuration_input.close();
     fs::remove_all(root);
 }
 

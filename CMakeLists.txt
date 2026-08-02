@@ -161,6 +161,8 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     arena_mock_uci tests/mocks/mock_uci_engine.cpp)
   add_executable(
     arena_mock_service tests/mocks/mock_service_cli.cpp)
+  target_link_libraries(
+    arena_mock_service PRIVATE nlohmann_json::nlohmann_json)
   add_executable(
     arena_installer_tests
     tests/unit/setup_tests.cpp

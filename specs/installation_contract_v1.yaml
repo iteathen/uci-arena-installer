@@ -202,6 +202,9 @@ interfaces:
   component: arena_install_component_v1
   standalone_service_contract: uci_arena_standalone_service_contract_v1
   provider_service_contract: uci_arena_service_contract_v1
+  provider_installer_integration: arena_provider_installer_integration_v1
+  provider_install_context: arena_provider_install_context_v1
+  provider_install_result: arena_provider_install_result_v1
   provider_result: arena_provider_release_result_v1
   plan: arena_install_plan_v1
   receipt: arena_install_receipt_v1
@@ -444,6 +447,47 @@ provider_service_contracts:
       - manager_operations_path
       - manager_operations_sha256
       - credential_gated_startup
+
+provider_installer_integration:
+  owner: installable_provider
+  consumer: uci_arena_installer
+  purpose: >
+    A provider translates declared suite dependency and saved-locator bindings
+    into its own configuration and bounded generated documents. Installer owns
+    validation, invocation, journaling, placement, verification, and rollback,
+    but it does not interpret provider configuration fields or identities.
+  contract:
+    schema: arena_provider_installer_integration_v1
+    version: 1
+    invocation: dependency_runtime_with_fixed_argument_array
+    context_schema: arena_provider_install_context_v1
+    result_schema: arena_provider_install_result_v1
+    workspace_output_limit: 16
+    dependency_binding_limit: 32
+    locator_binding_limit: 32
+  requirements:
+    - The provider manifest names one digest-verified renderer entrypoint and
+      its declared dependency runtime; Installer never selects an interpreter
+      from a suffix, source layout, or provider id.
+    - Dependency inputs are explicit receipt-verified active roots,
+      entrypoints, or safe component-relative paths. Required bindings fail
+      closed; unavailable optional bindings are omitted.
+    - Locator subscriptions are named and typed. Saving a locator refreshes
+      only installed consumers that declare that kind, without provider-id
+      branches.
+    - Context contains component identity, immutable active root, provider
+      workspace, enablement, declared bindings, and validated locator paths.
+      Credential contents never enter context, argv, logs, receipts, or output.
+    - Renderer output is a closed versioned object containing one configuration
+      object and at most sixteen safe workspace-relative JSON documents.
+    - Installer writes configuration and generated documents atomically,
+      records every mutation in the transaction journal, restores prior files
+      in reverse order on failure, and removes temporary context plus backups.
+    - Verification reruns the same provider renderer through the declared
+      contract and compares every generated document; retained state is not
+      trusted merely because it exists.
+    - Adding or changing provider configuration normally changes only the
+      provider renderer and manifest bindings, not Installer control flow.
 
 setup:
   executable: arena-setup

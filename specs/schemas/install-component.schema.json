@@ -21,6 +21,7 @@
     "contract_manifest": {"type": "string", "minLength": 1},
     "configuration_template": {"type": "string", "minLength": 1},
     "workspace_name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+    "installer_integration": {"$ref": "#/$defs/installer_integration"},
     "capabilities": {"type": "array", "items": {"type": "string"}},
     "dependencies": {
       "type": "array",
@@ -39,6 +40,85 @@
           "path": {"type": "string", "minLength": 1},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "runtime_component_id", "runtime_entrypoint"],
+      "properties": {
+        "kind": {"const": "dependency_runtime"},
+        "runtime_component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "runtime_entrypoint": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}
+      }
+    },
+    "dependency_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "component_id", "source", "required"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "source": {"enum": ["active_root", "entrypoint", "component_path"]},
+        "entrypoint": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "path": {"type": "string", "minLength": 1},
+        "required": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source": {"const": "entrypoint"}}},
+          "then": {"required": ["entrypoint"]}
+        },
+        {
+          "if": {"properties": {"source": {"const": "component_path"}}},
+          "then": {"required": ["path"]}
+        }
+      ]
+    },
+    "locator_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "required"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "kind": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "required": {"type": "boolean"}
+      }
+    },
+    "installer_integration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "schema_version", "entrypoint", "invocation", "arguments",
+        "workspace_name", "configure_when_disabled", "dependency_bindings",
+        "locator_bindings"
+      ],
+      "properties": {
+        "schema": {"const": "arena_provider_installer_integration_v1"},
+        "schema_version": {"const": 1},
+        "entrypoint": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "invocation": {"$ref": "#/$defs/invocation"},
+        "arguments": {
+          "type": "array",
+          "prefixItems": [{"const": "--context"}],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "workspace_name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "configure_when_disabled": {"type": "boolean"},
+        "dependency_bindings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/dependency_binding"}
+        },
+        "locator_bindings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/locator_binding"}
         }
       }
     }
