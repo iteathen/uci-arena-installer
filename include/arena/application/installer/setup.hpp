@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+namespace arena::ports {
+class AssetSearchIndex;
+}
+
 namespace arena::application::installer {
 
 struct SetupPaths {
@@ -42,7 +46,9 @@ class SetupEngine final {
                           bool retain_development_trust = false);
 
     [[nodiscard]] static nlohmann::json
-    inventory(const SetupPaths& paths, const std::vector<std::filesystem::path>& extra_roots = {});
+    inventory(const SetupPaths& paths,
+              const std::vector<std::filesystem::path>& extra_roots = {},
+              arena::ports::AssetSearchIndex* search_index = nullptr);
 
     [[nodiscard]] static nlohmann::json import_path(const SetupPaths& paths,
                                                     const std::string& kind,

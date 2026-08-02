@@ -25,6 +25,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 
 add_library(arena_installer_core
+  src/adapters/asset_search_index.cpp
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
   src/application/installer/removal_lifecycle.cpp
@@ -49,13 +50,16 @@ target_link_libraries(
 
 if(WIN32)
   target_sources(arena_installer_core PRIVATE
+    src/platform/windows/asset_search_index.cpp
     src/platform/windows/process_platform.cpp
     src/platform/windows/service_control.cpp
     src/platform/windows/workspace_permissions.cpp
   )
-  target_link_libraries(arena_installer_core PRIVATE advapi32)
+  target_link_libraries(
+    arena_installer_core PRIVATE advapi32 ole32 oleaut32 uuid)
 else()
   target_sources(arena_installer_core PRIVATE
+    src/platform/linux/asset_search_index.cpp
     src/platform/linux/process_platform.cpp
     src/platform/linux/service_control.cpp
     src/platform/linux/workspace_permissions.cpp

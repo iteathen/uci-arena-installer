@@ -28,6 +28,7 @@
 #include "arena/application/installer/credential_recovery.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/process_supervisor.hpp"
+#include "arena/ports/asset_search_index.hpp"
 #include "arena/platform/service_control.hpp"
 #include "arena/platform/workspace_permissions.hpp"
 
@@ -1704,7 +1705,39 @@ bool directory_has_extension(const fs::path& root, const std::set<std::string>& 
     return false;
 }
 
-json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_roots) {
+json validate_book_locator(const fs::path& path);
+json inspect_indexed_book_candidate(const fs::path& path);
+json validate_syzygy_locator(const fs::path& path);
+json inspect_timing_evidence_candidate(const fs::path& path);
+
+json indexed_search_projection(const ports::IndexedAssetSearchResult& result,
+                               const std::string_view kind,
+                               const std::size_t accepted,
+                               const std::size_t rejected) {
+    const std::size_t returned = static_cast<std::size_t>(std::count_if(
+        result.candidates.begin(), result.candidates.end(),
+        [kind](const ports::IndexedAssetCandidate& candidate) {
+            return ports::indexed_asset_kind_name(candidate.kind) == kind;
+        }));
+    return {
+        {"attempted", true},
+        {"adapter", result.adapter},
+        {"state", ports::indexed_search_state_name(result.state)},
+        {"detail_code", result.detail_code},
+        {"maximum_results", result.maximum_results},
+        {"returned_candidates", returned},
+        {"total_returned_candidates", result.candidates.size()},
+        {"accepted_candidates", accepted},
+        {"rejected_candidates", rejected},
+        {"elapsed_ms", result.elapsed.count()},
+        {"truncated", result.truncated},
+        {"ownership", "external_dependency"},
+        {"registration", "explicit_import_required"},
+    };
+}
+
+json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_roots,
+                    ports::AssetSearchIndex* search_index) {
     json rows = json::object();
     for (const auto kind : discovery_kinds) {
         rows[std::string(kind)] = {
@@ -1716,6 +1749,11 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             {"selection", nullptr},
             {"candidates", json::array()},
             {"browse", browse_contract(kind)},
+            {"indexed_search",
+             {{"attempted", false},
+              {"state", "not_requested"},
+              {"ownership", "external_dependency"},
+              {"registration", "explicit_import_required"}}},
         };
     }
     std::map<std::string, std::set<std::string>> seen;
@@ -1766,6 +1804,44 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
     };
     bounded_roots.insert(bounded_roots.end(), extra_roots.begin(), extra_roots.end());
     inspect_provider_roots(rows, seen, bounded_roots);
+
+    if (search_index != nullptr) {
+        const ports::IndexedAssetSearchResult indexed = search_index->search(
+            ports::IndexedAssetQuery{256, std::chrono::milliseconds(2000)});
+        std::map<std::string, std::size_t> accepted;
+        std::map<std::string, std::size_t> rejected;
+        for (const auto& candidate : indexed.candidates) {
+            const std::string kind(
+                ports::indexed_asset_kind_name(candidate.kind));
+            try {
+                fs::path selected = candidate.path;
+                json validation;
+                if (candidate.kind == ports::IndexedAssetKind::opening_book) {
+                    validation = inspect_indexed_book_candidate(selected);
+                } else if (candidate.kind == ports::IndexedAssetKind::syzygy) {
+                    if (fs::is_regular_file(selected)) {
+                        selected = selected.parent_path();
+                    }
+                    validation = validate_syzygy_locator(selected);
+                } else {
+                    validation = inspect_timing_evidence_candidate(selected);
+                }
+                append_discovery_candidate(
+                    rows, seen, kind, "indexed", selected,
+                    "detected_unmanaged",
+                    {{"adapter", indexed.adapter},
+                     {"ownership", "external_dependency"},
+                     {"validation", std::move(validation)}});
+                ++accepted[kind];
+            } catch (const std::exception&) {
+                ++rejected[kind];
+            }
+        }
+        for (const auto kind : {"opening_book", "syzygy", "timing_profile"}) {
+            rows.at(kind)["indexed_search"] = indexed_search_projection(
+                indexed, kind, accepted[kind], rejected[kind]);
+        }
+    }
 
     const fs::path book_root = paths.knowledge_root / "opening_books";
     if (directory_has_extension(book_root, {".bin", ".book"})) {
@@ -1982,6 +2058,109 @@ json validate_syzygy_locator(const fs::path& path) {
         {"wdl_files", wdl_files},
         {"dtz_files", dtz_files},
         {"bytes", bytes},
+    };
+}
+
+json inspect_indexed_book_candidate(const fs::path& path) {
+    if (!fs::is_regular_file(path) || contains_symbolic_link(path)) {
+        throw std::runtime_error(
+            "indexed opening-book candidate must be a safe regular file");
+    }
+    std::string extension = path.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    const std::uint64_t bytes = fs::file_size(path);
+    if (extension == ".book" && bytes > 0) {
+        return {
+            {"validation", "opaque_book_file"},
+            {"classification", "extension_candidate"},
+            {"bytes", bytes},
+        };
+    }
+    if (extension != ".bin" || bytes < 16 || bytes % 16 != 0) {
+        throw std::runtime_error(
+            "indexed .bin candidate does not have Polyglot record framing");
+    }
+    std::ifstream input(path, std::ios::binary);
+    std::array<unsigned char, 16> record{};
+    std::uint64_t previous_key{};
+    std::size_t inspected{};
+    bool first = true;
+    constexpr std::size_t maximum_records = 64;
+    while (inspected < maximum_records && input.read(
+               reinterpret_cast<char*>(record.data()), record.size())) {
+        std::uint64_t key{};
+        for (std::size_t index = 0; index < 8; ++index) {
+            key = (key << 8U) | record[index];
+        }
+        const std::uint16_t move = static_cast<std::uint16_t>(
+            (static_cast<std::uint16_t>(record[8]) << 8U) | record[9]);
+        const std::uint16_t promotion = (move >> 12U) & 0x7U;
+        if ((!first && key < previous_key) || promotion > 4U) {
+            throw std::runtime_error(
+                "indexed .bin candidate does not satisfy Polyglot record semantics");
+        }
+        previous_key = key;
+        first = false;
+        ++inspected;
+    }
+    if (inspected == 0 || (!input.eof() && input.fail())) {
+        throw std::runtime_error(
+            "indexed .bin candidate could not be inspected as Polyglot");
+    }
+    return {
+        {"validation", "polyglot_sample"},
+        {"classification", "polyglot_framed"},
+        {"bytes", bytes},
+        {"sampled_records", inspected},
+    };
+}
+
+json inspect_timing_evidence_candidate(const fs::path& path) {
+    std::error_code error;
+    if (!fs::is_regular_file(path) ||
+        fs::is_symlink(fs::symlink_status(path, error)) || error) {
+        throw std::runtime_error(
+            "timing evidence candidate must reference a safe regular file");
+    }
+    const auto size = fs::file_size(path, error);
+    if (error || size == 0 || size > 16ULL * 1024ULL * 1024ULL) {
+        throw std::runtime_error(
+            "timing evidence candidate must be non-empty and no larger than 16 MiB");
+    }
+    const json profile = read_json(path);
+    const std::string schema = profile.value("schema", "");
+    const bool timing_schema =
+        schema.starts_with("uci_time_profile_v") ||
+        (schema.find("timing") != std::string::npos &&
+         profile.is_object());
+    if (!timing_schema) {
+        throw std::runtime_error("JSON candidate is not timing evidence");
+    }
+    const json identity = profile.value("identity", json::object());
+    const std::string identity_sha256 = profile.value("identity_sha256", "");
+    const bool identity_valid =
+        identity.is_object() && !identity.empty() &&
+        identity_sha256 == "sha256:" + sha256_text(identity.dump());
+    const bool qualified =
+        schema == "uci_time_profile_v3" && profile.value("qualified", false) &&
+        profile.value("gates", json::object()).value("passed", false);
+    const std::string classification =
+        schema != "uci_time_profile_v3"
+            ? "legacy_parseable"
+            : qualified && identity_valid ? "qualified_identity"
+                                          : "parseable_incomplete";
+    return {
+        {"validation", "timing_evidence_inspection"},
+        {"schema", schema},
+        {"sha256", sha256_file(path)},
+        {"classification", classification},
+        {"identity_valid", identity_valid},
+        {"qualified", qualified},
+        {"activation", qualified && identity_valid
+                           ? "requires_runtime_identity_match"
+                           : "catalog_only_until_migrated_or_requalified"},
     };
 }
 
@@ -3461,7 +3640,9 @@ json SetupEngine::persist_release_media(const json& catalog, const SetupPaths& p
     }
 }
 
-json SetupEngine::inventory(const SetupPaths& paths, const std::vector<fs::path>& extra_roots) {
+json SetupEngine::inventory(const SetupPaths& paths,
+                            const std::vector<fs::path>& extra_roots,
+                            ports::AssetSearchIndex* search_index) {
     json knowledge{
         {"opening_book",
          {{"state", "missing"},
@@ -3523,7 +3704,7 @@ json SetupEngine::inventory(const SetupPaths& paths, const std::vector<fs::path>
             }
         }
     }
-    json discovery = discovery_rows(paths, extra_roots);
+    json discovery = discovery_rows(paths, extra_roots, search_index);
     if (knowledge["opening_book"]["state"] == "missing") {
         const json& selection = discovery.at("opening_book").at("selection");
         if (selection.value("state", "") != "unresolved" &&

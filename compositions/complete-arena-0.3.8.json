@@ -1,6 +1,6 @@
 {
   "schema": "arena_product_composition_v1",
-  "product_release": "0.3.7",
+  "product_release": "0.3.8",
   "installer": {
     "repository": "iteathen/uci-arena-installer",
     "minimum_version": "0.1.0"
@@ -9,7 +9,7 @@
     {
       "role": "manager",
       "component_id": "manager.core",
-      "version": "0.3.7",
+      "version": "0.3.8",
       "repository": "iteathen/uci-arena-manager",
       "required": true,
       "default_enabled": true,

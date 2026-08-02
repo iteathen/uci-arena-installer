@@ -967,6 +967,44 @@ discovery:
     - standard_install_roots
     - provider_manifests
     - user_selected_roots
+    - operating_system_file_index
+  indexed_asset_search:
+    owner: replaceable_platform_search_adapter
+    kinds: [opening_book, syzygy, timing_profile]
+    windows_adapter: Windows_Search_SystemIndex
+    linux_adapter: plocate_or_locate_database
+    maximum_results: 256
+    command_timeout_milliseconds: 2000
+    candidate_ownership: external_dependency
+    rules:
+      - Indexed search queries only immutable extension or bounded filename patterns;
+        it never walks the filesystem recursively.
+      - The platform adapter returns candidate paths and bounded status only.
+        Kind inspectors classify content, directory shape, identity, legacy
+        status, and symbolic-link safety without turning ordinary discovery
+        into a compatibility gate.
+      - An unavailable, stale, denied, timed-out, or truncated index is visible
+        in arena_setup_discovery_v1 and falls back to bounded standard roots and
+        explicit browse without failing inventory.
+      - Duplicate candidates are normalized and deterministic. A search result
+        is never installation authority and requires explicit import before use.
+      - Syzygy candidates are reduced to their containing flat collection and
+        referenced in place. Opening books and timing-evidence candidates are
+        never copied merely because the index found them.
+      - Parseable timing evidence remains discoverable and cataloged even when
+        legacy, incomplete, or incompatible with the currently selected
+        runtime. Exact identity and qualification are enforced only when a
+        consumer claims the profile is applied or protected-live-safe.
+      - A usable Polyglot book does not require optional statistics or policy
+        sidecars. Missing sidecars reduce projected capabilities rather than
+        blocking discovery or import.
+      - Indexed .bin candidates must satisfy bounded Polyglot record framing
+        and sampled ordering semantics so unrelated binary files do not crowd
+        out real books. This content check does not require a release version,
+        sidecars, or a Book Forge publication manifest.
+      - Any nonempty flat Syzygy WDL or DTZ subset is discoverable and usable
+        for the positions it covers. WDL does not require DTZ, and incomplete
+        cardinality coverage is reported rather than rejected.
   user_selected_root_behavior:
     maximum_directory_depth: 1
     multiple_explicit_roots: supported

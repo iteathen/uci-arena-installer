@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "arena/application/installer/setup.hpp"
+#include "arena/ports/asset_search_index.hpp"
 #include "arena/platform/service_control.hpp"
 #ifdef _WIN32
 #include "arena/platform/windows_install_scope.hpp"
@@ -285,7 +286,9 @@ int main(int argc, char** argv) {
 #endif
 
         if (*inventory) {
-            print(SetupEngine::inventory(paths, scan_roots), json_output, result_file);
+            auto search_index = arena::ports::make_platform_asset_search_index();
+            print(SetupEngine::inventory(paths, scan_roots, search_index.get()),
+                  json_output, result_file);
         } else if (*import_command) {
             print(SetupEngine::import_path(paths, import_kind, import_source, managed_copy),
                   json_output, result_file);

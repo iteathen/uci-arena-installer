@@ -10,12 +10,14 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "arena/application/installer/credential_recovery.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/installer/setup.hpp"
 #include "arena/domain/uuid.hpp"
+#include "arena/ports/asset_search_index.hpp"
 
 namespace {
 
@@ -27,6 +29,23 @@ using arena::application::installer::RemovalLifecycleHooks;
 using arena::application::installer::assess_book_forge_credential_recovery;
 using arena::application::installer::recover_book_forge_credential;
 using nlohmann::json;
+
+class FakeAssetSearchIndex final : public arena::ports::AssetSearchIndex {
+  public:
+    explicit FakeAssetSearchIndex(arena::ports::IndexedAssetSearchResult result)
+        : result_(std::move(result)) {}
+
+    [[nodiscard]] arena::ports::IndexedAssetSearchResult
+    search(const arena::ports::IndexedAssetQuery& query) override {
+        last_query = query;
+        return result_;
+    }
+
+    arena::ports::IndexedAssetQuery last_query{};
+
+  private:
+    arena::ports::IndexedAssetSearchResult result_;
+};
 
 fs::path temporary_directory() {
     const fs::path directory =
@@ -929,6 +948,116 @@ TEST_CASE("selected asset roots discover books and Syzygy one level only") {
                                     fs::absolute(too_deep).lexically_normal().string();
                          }));
 
+    fs::remove_all(root);
+}
+
+TEST_CASE("indexed discovery finds external books tablebases and legacy timing evidence") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path external = root / "external-assets";
+    const fs::path syzygy = external / "syzygy-3-5";
+    fs::create_directories(syzygy);
+    const fs::path book = external / "operator.book";
+    const fs::path binary_decoy = external / "not-a-polyglot.bin";
+    const fs::path table = syzygy / "KQvK.rtbw";
+    const fs::path timing = external / "old-timing-profile.json";
+    std::ofstream(book, std::ios::binary) << "book";
+    std::ofstream(binary_decoy, std::ios::binary) << "not a book";
+    std::ofstream(table, std::ios::binary) << "tablebase";
+    std::ofstream(timing) << json{{"schema", "uci_time_profile_v2"},
+                                  {"qualified", true}}
+                                 .dump();
+
+    arena::ports::IndexedAssetSearchResult result;
+    result.adapter = "fake_system_index";
+    result.state = arena::ports::IndexedSearchState::complete;
+    result.maximum_results = 256;
+    result.elapsed = std::chrono::milliseconds(7);
+    result.detail_code = "complete";
+    result.candidates = {
+        {arena::ports::IndexedAssetKind::opening_book, book},
+        {arena::ports::IndexedAssetKind::opening_book, binary_decoy},
+        {arena::ports::IndexedAssetKind::syzygy, table},
+        {arena::ports::IndexedAssetKind::timing_profile, timing},
+        {arena::ports::IndexedAssetKind::syzygy, external / "missing.rtbz"},
+    };
+    FakeAssetSearchIndex index(std::move(result));
+
+    const json inventory = SetupEngine::inventory(paths, {}, &index);
+    const json& discovery = inventory.at("discovery");
+    REQUIRE(index.last_query.maximum_results == 256);
+    REQUIRE(index.last_query.timeout == std::chrono::milliseconds(2000));
+    REQUIRE(discovery.at("opening_book").at("selection").at("source") == "indexed");
+    REQUIRE(discovery.at("opening_book").at("selection").at("path") ==
+            fs::absolute(book).lexically_normal().string());
+    REQUIRE(discovery.at("syzygy").at("selection").at("path") ==
+            fs::absolute(syzygy).lexically_normal().string());
+    const json& timing_candidate =
+        discovery.at("timing_profile").at("candidates").at(0);
+    REQUIRE(timing_candidate.at("details").at("validation").at("classification") ==
+            "legacy_parseable");
+    const json& search = discovery.at("syzygy").at("indexed_search");
+    REQUIRE(search.at("state") == "complete");
+    REQUIRE(search.at("ownership") == "external_dependency");
+    REQUIRE(search.at("registration") == "explicit_import_required");
+    REQUIRE(search.at("accepted_candidates") == 1);
+    REQUIRE(search.at("rejected_candidates") == 1);
+    const json& book_search = discovery.at("opening_book").at("indexed_search");
+    REQUIRE(book_search.at("accepted_candidates") == 1);
+    REQUIRE(book_search.at("rejected_candidates") == 1);
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("saved knowledge locator outranks an indexed candidate") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path saved = root / "saved.book";
+    const fs::path indexed = root / "indexed.book";
+    std::ofstream(saved) << "saved";
+    std::ofstream(indexed) << "indexed";
+    const json imported = SetupEngine::import_path(paths, "opening_book", saved);
+    REQUIRE(imported.at("mode") == "in_place_reference");
+
+    arena::ports::IndexedAssetSearchResult result;
+    result.adapter = "fake_system_index";
+    result.state = arena::ports::IndexedSearchState::complete;
+    result.maximum_results = 256;
+    result.detail_code = "complete";
+    result.candidates = {
+        {arena::ports::IndexedAssetKind::opening_book, indexed},
+    };
+    FakeAssetSearchIndex index(std::move(result));
+    const json inventory = SetupEngine::inventory(paths, {}, &index);
+    REQUIRE(inventory.at("discovery")
+                .at("opening_book")
+                .at("selection")
+                .at("source") == "saved_locator");
+    REQUIRE(inventory.at("discovery")
+                .at("opening_book")
+                .at("candidates")
+                .size() == 2);
+    fs::remove_all(root);
+}
+
+TEST_CASE("unavailable file index is visible and does not fail inventory") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    arena::ports::IndexedAssetSearchResult result;
+    result.adapter = "fake_system_index";
+    result.state = arena::ports::IndexedSearchState::unavailable;
+    result.maximum_results = 256;
+    result.detail_code = "index_disabled";
+    FakeAssetSearchIndex index(std::move(result));
+    const json inventory = SetupEngine::inventory(paths, {}, &index);
+    REQUIRE(inventory.at("discovery")
+                .at("timing_profile")
+                .at("indexed_search")
+                .at("state") == "unavailable");
+    REQUIRE(inventory.at("discovery")
+                .at("timing_profile")
+                .at("selection")
+                .at("source") == "unresolved");
     fs::remove_all(root);
 }
 

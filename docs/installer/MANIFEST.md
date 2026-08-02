@@ -17,6 +17,19 @@ provider products. Installer owns their exact upstream-input policy,
 reproducible packaging, native smoke validation, and keyless provenance. Their
 build never reads Manager or provider source trees.
 
+Large operator-owned books, Syzygy collections, and timing evidence are
+discovered through a bounded platform search-index adapter. Windows Search and
+the Linux locate database provide paths without a recursive drive walk. Content
+inspectors catalog standalone books, partial WDL/DTZ collections, and parseable
+legacy or incomplete timing evidence with their observed capabilities. A
+version or identity mismatch does not block discovery or unrelated components;
+exact qualification is required only when a consumer activates a profile or
+makes a protected-live safety claim. Indexed `.bin` candidates receive a small
+Polyglot framing and ordering sample to filter unrelated binaries without
+requiring sidecars, a publication manifest, or a package version. Discovery
+records an external in-place
+candidate only; explicit import remains the sole locator-registration step.
+
 `arena_install_catalog_v1` selects immutable components. Each `arena_install_component_v1` manifest is the authority for component identity, target, payload files, entrypoints, dependencies, capabilities, startup ownership, public service contract, data paths, and default model metadata.
 
 Catalog presets and explicit custom selections are the only ordinary component-selection authorities. Named `optional_component_groups` map operator requests to exact component ids. Per-component `default_enabled`, `disable_when_workspace_capacity_unavailable`, and `activation_role` fields control planning without product-name or id-prefix branches. Required suite members therefore belong in a preset or dependency edge; the planner never injects one implicitly.
