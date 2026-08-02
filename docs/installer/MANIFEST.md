@@ -44,6 +44,14 @@ requiring sidecars, a publication manifest, or a package version. Discovery
 records an external in-place
 candidate only; explicit import remains the sole locator-registration step.
 
+Installable components publish discoverable resources through the bounded
+`discovery` array in `arena-component.json`. Each entry declares a resource kind
+and locates it at the active root, a named digest-verified entrypoint, or a safe
+component-relative path. Receipt and provider-root inspection consume that data
+literally; component ids and filename prefixes never select a resource kind.
+The declaration is read-only evidence and provides no activation or lifecycle
+authority.
+
 `arena_install_catalog_v1` selects immutable components. Each `arena_install_component_v1` manifest is the authority for component identity, target, payload files, entrypoints, dependencies, capabilities, startup ownership, public service contract, data paths, and default model metadata.
 
 Catalog presets and explicit custom selections are the only ordinary component-selection authorities. Named `optional_component_groups` map operator requests to exact component ids. Per-component `default_enabled`, `disable_when_workspace_capacity_unavailable`, and `activation_role` fields control planning without product-name or id-prefix branches. Required suite members therefore belong in a preset or dependency edge; the planner never injects one implicitly.

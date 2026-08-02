@@ -1025,6 +1025,20 @@ knowledge_assets:
 discovery:
   interface: arena_setup_discovery_v1
   locator_interface: arena_saved_locator_v1
+  component_manifest_contract:
+    field: discovery
+    maximum_entries: 16
+    locator_sources: [active_root, entrypoint, component_path]
+    rules:
+      - Each resource kind is unique within one component manifest.
+      - Entrypoint locators name a digest-listed component entrypoint.
+      - Component-path locators are safe relative paths containing at least one
+        digest-listed payload file.
+      - Install receipts and bounded provider-root inspection resolve only these
+        declarations; component ids, repository names, filename prefixes, and
+        historical versions never select a discovery kind.
+      - Discovery conveys read-only location evidence and grants no activation,
+        registration, startup, or deletion authority.
   kinds:
     - opening_book
     - syzygy

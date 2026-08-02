@@ -1039,8 +1039,12 @@ TEST_CASE("inventory returns bounded versioned discovery and browse contracts") 
     std::ofstream(book_forge / "arena-component.json")
         << json{
                {"schema", "arena_install_component_v1"},
-               {"component_id", "book_forge.service"},
+               {"component_id", "replacement.forge"},
                {"component_version", "1.0.0"},
+               {"files", json::array()},
+               {"discovery",
+                json::array({{{"kind", "book_forge"},
+                              {"locator", {{"source", "active_root"}}}}})},
            }
                .dump();
 
@@ -1049,8 +1053,23 @@ TEST_CASE("inventory returns bounded versioned discovery and browse contracts") 
     std::ofstream(too_deep / "arena-component.json")
         << json{
                {"schema", "arena_install_component_v1"},
-               {"component_id", "uci_arena_evidence.service"},
+               {"component_id", "replacement.evidence"},
                {"component_version", "1.0.0"},
+               {"files", json::array()},
+               {"discovery",
+                json::array({{{"kind", "evidence_service"},
+                              {"locator", {{"source", "active_root"}}}}})},
+           }
+               .dump();
+
+    const fs::path misleading_name = provider_root / "legacy-name-only";
+    fs::create_directories(misleading_name);
+    std::ofstream(misleading_name / "arena-component.json")
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"component_id", "book_forge.service"},
+               {"component_version", "99.0.0"},
+               {"files", json::array()},
            }
                .dump();
 
@@ -1059,6 +1078,11 @@ TEST_CASE("inventory returns bounded versioned discovery and browse contracts") 
     REQUIRE(book.at("schema") == "arena_setup_discovery_v1");
     REQUIRE(book.at("schema_version") == 1);
     REQUIRE(book.at("selection").at("source") == "provider_manifest");
+    REQUIRE(std::none_of(book.at("candidates").begin(), book.at("candidates").end(),
+                         [](const json& candidate) {
+                             return candidate.value("details", json::object())
+                                        .value("component_id", "") == "book_forge.service";
+                         }));
     REQUIRE(book.at("browse").at("selection") == "file_or_directory");
     REQUIRE_FALSE(book.at("browse").at("hints").empty());
     REQUIRE(inventory.at("discovery").at("opening_book").at("browse").at("managed_copy_allowed") ==
@@ -1254,13 +1278,18 @@ TEST_CASE("saved in-place Syzygy locator is projected into knowledge inventory")
 TEST_CASE("discovery precedence is receipt then locator then provider manifest") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const fs::path provider_root = root / "book-forge";
+    const fs::path provider_root =
+        paths.install_root / "components" / "replacement.forge" / "1.0.0";
     fs::create_directories(provider_root);
     std::ofstream(provider_root / "arena-component.json")
         << json{
                {"schema", "arena_install_component_v1"},
-               {"component_id", "book_forge.service"},
+               {"component_id", "replacement.forge"},
                {"component_version", "1.0.0"},
+               {"files", json::array()},
+               {"discovery",
+                json::array({{{"kind", "book_forge"},
+                              {"locator", {{"source", "active_root"}}}}})},
            }
                .dump();
     const fs::path cli = provider_root / "book-forge.mjs";
@@ -1278,10 +1307,10 @@ TEST_CASE("discovery precedence is receipt then locator then provider manifest")
 
     const fs::path receipts = paths.data_root / "receipts";
     fs::create_directories(receipts);
-    std::ofstream(receipts / "book_forge.service.json")
+    std::ofstream(receipts / "replacement.forge.json")
         << json{
                {"schema", "arena_install_receipt_v1"},
-               {"component_id", "book_forge.service"},
+               {"component_id", "replacement.forge"},
                {"component_version", "1.0.0"},
                {"state", "installed_managed"},
                {"active_root", provider_root.string()},
