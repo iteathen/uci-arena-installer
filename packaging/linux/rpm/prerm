@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+# Remove startup authority before package-owned binaries.
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  systemctl disable --now uci-arena-manager.service || true
+fi

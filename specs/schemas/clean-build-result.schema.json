@@ -28,17 +28,17 @@
     "target_platform": {
       "enum": ["windows-x86_64", "linux-x86_64"]
     },
-    "source_repository": {"const": "iteathen/uci-arena-manager"},
+    "source_repository": {"const": "iteathen/uci-arena-installer"},
     "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "clean_tree": {"const": true},
     "build_preset": {"enum": ["windows-release", "linux-release"]},
-    "installer_authority": {"const": "iteathen/uci-arena-manager"},
-    "release_scope": {"const": "manager_core_development"},
-    "release_classification": {"const": "unsigned_platform_installer_candidate"},
+    "installer_authority": {"const": "iteathen/uci-arena-installer"},
+    "release_scope": {"enum": ["complete_development", "complete_release"]},
+    "release_classification": {"enum": ["unsigned_suite_candidate", "signed_suite_release"]},
     "artifacts": {
       "type": "array",
       "minItems": 2,
-      "maxItems": 4,
+      "maxItems": 5,
       "items": {
         "type": "object",
         "additionalProperties": false,

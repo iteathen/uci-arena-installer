@@ -517,13 +517,13 @@ packaging:
   windows_outputs: dist/windows
   linux_outputs: dist/linux
   clean_build:
-    authority: iteathen/uci-arena-manager
+    authority: iteathen/uci-arena-installer
     suite_command: protected .github/workflows/release.yml workflow_dispatch
     local_complete_candidate_command: >
       node tools/release/clean-build.mjs --complete-development
       --platform <target>
     manager_component_command: >
-      node tools/release/clean-build.mjs --manager-only --platform <target>
+      acquire one immutable attested manager.core candidate for <target>
     output_manifest:
       schema: arena_clean_build_result_v1
       filename: clean-build-result.json
@@ -546,14 +546,14 @@ packaging:
         integration. They accept workflow_dispatch only, run solely after an
         explicit operator request, and are never configured as automatically
         required pull-request status checks.
-      - Build the dashboard, configure the native release preset, clean native
-        outputs before rebuilding, run native tests once for the shared Windows
-        binary set, and invoke the existing CPack deployment generators for
-        each fixed package scope.
-      - The Windows clean-build entrypoint resolves CMake, CPack, and CTest as
-        one toolchain: an explicit ARENA_CMAKE_EXECUTABLE wins, followed by the
-        newest supported repository-local portable CMake, followed by PATH.
-        Per-user packaging still fails closed below CMake 4.3.
+      - Acquire and verify one immutable Manager component candidate and one
+        Installer runtime candidate per target. Platform integration overlays
+        are Installer-owned data applied only after both manifests validate.
+      - Windows package generation uses pinned WiX over the same validated
+        Manager and Installer runtime roots for both fixed scopes. Linux package
+        generation uses distro adapters over the same validated Manager root
+        plus Installer-owned integration policy; neither path reads a Manager
+        source or build tree.
       - Complete development composition resolves the pinned Cosign verifier
         from an explicit COSIGN_EXECUTABLE, then the exact repository-local
         build/tooling/cosign-3.0.6 payload, then PATH. Missing verification
@@ -644,13 +644,9 @@ packaging:
         - uci-arena-manager-<version>-linux-x86_64.tar.gz
     manager_component_outputs:
       windows-x86_64:
-        - UCI-Arena-Manager-<version>-windows-x64-user.msi
-        - UCI-Arena-Manager-<version>-windows-x64-machine.msi
-        - UCI-Arena-Manager-<version>-windows-x64.zip
+        - manager.core-<version>-windows-x86_64.tar.gz
       linux-x86_64:
-        - uci-arena-manager_<version>_amd64.deb
-        - uci-arena-manager-<version>-1.x86_64.rpm
-        - uci-arena-manager-<version>-linux-x86_64.tar.gz
+        - manager.core-<version>-linux-x86_64.tar.gz
   windows_manager_msi:
     owner: uci-arena-installer
     payload_source: immutable_manager_component_artifact
@@ -676,6 +672,7 @@ packaging:
       - native_runtime_dependencies
       - dashboard_assets
       - installed_contract_schemas
+      - complete_installer_runtime_dependency_closure
     rules:
       - Per-user and per-machine MSIs package one tested native binary set and
         install an MSI-owned share/uci-arena/install-scope.txt marker containing
@@ -684,8 +681,12 @@ packaging:
         never inferred from a React value or an untrusted catalog.
       - Installer validates every Manager artifact file against its component
         manifest before generating either MSI. The MSI builder overlays only
-        Installer-owned integration payloads, including arena-setup and the
-        fixed-scope marker; it does not infer Manager source-tree layout.
+        manifest-bound Installer runtime files and Installer-owned integration
+        payloads, including the fixed-scope marker; it does not infer Manager
+        source-tree layout or package a lone arena-setup executable.
+      - A path present in both Manager and Installer runtime manifests may be
+        deduplicated only when size and SHA-256 are identical. A mismatched
+        collision fails before WiX source or package output is committed.
       - Per-user MSI generation uses pinned WiX 6 with native per-user package
         scope. Every component installed beneath the user profile has an
         MSI-owned HKCU key path where Windows Installer requires it, and ICE38
@@ -802,6 +803,25 @@ packaging:
         user-profile default, which is not redirected through Documents or
         OneDrive. Existing receipt-owned workspaces remain authoritative on
         upgrade regardless of that default.
+  linux_manager_packages:
+    owner: uci-arena-installer
+    payload_source: immutable_manager_component_artifact
+    integration_policy: packaging/linux/manager-integration.json
+    formats: [deb, rpm, tar_gz]
+    rules:
+      - The package builder validates the complete Manager component manifest
+        before staging and never reads a Manager source or build tree.
+      - Component bytes are copied without content changes. Distro paths,
+        service units, desktop integration, maintainer scripts, package metadata,
+        compressed documentation, and output names come from Installer-owned
+        policy and adapters.
+      - Normal package removal removes package payload and startup authority but
+        preserves Manager and provider state. Distro purge hooks also preserve
+        valuable state; destructive suite data removal remains a separate,
+        previewed arena-setup purge transaction.
+      - DEB and RPM adapters receive the same validated, scope-neutral staging
+        tree. Adding or replacing one package adapter does not change Manager
+        component production or the other package format.
   artifact_names:
     - UCI-Arena-Setup-<version>-windows-x64-online.exe
     - UCI-Arena-Setup-<version>-windows-x64-offline.exe
@@ -1551,7 +1571,7 @@ release_gate_order:
   - provider_attestations
   - reviewed_release_lock
   - immutable_suite_candidate
-  - manager_only_clean_windows_and_linux
+  - manager_component_candidates_windows_and_linux
   - complete_clean_windows_and_linux
   - external_discovery_and_in_place_import
   - bounded_syzygy_manifest_range_and_real_fixture

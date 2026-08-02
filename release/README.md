@@ -21,3 +21,17 @@ Provider candidates remain private and independently attested. The optional
 Installer prerelease mirror is digest-pinned transport only: original provider
 identity and Sigstore provenance remain authoritative. No private repository,
 token file, or credential is made public or copied into release metadata.
+
+## Bounded Windows Manager MSI diagnostic
+
+`tools/release/windows-manager-msi-cycle.ps1` exercises one already-built,
+fixed-scope Manager MSI with a single MSI invocation (`msiexec`). `prepare` records
+the exact candidate and quarantines no state; `install` preserves prior state
+by same-volume rename; repeatable `smoke` runs inspect the same installation;
+and `restore -ConfirmRestore` returns the preserved state without deleting the
+test state. `CandidateSourceCommit` binds adopted media to its Installer source.
+
+This diagnostic does not build packages and does not replace full-suite
+acceptance. The final suite cycle must exercise the corresponding setup bundle,
+component selection, providers, repair, upgrade, ordinary uninstall, preserved
+state revalidation, and the separate explicit purge lifecycle.

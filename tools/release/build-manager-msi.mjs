@@ -18,6 +18,7 @@ import {
   normalizeComponentPath,
   validateExtractedComponent,
 } from "./component-artifact.mjs";
+import { validateInstallerRuntime } from "./build-installer-runtime.mjs";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/u;
 const SCOPES = new Set(["per-user", "per-machine"]);
@@ -68,7 +69,8 @@ function readJson(filename, label) {
 
 function validatePolicy(policy, scope) {
   if (policy?.schema !== "arena_manager_windows_integration_v1"
-      || policy.component_id !== "manager.core") {
+      || policy.component_id !== "manager.core"
+      || typeof policy.installer_runtime_manifest_destination !== "string") {
     throw new Error("invalid Manager Windows integration policy identity");
   }
   const selected = policy.scopes?.[scope];
@@ -190,7 +192,8 @@ function renderFileComponent({
 
 export function buildManagerMsiSource({
   managerRoot,
-  setupExecutable,
+  installerRoot,
+  installerVersion,
   scopeMarker,
   policyPath,
   version,
@@ -201,12 +204,12 @@ export function buildManagerMsiSource({
     throw new Error("Manager MSI requires a three-field version and fixed scope");
   }
   const resolvedRoot = path.resolve(managerRoot);
-  const resolvedSetup = path.resolve(setupExecutable);
+  const resolvedInstallerRoot = path.resolve(installerRoot);
   const resolvedMarker = path.resolve(scopeMarker);
   const resolvedIcon = path.resolve(iconPath);
   for (const [label, filename] of [
     ["Manager component root", resolvedRoot],
-    ["Installer setup executable", resolvedSetup],
+    ["Installer runtime root", resolvedInstallerRoot],
     ["scope marker", resolvedMarker],
     ["installer icon", resolvedIcon],
   ]) {
@@ -222,21 +225,41 @@ export function buildManagerMsiSource({
   );
   const sources = new Map(declared);
   sources.set("arena-component.json", manifestPath);
-  const installerEntrypoint = normalizeComponentPath(
-    policy.installer_entrypoint, "Installer entrypoint",
+  const runtime = validateInstallerRuntime({
+    root: resolvedInstallerRoot,
+    version: installerVersion,
+    target: "windows-x86_64",
+  });
+  const runtimeManifestDestination = normalizeComponentPath(
+    policy.installer_runtime_manifest_destination,
+    "Installer runtime manifest destination",
   );
   const markerRelative = normalizeComponentPath(policy.scope_marker, "scope marker path");
-  if (sources.has(installerEntrypoint) || sources.has(markerRelative)) {
-    throw new Error("Manager artifact collides with Installer-owned integration payloads");
+  if (sources.has(runtime.entrypoint) || sources.has(runtimeManifestDestination)
+      || sources.has(markerRelative)) {
+    throw new Error("Manager artifact collides with Installer-owned integration authority");
   }
-  const setupHeader = readFileSync(resolvedSetup).subarray(0, 2);
+  const setupHeader = readFileSync(runtime.declared.get(runtime.entrypoint)).subarray(0, 2);
   if (setupHeader.length !== 2 || setupHeader[0] !== 0x4d || setupHeader[1] !== 0x5a) {
     throw new Error("Installer setup executable is not a Windows PE image");
   }
   if (!new RegExp(`^${scope}\\r?\\n?$`, "u").test(readFileSync(resolvedMarker, "utf8"))) {
     throw new Error(`scope marker must contain exactly ${scope}`);
   }
-  sources.set(installerEntrypoint, resolvedSetup);
+  for (const [relative, filename] of runtime.declared) {
+    const existing = sources.get(relative);
+    if (existing) {
+      const existingBytes = readFileSync(existing);
+      const runtimeBytes = readFileSync(filename);
+      if (existingBytes.length !== runtimeBytes.length
+          || !existingBytes.equals(runtimeBytes)) {
+        throw new Error(`Manager and Installer runtime path collision: ${relative}`);
+      }
+      continue;
+    }
+    sources.set(relative, filename);
+  }
+  sources.set(runtimeManifestDestination, runtime.manifestPath);
   sources.set(markerRelative, resolvedMarker);
   const payloadPaths = [...sources.keys()].sort();
   const components = payloadPaths.map((relative) => renderFileComponent({
@@ -328,14 +351,15 @@ export function buildManagerMsi(options) {
 function main() {
   const args = parse(process.argv.slice(2));
   for (const required of [
-    "manager-root", "setup-executable", "scope-marker", "policy", "version",
-    "scope", "icon", "output",
+    "manager-root", "installer-root", "installer-version", "scope-marker",
+    "policy", "version", "scope", "icon", "output",
   ]) {
     if (!args[required]) throw new Error(`missing --${required}`);
   }
   process.stdout.write(`${JSON.stringify(buildManagerMsi({
     managerRoot: args["manager-root"],
-    setupExecutable: args["setup-executable"],
+    installerRoot: args["installer-root"],
+    installerVersion: args["installer-version"],
     scopeMarker: args["scope-marker"],
     policyPath: args.policy,
     version: args.version,
