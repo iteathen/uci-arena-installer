@@ -126,6 +126,8 @@ signed_provenance:
         and original-provider provenance gates as direct provider transport.
   managed_candidates:
     predicate_type: https://uci-arena.example/attestations/managed-component-release-result/v1
+    release_authority: installer_managed_component_only
+    suite_installer_authority: iteathen/uci-arena-installer
     trusted_repository: iteathen/uci-arena-installer
     trusted_workflow: .github/workflows/managed-component-release.yml
     trusted_workflow_name: Managed component candidate
@@ -143,6 +145,9 @@ signed_provenance:
     verification:
       - Managed Node.js and Stockfish payloads are private immutable prerelease
         candidates and are never accepted from mutable public download URLs.
+      - Their builder, pinned upstream inputs, native smoke evidence, and
+        keyless provenance workflow are Installer-owned and never depend on a
+        Manager source or build tree.
       - Download the exact lock-pinned archive, managed result, and Sigstore
         bundle from the same immutable private Installer release.
       - Verify all three asset SHA-256 values before interpreting them.

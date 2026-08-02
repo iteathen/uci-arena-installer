@@ -18,7 +18,7 @@
     {
       "role": "engine",
       "component_id": "uci_arena.engine",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "repository": "iteathen/UCI_Arena",
       "required": true,
       "default_enabled": true,
@@ -27,7 +27,7 @@
     {
       "role": "evidence_runtime",
       "component_id": "uci_arena_evidence.runtime",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "repository": "iteathen/UCI_Arena",
       "required": true,
       "default_enabled": true,
@@ -45,7 +45,7 @@
     {
       "role": "book_forge",
       "component_id": "book_forge.service",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "repository": "iteathen/uci-arena-book-forge",
       "required": false,
       "default_enabled": true,
@@ -54,7 +54,7 @@
     {
       "role": "opening_book",
       "component_id": "opening_book.standard",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "repository": "iteathen/uci-arena-book-forge",
       "required": false,
       "default_enabled": true,

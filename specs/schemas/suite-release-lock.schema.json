@@ -21,7 +21,7 @@
     },
     "release_ready": {"type": "boolean"},
     "provider_repository": {"const": "iteathen/UCI_Arena"},
-    "managed_repository": {"const": "iteathen/uci-arena-manager"},
+    "managed_repository": {"const": "iteathen/uci-arena-installer"},
     "components": {
       "type": "array",
       "items": {"$ref": "#/$defs/providerComponent"}
@@ -205,7 +205,7 @@
             },
             "provenance_bundle_sha256": {"$ref": "#/$defs/digest"},
             "provenance_certificate_identity": {
-              "const": "https://github.com/iteathen/uci-arena-manager/.github/workflows/managed-component-release.yml@refs/heads/main"
+              "const": "https://github.com/iteathen/uci-arena-installer/.github/workflows/managed-component-release.yml@refs/heads/main"
             },
             "provenance_oidc_issuer": {
               "const": "https://token.actions.githubusercontent.com"

@@ -23,14 +23,16 @@
     "providers": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["uci_arena", "book_forge", "evidence_service"],
+      "required": ["manager", "uci_arena", "lichess_bot", "book_forge", "evidence_service"],
       "properties": {
+        "manager": {"$ref": "#/$defs/managerProvider"},
         "uci_arena": {"$ref": "#/$defs/uciArenaProvider"},
+        "lichess_bot": {"$ref": "#/$defs/lichessProvider"},
         "book_forge": {"$ref": "#/$defs/bookForgeProvider"},
         "evidence_service": {"$ref": "#/$defs/evidenceProvider"}
       }
     },
-    "managed_repository": {"const": "iteathen/uci-arena-manager"},
+    "managed_repository": {"const": "iteathen/uci-arena-installer"},
     "components": {
       "type": "array",
       "items": {"$ref": "#/$defs/providerComponent"}
@@ -61,6 +63,28 @@
           "properties": {
             "repository": {"const": "iteathen/UCI_Arena"},
             "workflow_name": {"const": "Provider component candidate"}
+          }
+        }
+      ]
+    },
+    "managerProvider": {
+      "allOf": [
+        {"$ref": "#/$defs/providerBase"},
+        {
+          "properties": {
+            "repository": {"const": "iteathen/uci-arena-manager"},
+            "workflow_name": {"const": "Manager component candidate"}
+          }
+        }
+      ]
+    },
+    "lichessProvider": {
+      "allOf": [
+        {"$ref": "#/$defs/providerBase"},
+        {
+          "properties": {
+            "repository": {"const": "iteathen/uci-arena-lichess-bot"},
+            "workflow_name": {"const": "Lichess Bot component candidate"}
           }
         }
       ]
@@ -110,7 +134,7 @@
         "provenance_workflow_trigger"
       ],
       "properties": {
-        "provider_id": {"enum": ["uci_arena", "book_forge", "evidence_service"]},
+        "provider_id": {"enum": ["manager", "uci_arena", "lichess_bot", "book_forge", "evidence_service"]},
         "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "component_version": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "target_triple": {
