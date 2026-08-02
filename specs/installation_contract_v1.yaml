@@ -854,6 +854,13 @@ components:
       platform lock realizes that composition with immutable artifact,
       manifest, digest, and provenance identities; it cannot silently replace
       a component version or dependency.
+    - Every platform release lock records the exact product-composition file
+      name and SHA-256. Lock validation resolves component identity,
+      repository, version, and dependency edges from that composition rather
+      than from a hardcoded component table in release tooling.
+    - A lock with release_ready false is reviewable planning data only. It may
+      be validated and dry-run inspected, but acquisition, mirroring,
+      assembly, signing, installation mutation, and publication must reject it.
     - Presets and explicit custom selection are the only authorities that add
       ordinary components to a plan. The planner never injects manager.core,
       a runtime, or any other product identity implicitly.

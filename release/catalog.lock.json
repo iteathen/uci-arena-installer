@@ -1,0 +1,43 @@
+{
+  "schema": "arena_suite_release_lock_v2",
+  "suite_version": "0.3.8",
+  "release_ready": false,
+  "composition": {
+    "manifest_name": "complete-arena-0.3.8.json",
+    "sha256": "7dc4be3eb7699c70051086f901ca00c354f612956963a8cbd19cb7f55d9582ff"
+  },
+  "providers": {
+    "manager": {
+      "repository": "iteathen/uci-arena-manager",
+      "workflow_path": ".github/workflows/component-release.yml",
+      "workflow_name": "Manager component candidate"
+    },
+    "uci_arena": {
+      "repository": "iteathen/UCI_Arena",
+      "workflow_path": ".github/workflows/component-release.yml",
+      "workflow_name": "Provider component candidate"
+    },
+    "lichess_bot": {
+      "repository": "iteathen/uci-arena-lichess-bot",
+      "workflow_path": ".github/workflows/component-release.yml",
+      "workflow_name": "Lichess Bot component candidate"
+    },
+    "book_forge": {
+      "repository": "iteathen/uci-arena-book-forge",
+      "workflow_path": ".github/workflows/component-release.yml",
+      "workflow_name": "Book Forge component candidate"
+    },
+    "evidence_service": {
+      "repository": "iteathen/uci-arena-evidence-service",
+      "workflow_path": ".github/workflows/component-release.yml",
+      "workflow_name": "Evidence Service component candidate"
+    }
+  },
+  "provider_asset_mirror": {
+    "repository": "iteathen/uci-arena-installer",
+    "release_tag": "provider-mirror/v0.3.8"
+  },
+  "managed_repository": "iteathen/uci-arena-installer",
+  "components": [],
+  "managed_components": []
+}

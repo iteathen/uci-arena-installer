@@ -12,6 +12,20 @@ The composition and installer engine are versioned independently. Changing a
 provider version or adding a conforming provider changes composition data and
 its lock realization, not transaction control flow.
 
+`arena_suite_release_lock_v2` binds one realization to the exact composition
+filename and SHA-256. Provider registrations are keyed data whose repository
+must match the composition; they are not a hardcoded list in the validator.
+Each release-ready component has either one portable candidate or both Windows
+and Linux candidates, and every candidate repeats the composition-owned version
+and dependency edges exactly. The checked-in lock may remain an incomplete
+`release_ready: false` review draft, but only validation and explicit dry-run
+inspection may consume that state. Mutation and publication reject it.
+
+`tools/release/release-lock.mjs` owns structural and composition validation.
+`tools/release/mirror-provider-assets.mjs` owns private transport mirroring and
+retains the original repository, release tag, asset digest, and provenance
+identity for every byte. The mirror never becomes component authority.
+
 Node.js and Stockfish are externally sourced managed components rather than
 provider products. Installer owns their exact upstream-input policy,
 reproducible packaging, native smoke validation, and keyless provenance. Their
