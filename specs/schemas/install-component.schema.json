@@ -11,9 +11,21 @@
     "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
     "component_version": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
     "target_triple": {"type": "string"},
+    "display_name": {"type": "string", "minLength": 1},
     "entrypoints": {
       "type": "object",
       "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "default_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "display_name", "input_adapter_id", "root"],
+      "properties": {
+        "model_id": {"type": "string", "minLength": 1},
+        "display_name": {"type": "string", "minLength": 1},
+        "input_adapter_id": {"type": "string", "minLength": 1},
+        "root": {"type": "string", "minLength": 1}
+      }
     },
     "manager_integration_api": {
       "$ref": "manager-service-api.schema.json"

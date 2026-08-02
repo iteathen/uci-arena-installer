@@ -171,6 +171,10 @@ signed_provenance:
       - Managed component versions preserve the upstream identity exactly and
         accept two- or three-part numeric versions; Stockfish 15.1 must not be
         relabeled as 15.1.0.
+      - The managed Stockfish manifest declares its `uci_engine` discovery
+        role through the `stockfish` entrypoint. The private Node runtime
+        declares no engine role; capability, component identity, filename, and
+        entrypoint names never substitute for the discovery declaration.
   suite_artifacts:
     predicate_type: https://uci-arena.example/attestations/installer-release/v1
     statement_type: https://in-toto.io/Statement/v1
