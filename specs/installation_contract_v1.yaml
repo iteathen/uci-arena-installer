@@ -578,9 +578,11 @@ packaging:
         arena_clean_build_result_v1 manifest and cannot succeed when any
         required installer is missing, empty, ambiguously named, or accompanied
         by stale installer output.
-      - Local and CI Manager-Core builds use the same explicit --manager-only
-        command and artifact verifier. Omitting that scope fails closed rather
-        than claiming native Manager packages are Complete Arena media.
+      - Manager publishes one immutable, manifest-bound component candidate per
+        target. Installer release assembly consumes that candidate through the
+        same component contract locally and in protected CI; it never reads a
+        Manager source checkout or mistakes the candidate for Complete Arena
+        media.
       - The explicit --complete-development path composes only the
         release-ready digest-pinned lock and its verified provider Sigstore
         bundles. It may emit an unsigned development bootstrapper, but it
@@ -613,10 +615,11 @@ packaging:
         Stockfish, Book Forge, standard opening book, Evidence runtime,
         Evidence Service, and the Lichess adapter according to the exact
         reviewed catalog.
-      - The protected suite workflow is the canonical complete clean build. It
-        requires a release-ready lock, builds Manager-Core on both platforms,
-        assembles exact provider candidates, runs the acceptance gates, and
-        emits the complete installer sets from the accepted bytes.
+      - The protected Installer workflow is the canonical complete clean build.
+        It requires a release-ready lock, acquires immutable Manager and provider
+        candidates for both platforms, validates their manifests and provenance,
+        runs the acceptance gates, and emits the complete installer sets from
+        the accepted bytes.
       - Provider artifacts from every lock-allowlisted private repository
         remain immutable component candidates. They never satisfy or replace a
         suite installer artifact.
@@ -649,7 +652,9 @@ packaging:
         - uci-arena-manager-<version>-1.x86_64.rpm
         - uci-arena-manager-<version>-linux-x86_64.tar.gz
   windows_manager_msi:
-    payload_source: complete_cmake_install_tree
+    owner: uci-arena-installer
+    payload_source: immutable_manager_component_artifact
+    integration_policy: packaging/windows/manager-integration.json
     scopes:
       per_user:
         recommended: true
@@ -665,7 +670,7 @@ packaging:
         data_root: ProgramData/UCI Arena Manager
         path: machine_msi_owned
         manager_lifecycle: LocalService_windows_service
-    service_registration: per_machine_cpack_wix_component_patch_only
+    service_registration: installer_owned_declarative_wix_integration_policy
     required_payloads:
       - manager_binaries
       - native_runtime_dependencies
@@ -677,10 +682,14 @@ packaging:
         exactly per-user or per-machine. Native entry points fail safely to
         per-machine semantics when the marker is absent or invalid; scope is
         never inferred from a React value or an untrusted catalog.
-      - Per-user MSI generation uses a pinned CMake/CPack version with native
-        per-user component-key support. Every component installed beneath the
-        user profile has an MSI-owned HKCU registry key path, and ICE38 is a
-        blocking validation rather than a suppressed warning.
+      - Installer validates every Manager artifact file against its component
+        manifest before generating either MSI. The MSI builder overlays only
+        Installer-owned integration payloads, including arena-setup and the
+        fixed-scope marker; it does not infer Manager source-tree layout.
+      - Per-user MSI generation uses pinned WiX 6 with native per-user package
+        scope. Every component installed beneath the user profile has an
+        MSI-owned HKCU key path where Windows Installer requires it, and ICE38
+        is a blocking validation rather than a suppressed warning.
       - Burn passes the fixed package scope explicitly to arena-setup together
         with every scope-owned root: install, data, cache, and knowledge. The
         provider workspace is not package-scope-owned and retains arena-setup's
@@ -995,6 +1004,13 @@ discovery:
         legacy, incomplete, or incompatible with the currently selected
         runtime. Exact identity and qualification are enforced only when a
         consumer claims the profile is applied or protected-live-safe.
+      - Discovery and preservation never compare a book, Syzygy collection, or
+        timing-evidence file to the suite product version. Compatibility is
+        capability- and content-based. Unknown optional metadata, newer minor
+        fields, absent sidecars, partial table coverage, or a different runtime
+        identity are reported without hiding, deleting, or blocking the asset.
+        A consumer that cannot activate evidence keeps it cataloged and explains
+        the missing capability, migration, or requalification needed.
       - A usable Polyglot book does not require optional statistics or policy
         sidecars. Missing sidecars reduce projected capabilities rather than
         blocking discovery or import.
