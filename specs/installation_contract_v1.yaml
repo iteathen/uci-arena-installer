@@ -1395,10 +1395,11 @@ transaction:
       - stockfish
       - saved_lichess_token_path_reference_when_available
     evidence_service:
+      - exact_installed_evidence_runtime_root
       - uci_arena_engine
       - installed_model_root
       - stockfish
-      - complete_game_referee
+      - evidence_runtime_complete_game_referee
       - manager_owned_runtime_models_root
       - manager_owned_active_model_pointer
       - explicit_timing_profile_imports

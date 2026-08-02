@@ -2871,6 +2871,8 @@ json generated_component_config(const std::string& component_id, const fs::path&
     }
     if (component_id == "uci_arena_evidence.service") {
         const fs::path engine = installed_entrypoint(receipts_root, "uci_arena.engine", "uci");
+        const fs::path evidence_runtime =
+            installed_active_root(receipts_root, "uci_arena_evidence.runtime");
         const fs::path model_root =
             installed_active_root(receipts_root, "uci_arena.engine") / "models" / "default";
         if (!fs::is_directory(model_root) || contains_symbolic_link(model_root)) {
@@ -2880,6 +2882,7 @@ json generated_component_config(const std::string& component_id, const fs::path&
         json config{
             {"schema", "uci_arena_evidence_service_config_v1"},
             {"workspace", workspace.string()},
+            {"runtimeRoot", evidence_runtime.string()},
             {"activeModelPointer",
              (workspace / "runtime-models" / "active_model_runtime.json").string()},
             {"runtimeModelsRoot", (workspace / "runtime-models").string()},
@@ -2888,7 +2891,8 @@ json generated_component_config(const std::string& component_id, const fs::path&
             {"stockfish",
              installed_entrypoint(receipts_root, "stockfish.engine", "stockfish").string()},
             {"referee",
-             installed_entrypoint(receipts_root, "uci_arena.engine", "referee").string()},
+             installed_entrypoint(receipts_root, "uci_arena_evidence.runtime", "referee")
+                 .string()},
         };
         if (const auto profile_path = saved_locator_path(data_root, "timing_profile");
             profile_path.has_value()) {

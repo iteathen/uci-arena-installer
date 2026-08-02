@@ -1562,6 +1562,131 @@ TEST_CASE("timing profile imports require qualified exact runtime identity") {
     fs::remove_all(root);
 }
 
+TEST_CASE("Evidence configuration binds the installed Evidence Runtime root and referee") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path receipts = paths.data_root / "receipts";
+    fs::create_directories(receipts);
+
+    const auto install_component = [&](const std::string& id, const std::string& version,
+                                       const json& entrypoints,
+                                       const std::vector<std::pair<fs::path, std::string>>& files) {
+        const fs::path active_root = paths.install_root / "components" / id / version;
+        json listed_files = json::array();
+        for (const auto& [relative, contents] : files) {
+            const fs::path target = active_root / relative;
+            fs::create_directories(target.parent_path());
+            std::ofstream(target, std::ios::binary) << contents;
+            listed_files.push_back({
+                {"path", relative.generic_string()},
+                {"size_bytes", contents.size()},
+                {"sha256", sha256_text(contents)},
+            });
+        }
+        std::ofstream(active_root / "arena-component.json", std::ios::binary)
+            << json{
+                   {"schema", "arena_install_component_v1"},
+                   {"schema_version", 1},
+                   {"component_id", id},
+                   {"component_version", version},
+                   {"entrypoints", entrypoints},
+                   {"files", listed_files},
+               }
+                   .dump(2);
+        std::ofstream(receipts / (id + ".json"), std::ios::binary)
+            << json{
+                   {"schema", "arena_install_receipt_v1"},
+                   {"schema_version", 1},
+                   {"component_id", id},
+                   {"component_version", version},
+                   {"state", "installed_managed"},
+                   {"active_root", active_root.string()},
+                   {"artifact_sha256", std::string(64, 'a')},
+                   {"dependencies", json::array()},
+                   {"data_paths", json::array()},
+                   {"configuration_path", ""},
+                   {"activated_files", json::array()},
+               }
+                   .dump(2);
+        return active_root;
+    };
+
+    const fs::path engine_root = install_component(
+        "uci_arena.engine", "1.0.0", {{"uci", "bin/uci_arena_engine.exe"}},
+        {{"bin/uci_arena_engine.exe", "engine"},
+         {"models/default/checkpoint_manifest.json",
+          R"({"model_id":"model-1","checkpoint_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})"}});
+    static_cast<void>(install_component(
+        "stockfish.engine", "1.0.0", {{"stockfish", "bin/stockfish.exe"}},
+        {{"bin/stockfish.exe", "stockfish"}}));
+    const fs::path runtime_root = install_component(
+        "uci_arena_evidence.runtime", "1.0.0",
+        {{"referee", "bin/uci_arena_complete_game_referee.exe"}},
+        {{"bin/uci_arena_complete_game_referee.exe", "referee"}});
+    write_manager_api_service_install(paths, manager_service_api());
+
+    const fs::path configuration =
+        paths.workspace_root / "evidence-service" / "manager-config.json";
+    const fs::path evidence_receipt_path =
+        receipts / "uci_arena_evidence.service.json";
+    std::ifstream evidence_receipt_input(evidence_receipt_path, std::ios::binary);
+    json evidence_receipt = json::parse(evidence_receipt_input);
+    evidence_receipt_input.close();
+    evidence_receipt["configuration_path"] = configuration.string();
+    evidence_receipt["data_paths"] = json::array({configuration.parent_path().string()});
+    std::ofstream(evidence_receipt_path, std::ios::binary)
+        << evidence_receipt.dump(2);
+
+    const json identity{
+        {"engine",
+         {{"executable_sha256",
+           "sha256:" + sha256_text("engine")}}},
+        {"model", {{"model_id", "model-1"}, {"model_fingerprint", "model-fingerprint"}}},
+        {"provider", {{"hardware_driver_fingerprint", "cpu-fixture"}}},
+        {"search",
+         {{"search_core", "mcgs"},
+          {"threads", 1},
+          {"root_workers", 1},
+          {"split_depth", 2},
+          {"background_search", true},
+          {"nn_speculation", false},
+          {"batch_size_effective", 1},
+          {"batch_wait_us_effective", 0},
+          {"provider_effective", "cpu"},
+          {"extra_engine_options", json::object()}}},
+    };
+    const fs::path profile_path = root / "uci_time_profile_v3.json";
+    std::ofstream(profile_path, std::ios::binary)
+        << json{
+               {"schema", "uci_time_profile_v3"},
+               {"qualified", true},
+               {"gates", {{"passed", true}}},
+               {"permissions",
+                {{"provider_safety_qualified", true},
+                 {"forecast_shadow_qualified", false},
+                 {"adaptive_play_qualified", false}}},
+               {"identity", identity},
+               {"identity_sha256", "sha256:" + sha256_text(identity.dump())},
+           }
+               .dump(2);
+
+    const json imported = SetupEngine::import_path(paths, "timing_profile", profile_path);
+    REQUIRE(imported.at("refreshed_consumers") ==
+            json::array({"uci_arena_evidence.service"}));
+    std::ifstream configuration_input(configuration, std::ios::binary);
+    const json generated = json::parse(configuration_input);
+    REQUIRE(fs::path(generated.at("runtimeRoot").get<std::string>()) ==
+            fs::absolute(runtime_root).lexically_normal());
+    REQUIRE(fs::path(generated.at("referee").get<std::string>()) ==
+            fs::absolute(runtime_root / "bin/uci_arena_complete_game_referee.exe")
+                .lexically_normal());
+    REQUIRE_FALSE(fs::path(generated.at("referee").get<std::string>())
+                      .string()
+                      .starts_with(fs::absolute(engine_root).lexically_normal().string()));
+    configuration_input.close();
+    fs::remove_all(root);
+}
+
 TEST_CASE("Lichess safety profiles preserve qualification and manage the evidence closure") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
