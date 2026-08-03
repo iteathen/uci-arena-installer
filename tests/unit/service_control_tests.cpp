@@ -8,8 +8,10 @@
 namespace {
 
 using arena::platform::ServiceAction;
+using arena::platform::perform_service_action;
 using arena::platform::service_action_from_name;
 using arena::platform::service_action_name;
+using arena::platform::valid_service_action;
 
 TEST_CASE("service control accepts only the fixed typed action set") {
     constexpr std::array expected{
@@ -23,6 +25,7 @@ TEST_CASE("service control accepts only the fixed typed action set") {
         REQUIRE(parsed.has_value());
         REQUIRE(*parsed == action);
         REQUIRE(service_action_name(action) == name);
+        REQUIRE(valid_service_action(action));
     }
 
     REQUIRE_FALSE(service_action_from_name("enable").has_value());
@@ -30,6 +33,18 @@ TEST_CASE("service control accepts only the fixed typed action set") {
     REQUIRE_FALSE(service_action_from_name("daemon-reload").has_value());
     REQUIRE_FALSE(service_action_from_name("start --now").has_value());
     REQUIRE_FALSE(service_action_from_name("").has_value());
+}
+
+TEST_CASE("invalid service actions fail before platform access") {
+    const auto invalid = static_cast<ServiceAction>(255);
+    REQUIRE(service_action_name(invalid).empty());
+    REQUIRE_FALSE(valid_service_action(invalid));
+    REQUIRE_THROWS_WITH(
+        perform_service_action("unused-service", invalid),
+        Catch::Matchers::ContainsSubstring("unsupported"));
+    REQUIRE_THROWS_WITH(
+        perform_service_action("unused-service", "enable"),
+        "unsupported service action");
 }
 
 } // namespace
