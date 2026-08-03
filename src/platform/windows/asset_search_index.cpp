@@ -91,9 +91,12 @@ HRESULT execute_query(IDBCreateCommand* command_factory, const std::wstring& sql
     if (FAILED(result)) {
         return result;
     }
-    (void)set_command_timeout(
+    result = set_command_timeout(
         command.Get(),
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now));
+    if (FAILED(result)) {
+        return result;
+    }
 
     ComPtr<IRowset> rowset;
     DBROWCOUNT affected{};
@@ -283,11 +286,11 @@ class WindowsSearchIndex final : public AssetSearchIndex {
              L"System.ItemNameDisplay LIKE '%time%profile%.json')"},
         };
         for (const auto& [kind, predicate] : queries) {
-            const std::size_t limit =
-                indexed_asset_kind_budget(query.maximum_results, kind);
+            const std::size_t limit = indexed_asset_remaining_budget(
+                query.maximum_results, result.candidates.size());
             if (limit == 0) {
                 result.truncated = true;
-                continue;
+                break;
             }
             status = execute_query(
                 command_factory.Get(), query_sql(limit, predicate), kind,
