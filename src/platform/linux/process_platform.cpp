@@ -2,12 +2,15 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -16,6 +19,53 @@
 #include <thread>
 
 namespace arena::ports {
+namespace {
+
+class ScopedSigpipeBlock final {
+  public:
+    ScopedSigpipeBlock() {
+        sigemptyset(&blocked_);
+        sigaddset(&blocked_, SIGPIPE);
+        if (pthread_sigmask(SIG_BLOCK, &blocked_, &previous_) != 0) {
+            throw std::runtime_error("failed to block SIGPIPE for process write");
+        }
+        active_ = true;
+        previously_blocked_ = sigismember(&previous_, SIGPIPE) == 1;
+    }
+
+    ~ScopedSigpipeBlock() {
+        if (active_) {
+            pthread_sigmask(SIG_SETMASK, &previous_, nullptr);
+        }
+    }
+
+    ScopedSigpipeBlock(const ScopedSigpipeBlock&) = delete;
+    ScopedSigpipeBlock& operator=(const ScopedSigpipeBlock&) = delete;
+
+    void consume_generated_sigpipe() const noexcept {
+        if (previously_blocked_) {
+            return;
+        }
+        timespec timeout{};
+        while (sigtimedwait(&blocked_, nullptr, &timeout) < 0 && errno == EINTR) {
+        }
+    }
+
+  private:
+    sigset_t blocked_{};
+    sigset_t previous_{};
+    bool active_{};
+    bool previously_blocked_{};
+};
+
+void close_fd(int& descriptor) noexcept {
+    if (descriptor >= 0) {
+        close(descriptor);
+        descriptor = -1;
+    }
+}
+
+} // namespace
 
 struct NativeProcess::Impl {
     static constexpr std::size_t max_lines = 8192;
@@ -29,16 +79,11 @@ struct NativeProcess::Impl {
     std::deque<std::string> lines;
     std::uint64_t dropped{};
     bool reader_finished{true};
+    std::atomic_bool reader_stop_requested{false};
 
-    void close_descriptors() {
-        if (stdin_fd >= 0) {
-            close(stdin_fd);
-            stdin_fd = -1;
-        }
-        if (stdout_fd >= 0) {
-            close(stdout_fd);
-            stdout_fd = -1;
-        }
+    void close_descriptors() noexcept {
+        close_fd(stdin_fd);
+        close_fd(stdout_fd);
     }
 
     void enqueue(std::string line) {
@@ -69,13 +114,41 @@ struct NativeProcess::Impl {
     void read_output() {
         std::string pending;
         char buffer[4096];
-        ssize_t count = 0;
-        while ((count = read(stdout_fd, buffer, sizeof(buffer))) > 0) {
-            pending.append(buffer, static_cast<std::size_t>(count));
-            std::size_t newline = 0;
-            while ((newline = pending.find('\n')) != std::string::npos) {
-                enqueue(pending.substr(0, newline));
-                pending.erase(0, newline + 1);
+        bool finished = false;
+        while (!finished && !reader_stop_requested.load(std::memory_order_acquire)) {
+            pollfd descriptor{stdout_fd, POLLIN | POLLHUP | POLLERR, 0};
+            const int result = poll(&descriptor, 1, 100);
+            if (result < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (result == 0) {
+                continue;
+            }
+            if ((descriptor.revents & POLLIN) != 0) {
+                for (;;) {
+                    const ssize_t count = read(stdout_fd, buffer, sizeof(buffer));
+                    if (count > 0) {
+                        pending.append(buffer, static_cast<std::size_t>(count));
+                        std::size_t newline = 0;
+                        while ((newline = pending.find('\n')) != std::string::npos) {
+                            enqueue(pending.substr(0, newline));
+                            pending.erase(0, newline + 1);
+                        }
+                        continue;
+                    }
+                    if (count == 0) {
+                        finished = true;
+                    } else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                        finished = true;
+                    }
+                    break;
+                }
+            }
+            if ((descriptor.revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+                finished = true;
             }
         }
         if (!pending.empty()) {
@@ -105,10 +178,16 @@ void NativeProcess::start(
     if (running()) {
         throw std::runtime_error("process is already running");
     }
-    int stdin_pipe[2]{};
-    int stdout_pipe[2]{};
-    if (pipe2(stdin_pipe, O_CLOEXEC) != 0 || pipe2(stdout_pipe, O_CLOEXEC) != 0) {
-        throw std::runtime_error(std::string("failed to create process pipes: ") +
+    int stdin_pipe[2]{-1, -1};
+    int stdout_pipe[2]{-1, -1};
+    if (pipe2(stdin_pipe, O_CLOEXEC) != 0) {
+        throw std::runtime_error(std::string("failed to create process stdin pipe: ") +
+                                 std::strerror(errno));
+    }
+    if (pipe2(stdout_pipe, O_CLOEXEC) != 0) {
+        close(stdin_pipe[0]);
+        close(stdin_pipe[1]);
+        throw std::runtime_error(std::string("failed to create process stdout pipe: ") +
                                  std::strerror(errno));
     }
 
@@ -121,8 +200,7 @@ void NativeProcess::start(
         throw std::runtime_error(std::string("failed to fork: ") + std::strerror(errno));
     }
     if (child == 0) {
-        setpgid(0, 0);
-        if (chdir(working_directory.c_str()) != 0 ||
+        if (setpgid(0, 0) != 0 || chdir(working_directory.c_str()) != 0 ||
             dup2(stdin_pipe[0], STDIN_FILENO) < 0 ||
             dup2(stdout_pipe[1], STDOUT_FILENO) < 0 ||
             dup2(stdout_pipe[1], STDERR_FILENO) < 0) {
@@ -149,9 +227,28 @@ void NativeProcess::start(
 
     close(stdin_pipe[0]);
     close(stdout_pipe[1]);
+    if (setpgid(child, child) != 0 && errno != EACCES && errno != ESRCH) {
+        kill(child, SIGKILL);
+        waitpid(child, nullptr, 0);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        throw std::runtime_error(std::string("failed to establish process group: ") +
+                                 std::strerror(errno));
+    }
+    const int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
+    if (flags < 0 || fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK) != 0) {
+        kill(-child, SIGKILL);
+        waitpid(child, nullptr, 0);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        throw std::runtime_error(std::string("failed to configure process output pipe: ") +
+                                 std::strerror(errno));
+    }
+
     impl_->process_id = child;
     impl_->stdin_fd = stdin_pipe[1];
     impl_->stdout_fd = stdout_pipe[0];
+    impl_->reader_stop_requested.store(false, std::memory_order_release);
     {
         std::scoped_lock lock(impl_->mutex);
         impl_->lines.clear();
@@ -166,12 +263,20 @@ void NativeProcess::write_line(const std::string& line) {
         throw std::runtime_error("cannot write to a stopped process");
     }
     const std::string framed = line + "\n";
+    ScopedSigpipeBlock sigpipe;
     std::size_t offset = 0;
     while (offset < framed.size()) {
         const ssize_t written = write(
             impl_->stdin_fd, framed.data() + offset, framed.size() - offset);
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
         if (written <= 0) {
-            throw std::runtime_error("failed to write to process");
+            if (errno == EPIPE) {
+                sigpipe.consume_generated_sigpipe();
+            }
+            throw std::runtime_error(std::string("failed to write to process: ") +
+                                     std::strerror(errno));
         }
         offset += static_cast<std::size_t>(written);
     }
@@ -194,9 +299,16 @@ bool NativeProcess::running() const {
     if (impl_->process_id <= 0) {
         return false;
     }
-    int status = 0;
-    const pid_t result = waitpid(impl_->process_id, &status, WNOHANG);
-    return result == 0;
+    siginfo_t information{};
+    if (waitid(P_PID, impl_->process_id, &information,
+               WEXITED | WNOHANG | WNOWAIT) != 0) {
+        if (errno == ECHILD) {
+            return false;
+        }
+        throw std::runtime_error(std::string("failed to inspect process state: ") +
+                                 std::strerror(errno));
+    }
+    return information.si_pid == 0;
 }
 
 std::uint64_t NativeProcess::pid() const {
@@ -212,6 +324,7 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
     if (impl_->process_id <= 0) {
         return;
     }
+    const pid_t process_id = impl_->process_id;
     if (running()) {
         try {
             write_line("quit");
@@ -221,20 +334,21 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
         while (std::chrono::steady_clock::now() < deadline && running()) {
             poll(nullptr, 0, 10);
         }
-        if (running()) {
-            kill(-impl_->process_id, SIGKILL);
-            waitpid(impl_->process_id, nullptr, 0);
-        }
     }
-    if (impl_->stdin_fd >= 0) {
-        close(impl_->stdin_fd);
-        impl_->stdin_fd = -1;
+
+    if (kill(-process_id, SIGKILL) != 0 && errno != ESRCH) {
+        impl_->reader_stop_requested.store(true, std::memory_order_release);
     }
+    int status = 0;
+    while (waitpid(process_id, &status, 0) < 0 && errno == EINTR) {
+    }
+    close_fd(impl_->stdin_fd);
+    impl_->reader_stop_requested.store(true, std::memory_order_release);
     if (impl_->reader.joinable()) {
         impl_->reader.join();
     }
-    impl_->close_descriptors();
+    close_fd(impl_->stdout_fd);
     impl_->process_id = -1;
 }
 
-}  // namespace arena::ports
+} // namespace arena::ports
