@@ -19,19 +19,30 @@ std::wstring utf8_to_wide(const std::string& value) {
     if (value.empty()) {
         return {};
     }
-    const int size = MultiByteToWideChar(
-        CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (size <= 0) {
-        throw std::runtime_error("invalid UTF-8 process argument");
+    if (value.size() >
+        static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        throw std::runtime_error("process argument exceeds the Windows UTF-8 conversion bound");
     }
-    std::wstring result(static_cast<std::size_t>(size), L'\0');
-    MultiByteToWideChar(
+    const int size = MultiByteToWideChar(
         CP_UTF8,
         MB_ERR_INVALID_CHARS,
         value.data(),
         static_cast<int>(value.size()),
-        result.data(),
-        size);
+        nullptr,
+        0);
+    if (size <= 0) {
+        throw std::runtime_error("invalid UTF-8 process argument");
+    }
+    std::wstring result(static_cast<std::size_t>(size), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            result.data(),
+            size) != size) {
+        throw std::runtime_error("process argument UTF-8 conversion failed");
+    }
     return result;
 }
 
@@ -65,6 +76,59 @@ void close_handle(HANDLE& handle) noexcept {
     if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
         CloseHandle(handle);
         handle = nullptr;
+    }
+}
+
+void remember_failure(std::string& failure, std::string message) {
+    if (failure.empty()) {
+        failure = std::move(message);
+    }
+}
+
+DWORD finite_wait_duration(
+    const std::chrono::milliseconds timeout,
+    const char* label) {
+    if (timeout.count() < 0) {
+        throw std::runtime_error(std::string(label) + " must be non-negative");
+    }
+    constexpr auto maximum =
+        static_cast<std::int64_t>((std::numeric_limits<DWORD>::max)() - 1U);
+    if (timeout.count() > maximum) {
+        throw std::runtime_error(std::string(label) + " exceeds the Windows wait bound");
+    }
+    return static_cast<DWORD>(timeout.count());
+}
+
+bool wait_for_job_empty(
+    const HANDLE job,
+    const std::chrono::milliseconds timeout,
+    std::string& failure) noexcept {
+    const ULONGLONG deadline = GetTickCount64() +
+        static_cast<ULONGLONG>(timeout.count());
+    for (;;) {
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION information{};
+        if (!QueryInformationJobObject(
+                job,
+                JobObjectBasicAccountingInformation,
+                &information,
+                sizeof(information),
+                nullptr)) {
+            remember_failure(
+                failure,
+                "failed to query Job Object activity, Windows error " +
+                    std::to_string(GetLastError()));
+            return false;
+        }
+        if (information.ActiveProcesses == 0) {
+            return true;
+        }
+        if (GetTickCount64() >= deadline) {
+            remember_failure(
+                failure,
+                "Job Object still has active processes after forced shutdown");
+            return false;
+        }
+        Sleep(10);
     }
 }
 
@@ -198,6 +262,10 @@ void NativeProcess::start(
         command_line.push_back(L' ');
         command_line += quote_argument(utf8_to_wide(argument));
     }
+    if (command_line.size() >= 32'767) {
+        close_pipe_handles();
+        throw std::runtime_error("process command line exceeds the Windows bound");
+    }
 
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -219,12 +287,13 @@ void NativeProcess::start(
         working_directory_wide.c_str(),
         &startup,
         &process_info);
+    const DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
     close_handle(stdin_read);
     close_handle(stdout_write);
     if (!created) {
         close_pipe_handles();
         throw std::runtime_error("failed to launch process, Windows error " +
-                                 std::to_string(GetLastError()));
+                                 std::to_string(create_error));
     }
 
     impl_->job = CreateJobObjectW(nullptr, nullptr);
@@ -277,10 +346,13 @@ void NativeProcess::write_line(const std::string& line) {
     if (!running()) {
         throw std::runtime_error("cannot write to a stopped process");
     }
-    const std::string framed = line + "\n";
-    if (framed.size() > (std::numeric_limits<DWORD>::max)()) {
+    if (line.size() >= (std::numeric_limits<DWORD>::max)()) {
         throw std::runtime_error("process input line exceeds the Windows write bound");
     }
+    std::string framed;
+    framed.reserve(line.size() + 1);
+    framed.append(line);
+    framed.push_back('\n');
     DWORD written = 0;
     if (!WriteFile(
             impl_->stdin_write,
@@ -311,7 +383,12 @@ bool NativeProcess::running() const {
         return false;
     }
     DWORD exit_code = 0;
-    return GetExitCodeProcess(impl_->process, &exit_code) && exit_code == STILL_ACTIVE;
+    if (!GetExitCodeProcess(impl_->process, &exit_code)) {
+        throw std::runtime_error(
+            "failed to inspect process state, Windows error " +
+            std::to_string(GetLastError()));
+    }
+    return exit_code == STILL_ACTIVE;
 }
 
 std::uint64_t NativeProcess::pid() const { return impl_->process_id; }
@@ -322,21 +399,61 @@ std::uint64_t NativeProcess::dropped_observational_lines() const {
 }
 
 void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
+    const DWORD graceful_wait = finite_wait_duration(
+        graceful_timeout,
+        "process graceful timeout");
     if (impl_->process == nullptr) {
         return;
     }
-    if (running()) {
+
+    std::string failure;
+    bool direct_running = true;
+    try {
+        direct_running = running();
+    } catch (const std::exception& error) {
+        remember_failure(failure, error.what());
+    }
+    if (direct_running) {
         try {
             write_line("quit");
         } catch (...) {
         }
-        WaitForSingleObject(impl_->process, static_cast<DWORD>(graceful_timeout.count()));
+        const DWORD graceful_result =
+            WaitForSingleObject(impl_->process, graceful_wait);
+        if (graceful_result == WAIT_FAILED) {
+            remember_failure(
+                failure,
+                "failed while waiting for graceful process exit, Windows error " +
+                    std::to_string(GetLastError()));
+        }
     }
 
+    bool job_termination_requested = false;
     if (impl_->job != nullptr) {
-        TerminateJobObject(impl_->job, 1);
+        if (TerminateJobObject(impl_->job, 1)) {
+            job_termination_requested = true;
+        } else {
+            remember_failure(
+                failure,
+                "failed to terminate process Job Object, Windows error " +
+                    std::to_string(GetLastError()));
+            close_handle(impl_->job);
+        }
     }
-    WaitForSingleObject(impl_->process, 2000);
+
+    const DWORD direct_wait = WaitForSingleObject(impl_->process, 2'000);
+    if (direct_wait != WAIT_OBJECT_0) {
+        remember_failure(
+            failure,
+            direct_wait == WAIT_TIMEOUT
+                ? "direct process remained active after forced shutdown"
+                : "failed while waiting for forced process exit, Windows error " +
+                    std::to_string(GetLastError()));
+    }
+    if (job_termination_requested && impl_->job != nullptr) {
+        wait_for_job_empty(impl_->job, std::chrono::seconds(2), failure);
+    }
+
     close_handle(impl_->stdin_write);
     if (impl_->reader.joinable()) {
         CancelSynchronousIo(impl_->reader.native_handle());
@@ -348,6 +465,10 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
     close_handle(impl_->process);
     close_handle(impl_->job);
     impl_->process_id = 0;
+
+    if (!failure.empty()) {
+        throw std::runtime_error(failure);
+    }
 }
 
 } // namespace arena::ports
