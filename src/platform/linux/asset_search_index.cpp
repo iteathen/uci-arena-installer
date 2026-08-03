@@ -161,16 +161,7 @@ class LocateAssetSearchIndex final : public AssetSearchIndex {
             return finish(IndexedSearchState::unavailable,
                           "locate_process_unavailable");
         }
-        std::ranges::sort(result.candidates, {}, [](const IndexedAssetCandidate& candidate) {
-            return candidate.path.native();
-        });
-        result.candidates.erase(
-            std::unique(result.candidates.begin(), result.candidates.end(),
-                        [](const IndexedAssetCandidate& left,
-                           const IndexedAssetCandidate& right) {
-                            return left.kind == right.kind && left.path == right.path;
-                        }),
-            result.candidates.end());
+        finalize_indexed_asset_search_result(result);
         return finish(IndexedSearchState::complete,
                       result.truncated ? "result_limit_reached" : "complete");
     }
