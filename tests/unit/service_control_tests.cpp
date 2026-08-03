@@ -41,7 +41,7 @@ TEST_CASE("invalid service actions fail before platform access") {
     REQUIRE_FALSE(valid_service_action(invalid));
     REQUIRE_THROWS_WITH(
         perform_service_action("unused-service", invalid),
-        Catch::Matchers::ContainsSubstring("unsupported"));
+        "unsupported service action");
     REQUIRE_THROWS_WITH(
         perform_service_action("unused-service", "enable"),
         "unsupported service action");
