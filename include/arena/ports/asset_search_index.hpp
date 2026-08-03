@@ -51,6 +51,8 @@ class AssetSearchIndex {
     search(const IndexedAssetQuery& query) = 0;
 };
 
+void finalize_indexed_asset_search_result(IndexedAssetSearchResult& result);
+
 [[nodiscard]] std::string_view indexed_asset_kind_name(IndexedAssetKind kind) noexcept;
 [[nodiscard]] std::string_view indexed_search_state_name(IndexedSearchState state) noexcept;
 [[nodiscard]] std::unique_ptr<AssetSearchIndex> make_platform_asset_search_index();
