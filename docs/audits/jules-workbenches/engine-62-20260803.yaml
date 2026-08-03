@@ -1,0 +1,63 @@
+schema: uci_arena_jules_workbench_manifest_v1
+workbench_id: engine-62-20260803
+disposable: true
+repository:
+  intended_name: iteathen/jules-wb-engine-62-20260803
+  visibility: private
+  default_branch: main
+  one_task_only: true
+source:
+  repository: iteathen/UCI_Arena
+  authoritative_branch: agent/integrate-engine-audit-stacks
+  authoritative_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+  authoritative_pr: 47
+  prepared_destination_branch: agent/timestamp-resource-lease-revocation
+  source_issue: 62
+baseline:
+  required_main_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+  verification:
+    - main tree must match source authoritative_sha before the manifest/task files are added
+    - record the manifest commit as the Jules baseline SHA
+    - Jules result must descend directly from that recorded baseline
+scope:
+  owner: packages/background-service-runtime
+  permitted_paths:
+    - packages/background-service-runtime/src/background-resource-lease.mjs
+    - packages/background-service-runtime/test/resource-lease-revocation.test.mjs
+    - packages/background-service-runtime/test/resource-lease-heartbeat.test.mjs
+    - packages/background-service-runtime/package.json
+    - specs/background_resource_lease_revocation_v1.yaml
+    - specs/index.yaml
+    - tools/spec_preflight_check.py
+  forbidden_paths:
+    - engine/**
+    - arena/**
+    - release/**
+    - .github/**
+    - packages/time-profile-contract/**
+  forbidden_changes:
+    - inference, search, evaluation, UCI, provider release, packaging, or model semantics
+    - Evidence-specific two-second policy in the shared package
+    - unbounded request arrays or high-frequency directory scans
+handoff:
+  workbench_pr_is_delivery_container_only: true
+  review_in_workbench: false
+  transfer_method: cherry-pick_or_exact_reconstruction
+  destination_repository: iteathen/UCI_Arena
+  destination_branch: agent/timestamp-resource-lease-revocation
+  destination_base: agent/integrate-engine-audit-stacks
+  equivalence_rule: >-
+    The transferred source-repository patch must equal workbench baseline..Jules result
+    after excluding only the workbench manifest/task files.
+cleanup_gates:
+  - freeze exact workbench result SHA
+  - push transferred branch in source repository
+  - open source-repository draft PR
+  - verify patch equivalence
+  - record Jules task transcript/final summary
+  - update canonical handoff and registry
+  - delete private workbench repository
+  - remove local clones/worktrees and prune stale refs
+terminal_states:
+  - transferred_and_deleted
+  - abandoned_and_deleted
