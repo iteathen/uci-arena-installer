@@ -129,7 +129,7 @@ int perform_service_action(
         throw std::runtime_error("service name is required");
     }
     if (!valid_service_action(action)) {
-        throw std::runtime_error("unsupported Windows service action");
+        throw std::runtime_error("unsupported service action");
     }
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (manager == nullptr) {
