@@ -18,22 +18,10 @@ import path from "node:path";
 import process from "node:process";
 import { gzipSync } from "node:zlib";
 
-const COMPONENTS = Object.freeze({
-  "node_runtime.private": {
-    executable: { windows: "node.exe", linux: "node" },
-    entrypoint: "node",
-    licenseName: "node-LICENSE",
-    capability: "private_node_runtime",
-    smokeProtocol: "node_version",
-  },
-  "stockfish.engine": {
-    executable: { windows: "stockfish.exe", linux: "stockfish" },
-    entrypoint: "stockfish",
-    licenseName: "stockfish-Copying.txt",
-    capability: "uci_engine",
-    smokeProtocol: "uci_startup",
-  },
-});
+import {
+  managedComponentDefinition,
+  managedComponentManifest,
+} from "./managed-component-manifest.mjs";
 const TARGETS = new Set(["windows-x86_64", "linux-x86_64"]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
@@ -201,8 +189,7 @@ for (const required of [
   if (!args[required]) throw new Error(`--${required} is required`);
 }
 const componentId = args["component-id"];
-const definition = COMPONENTS[componentId];
-if (!definition) throw new Error(`unsupported managed component ${componentId}`);
+const definition = managedComponentDefinition(componentId);
 if (!VERSION_PATTERN.test(args.version)) throw new Error("--version is invalid");
 if (!TARGETS.has(args.target)) throw new Error("--target is invalid");
 if (!/^https:\/\//u.test(args["source-url"])) throw new Error("--source-url must use HTTPS");
@@ -264,18 +251,13 @@ const payloadFiles = files(stage).map((relative) => ({
   size_bytes: statSync(path.join(stage, relative)).size,
 }));
 const manifestPath = path.join(stage, "arena-component.json");
-writeFileSync(manifestPath, canonicalJson({
-  schema: "arena_install_component_v1",
-  schema_version: 1,
-  component_id: componentId,
-  component_version: args.version,
-  target_triple: args.target,
-  entrypoints: { [definition.entrypoint]: executableRelative },
-  capabilities: [definition.capability],
-  startup: {},
-  data_paths: [],
-  files: payloadFiles,
-}));
+writeFileSync(manifestPath, canonicalJson(managedComponentManifest({
+  componentId,
+  version: args.version,
+  target: args.target,
+  executableRelative,
+  payloadFiles,
+})));
 chmodSync(manifestPath, 0o644);
 utimesSync(manifestPath, epoch, epoch);
 archive(stage, artifactPath, epoch);

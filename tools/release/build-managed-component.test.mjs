@@ -13,6 +13,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { managedComponentManifest } from "./managed-component-manifest.mjs";
+
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -27,6 +29,33 @@ const script = path.join(
 function sha256(filename) {
   return createHash("sha256").update(readFileSync(filename)).digest("hex");
 }
+
+test("managed component roles are explicit manifest data", () => {
+  const common = {
+    version: "1.0.0",
+    target: "windows-x86_64",
+    executableRelative: "bin/runtime.exe",
+    payloadFiles: [{
+      path: "bin/runtime.exe",
+      sha256: "a".repeat(64),
+      size_bytes: 1,
+    }],
+  };
+  const stockfish = managedComponentManifest({
+    ...common,
+    componentId: "stockfish.engine",
+  });
+  assert.deepEqual(stockfish.discovery, [{
+    kind: "uci_engine",
+    locator: { source: "entrypoint", entrypoint: "stockfish" },
+  }]);
+
+  const node = managedComponentManifest({
+    ...common,
+    componentId: "node_runtime.private",
+  });
+  assert.equal(Object.hasOwn(node, "discovery"), false);
+});
 
 test("managed Node candidate is native-smoked, licensed, and reproducible", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "arena-managed-component-"));

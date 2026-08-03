@@ -18,6 +18,12 @@ set(
   "Pinned SHA-256 of the trusted TUF root for official installer builds"
 )
 
+if(MSVC)
+  set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
+  set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+  include(InstallRequiredSystemLibraries)
+endif()
+
 find_package(CLI11 CONFIG REQUIRED)
 find_package(CURL CONFIG REQUIRED)
 find_package(LibArchive REQUIRED)
@@ -72,6 +78,43 @@ target_link_libraries(
   arena-setup
   PRIVATE arena_installer_core CLI11::CLI11 CURL::libcurl)
 
+if(WIN32)
+  set(ARENA_INSTALLER_RUNTIME_SEARCH_DIRECTORIES
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+else()
+  set(ARENA_INSTALLER_RUNTIME_SEARCH_DIRECTORIES
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
+endif()
+
+install(
+  TARGETS arena-setup
+  RUNTIME_DEPENDENCIES
+    DIRECTORIES ${ARENA_INSTALLER_RUNTIME_SEARCH_DIRECTORIES}
+    PRE_EXCLUDE_REGEXES
+      "api-ms-"
+      "ext-ms-"
+      "[Aa]zure[Aa]ttest.*"
+      "[Hh]vsi[Ff]ile[Tt]rust\\.dll"
+      "[Pp]dm[Uu]tilities\\.dll"
+      "[Ww]paxholder\\.dll"
+    POST_EXCLUDE_REGEXES
+      ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss][Yy][Ss][Tt][Ee][Mm]32[/\\\\].*"
+      "^/lib(64)?/.*"
+      "^/usr/lib(64)?/.*"
+  RUNTIME DESTINATION bin
+)
+install(FILES LICENSE DESTINATION share/licenses/uci-arena-installer)
+file(GLOB ARENA_INSTALLER_VCPKG_COPYRIGHTS CONFIGURE_DEPENDS
+  "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/*/copyright")
+foreach(ARENA_INSTALLER_VCPKG_COPYRIGHT IN LISTS ARENA_INSTALLER_VCPKG_COPYRIGHTS)
+  get_filename_component(ARENA_INSTALLER_VCPKG_SHARE_DIR
+    "${ARENA_INSTALLER_VCPKG_COPYRIGHT}" DIRECTORY)
+  get_filename_component(ARENA_INSTALLER_VCPKG_PACKAGE
+    "${ARENA_INSTALLER_VCPKG_SHARE_DIR}" NAME)
+  install(FILES "${ARENA_INSTALLER_VCPKG_COPYRIGHT}"
+    DESTINATION "share/licenses/vcpkg/${ARENA_INSTALLER_VCPKG_PACKAGE}")
+endforeach()
+
 if(MSVC)
   target_compile_options(arena_installer_core PRIVATE /W4 /permissive- /EHsc)
   target_compile_options(arena-setup PRIVATE /W4 /permissive- /EHsc)
@@ -118,6 +161,8 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     arena_mock_uci tests/mocks/mock_uci_engine.cpp)
   add_executable(
     arena_mock_service tests/mocks/mock_service_cli.cpp)
+  target_link_libraries(
+    arena_mock_service PRIVATE nlohmann_json::nlohmann_json)
   add_executable(
     arena_mock_process_tree tests/mocks/mock_process_tree.cpp)
   add_executable(
@@ -127,7 +172,10 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     tests/unit/windows_installer_launcher_tests.cpp
   )
   add_dependencies(
-    arena_installer_tests arena_mock_uci arena_mock_service arena_mock_process_tree)
+    arena_installer_tests
+    arena_mock_uci
+    arena_mock_service
+    arena_mock_process_tree)
   target_compile_definitions(
     arena_installer_tests
     PRIVATE

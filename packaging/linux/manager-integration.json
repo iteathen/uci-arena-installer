@@ -1,0 +1,48 @@
+{
+  "schema": "arena_manager_linux_integration_v1",
+  "component_id": "manager.core",
+  "package": {
+    "name": "uci-arena-manager",
+    "architecture": {
+      "deb": "amd64",
+      "rpm": "x86_64"
+    },
+    "license": "AGPL-3.0-or-later",
+    "section": "games",
+    "group": "Applications/Engineering",
+    "priority": "optional",
+    "maintainer": "UCI Arena Manager contributors <iteathen@users.noreply.github.com>",
+    "homepage": "https://github.com/iteathen/uci-arena-manager",
+    "summary": "Local-first UCI chess arena control plane",
+    "description": "UCI Arena Manager provides the native service, authenticated CLI, desktop launcher, and local control plane for UCI engine matches.",
+    "deb_dependencies": "libc6, libstdc++6, systemd, init-system-helpers, passwd, acl, libwebkit2gtk-4.1-0, zenity",
+    "rpm_dependencies": "systemd, acl, webkit2gtk4.1, zenity"
+  },
+  "component_mappings": [
+    {"source_prefix": "bin/", "destination_prefix": "usr/bin/"},
+    {"source_prefix": "share/", "destination_prefix": "usr/share/"},
+    {"source_prefix": "", "destination_prefix": "usr/share/uci-arena/components/manager.core/"}
+  ],
+  "component_manifest_destination": "usr/share/uci-arena/components/manager.core/arena-component.json",
+  "integration_files": [
+    {"source": "uci-arena-manager.service", "destination": "lib/systemd/system/uci-arena-manager.service", "mode": 420},
+    {"source": "uci-arena-broker.service", "destination": "lib/systemd/system/uci-arena-broker.service", "mode": 420},
+    {"source": "uci-arena-manager.desktop", "destination": "usr/share/applications/uci-arena-manager.desktop", "mode": 420},
+    {"source": "copyright", "destination": "usr/share/doc/uci-arena-manager/copyright", "mode": 420},
+    {"source": "uci-arena-manager.lintian-overrides", "destination": "usr/share/lintian/overrides/uci-arena-manager", "mode": 420}
+  ],
+  "component_aliases": [
+    {"source": "share/icons/uci-arena-manager/uci-arena-manager.svg", "destination": "usr/share/icons/hicolor/scalable/apps/uci-arena-manager.svg", "mode": 420},
+    {"source": "share/icons/uci-arena-manager/uci-arena-manager.png", "destination": "usr/share/icons/hicolor/256x256/apps/uci-arena-manager.png", "mode": 420}
+  ],
+  "documentation": {
+    "manual_source": "share/doc/uci-arena-manager/arena.1",
+    "manual_destination": "usr/share/man/man1/arena.1.gz",
+    "changelog_source": "changelog.in",
+    "changelog_destination": "usr/share/doc/uci-arena-manager/changelog.gz"
+  },
+  "maintainer_scripts": {
+    "deb": {"postinst": "debian/postinst", "prerm": "debian/prerm", "postrm": "debian/postrm"},
+    "rpm": {"post": "rpm/postinst", "preun": "rpm/prerm", "postun": "rpm/postrm"}
+  }
+}
