@@ -8,6 +8,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #ifdef _WIN32
@@ -15,8 +16,8 @@
 #include <windows.h>
 #else
 #include <cerrno>
-#include <csignal>
 #include <pthread.h>
+#include <signal.h>
 #include <unistd.h>
 #endif
 
