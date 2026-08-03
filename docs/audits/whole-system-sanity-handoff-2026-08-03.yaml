@@ -1,0 +1,201 @@
+meta:
+  schema: uci_arena_whole_system_sanity_handoff_v1
+  snapshot_at: '2026-08-03T15:00:00-07:00'
+  status: in_progress
+  soundness_conclusion: none
+  release_readiness: not_established
+  package_e2e_finding: PKG-E2E-011_unknown
+  canonical_repository: iteathen/uci-arena-installer
+  canonical_branch: agent/release-assembly
+  canonical_pr: 2
+  narrative: docs/audits/whole-system-sanity-handoff-2026-08-03.md
+  architecture: docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md
+  ledger: docs/audits/whole-system-sanity-2026-08.md
+  performance_addendum: docs/audits/whole-system-performance-addendum-2026-08-03.md
+  topology_addendum: docs/audits/whole-system-branch-topology-addendum-2026-08-03.md
+
+method:
+  jules_output_trusted: false
+  branch_ancestry_is_release_correctness: true
+  automatic_ci_enabled: false
+  full_native_validation_available_in_connector_environment: false
+  required_node: 24.15.0
+  rules:
+    - project_owned_neutral_contracts
+    - strict_ioc_ports_adapters
+    - one_owner_per_concern
+    - immutable_cross_repository_artifacts
+    - no_peer_source_imports
+    - no_hidden_discovery
+    - no_hot_path_json_string_filesystem_allocation_blocking
+    - exact_test_output_before_claim
+    - reconstruct_accepted_jules_slices_on_authoritative_ancestry
+
+repositories:
+  installer:
+    authority: suite_composition_deployment
+    base_pr: 2
+    base_branch: agent/release-assembly
+    reviewable_prs:
+      - {pr: 3, branch: agent/bound-indexed-asset-results, base_pr: 2}
+      - {pr: 4, branch: agent/harden-native-process-tree-stop, base_pr: 2}
+      - {pr: 5, branch: agent/type-service-control-actions, base_pr: 4}
+    blockers:
+      - {issue: 6, summary: platform_neutral_service_control_result}
+      - {issue: 7, summary: exact_stable_byte_tuf_catalog_and_state_admission}
+      - {issue: 8, summary: bounded_acquisition_cache_and_archive_expansion}
+      - {issue: 9, summary: transactional_apply_rollback_and_crash_recovery}
+      - {issue: 10, summary: exact_identity_bound_uninstall_and_purge}
+  engine:
+    authority: chess_search_evaluation_model_inference_runtime_tools
+    stack:
+      - {pr: 39, branch: agent/system-sanity, base: main}
+      - {pr: 44, branch: agent/model-adapter-contract, base_pr: 39}
+      - {pr: 47, branch: agent/integrate-engine-audit-stacks, base_pr: 44}
+      - {pr: 52, branch: agent/canonical-fen-admission-v2, base_pr: 47, status: reviewable_draft}
+    blocked_or_unaccepted:
+      - {issue: 43, summary: lock_free_tt_original_task}
+      - {issue: 54, summary: corrected_production_lock_free_tt}
+      - {issue: 45, summary: broad_inference_port}
+      - {issue: 57, summary: provider_free_inference_contract}
+      - {pr: 60, summary: jules_provider_free_inference_wrong_base_snapshot, accepted: false}
+      - {issue: 46, summary: composition_root_blocked_on_inference}
+      - {issue: 56, summary: machine_code_hot_path_profile}
+      - {issue: 58, summary: killer_history_synchronization}
+      - {issue: 59, summary: incremental_mcgs_repetition_history}
+  manager:
+    authority: installed_suite_control_plane
+    base_pr: 54
+    base_branch: agent/release-assembly
+    reviewable_prs:
+      - {pr: 73, branch: agent/bound-match-plan-after-release-assembly, base_pr: 54}
+    blocked_prs:
+      - pr: 67
+        branch: agent/harden-sqlite-store-foundation
+        reasons:
+          - sqlite_storage_class_coercion_not_rejected
+          - ancestor_path_identity_incomplete
+          - opened_database_wal_shm_identity_not_bound
+          - schema_and_migration_authority_incomplete
+          - missing_adversarial_tests
+    delegated_or_open:
+      - {issue: 69, summary: localauth_reconciliation}
+      - {issue: 70, summary: broad_uci_probe_reconciliation}
+      - {issue: 76, summary: preferred_pure_uci_identity_option_contract}
+      - {issue: 71, summary: superseded_match_plan_task, replacement_pr: 73}
+  evidence_service:
+    authority: evidence_scheduling_dataset_profile_publication
+    stack:
+      - {pr: 10, branch: agent/system-sanity}
+      - {pr: 13, branch: agent/strict-cli-contract-after-system-sanity}
+      - {pr: 14, branch: agent/stream-dataset-export-after-cli}
+      - {pr: 15, branch: agent/stream-dataset-show-after-export}
+      - {pr: 16, branch: agent/transactional-prune-after-show}
+      - {pr: 17, branch: agent/integrate-orphan-boundary-fixes}
+      - {pr: 18, branch: agent/harden-pointer-owner-root-admission}
+      - {pr: 19, branch: agent/fix-daemon-timing-after-path-admission}
+      - {pr: 22, branch: agent/harden-resource-config-after-daemon-timing}
+    blockers:
+      - {issue: 20, summary: stale_heartbeat_status_projection}
+      - {issue: 21, summary: end_to_end_foreground_revocation_budget}
+    validation_required:
+      - node_24_15_full_suite
+      - npm_run_check
+      - npm_run_acceptance_idle
+      - packaged_runtime_windows_linux
+  book_forge:
+    authority: opening_book_production
+    documented_stack:
+      - {pr: 8, branch: agent/system-sanity, acceptance_blocked: true}
+      - {pr: 11, branch: agent/config-contract-after-system-sanity, base_pr: 8, acceptance_blocked: true}
+      - {pr: 10, branch: agent/always-release-daemon-lock, base_pr: 11, acceptance_blocked: true}
+    blockers:
+      - {issue: 12, summary: exact_acquisition_credential_at_use_time}
+      - {issue: 13, summary: single_pass_recoverable_snapshot_compilation}
+      - {issue: 14, summary: catalog_and_shard_sqlite_authority}
+    reopened_ledger_rows:
+      - BOOK-TRUST-017
+      - BOOK-AUTH-018
+      - BOOK-SCALE-020
+  lichess_bot:
+    authority: lichess_api_policy_scheduling_persistence_provider
+    broad_pr: {pr: 3, branch: agent/system-sanity, acceptance_blocked: true}
+    blockers:
+      - {issue: 4, summary: exact_credential_profile_engine_runtime_files}
+      - {issue: 5, summary: byte_uci_framing_typed_options_and_applied_identity}
+      - {issue: 6, summary: transactional_game_activation_nonblocking_status}
+      - {issue: 7, summary: sqlite_storage_foundation}
+    reopened_ledger_rows:
+      - LICHESS-UCI-012
+      - LICHESS-CRED-013
+      - LICHESS-LIFECYCLE-014
+
+jules:
+  active_tasks:
+    - {repository: iteathen/UCI_Arena, issue: 45, task_id: '11856418714977393425', scope: broad_inference}
+    - {repository: iteathen/uci-arena-manager, issue: 69, task_id: '15207249830771102373', scope: localauth}
+    - {repository: iteathen/uci-arena-manager, issue: 70, task_id: '5783702717709122040', scope: broad_uci_probe}
+  completed_untrusted:
+    - {repository: iteathen/UCI_Arena, issue: 57, task_id: '12435499143853197163', pr: 60, reason: wrong_main_base_and_stale_snapshot}
+  rejected_prs:
+    - {repository: iteathen/UCI_Arena, pr: 49, reason: setup_only_no_inference_implementation}
+    - {repository: iteathen/UCI_Arena, pr: 50, reason: stale_fen_snapshot_reconstructed_as_pr_52}
+    - {repository: iteathen/UCI_Arena, pr: 51, reason: noncompiling_tt_and_duplicated_test_implementation}
+    - {repository: iteathen/UCI_Arena, pr: 55, reason: planning_only_no_tt_implementation}
+    - {repository: iteathen/uci-arena-manager, pr: 72, reason: empty_commit_false_delivery_narrative}
+  failed_task_creation:
+    - {repository: iteathen/uci-arena-manager, issue: 76, attempts: 2}
+  mandatory_review:
+    - verify_completion_marker
+    - verify_requested_base_and_ancestry
+    - list_changed_files
+    - reject_unrelated_snapshot_changes
+    - inspect_every_changed_line_and_omission
+    - compile_production_code
+    - verify_tests_call_production_code
+    - verify_claimed_exact_output
+    - check_fixture_reaches_intended_rule
+    - check_memory_copy_allocation_blocking_and_races
+    - reconstruct_on_authoritative_branch
+
+next_actions:
+  - review_and_isolate_engine_pr_60_onto_pr_47_or_reject
+  - review_active_jules_outputs_when_complete_without_creating_more_tasks
+  - implement_manager_issue_76_before_accepting_broad_issue_70_parser_work
+  - reconstruct_manager_pr_67_storage_foundation
+  - preserve_manager_pr_73_as_draft_until_native_tests
+  - resolve_lichess_issues_4_through_7
+  - resolve_book_forge_issues_12_through_14
+  - resolve_evidence_issues_20_and_21_on_final_pr_22_ancestry
+  - resolve_installer_issues_7_through_10_before_package_conclusion
+  - update_ledger_in_one_convergence_commit
+  - update_this_handoff_before_stopping
+
+final_gates:
+  source_architecture:
+    - all_specs_and_boundary_checks
+    - no_orphan_fixes
+    - all_substitution_probes
+    - all_reopened_ledger_rows_reclassified
+  native_runtime:
+    - windows_and_linux_engine_manager_installer_build_ctest
+    - node_24_15_evidence_and_book_forge_suites
+    - lichess_loopback_and_active_game_tests
+    - onnx_parity_reload_cancellation_composition
+    - tt_race_memory_and_search_benchmarks
+    - storage_migration_corruption_race_recovery
+  package_lifecycle:
+    - immutable_candidates_from_accepted_ancestry
+    - exact_manifests_receipts_digests_sbom_provenance
+    - windows_personal_and_all_users
+    - linux_packages
+    - clean_install
+    - ordinary_use
+    - repair
+    - upgrade
+    - reinstall
+    - crash_recovery
+    - normal_uninstall_preservation
+    - safe_reinstall_revalidation
+    - explicit_previewed_purge
+    - repeated_cycle_without_stale_authority
