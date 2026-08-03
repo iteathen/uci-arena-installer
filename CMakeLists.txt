@@ -120,6 +120,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     arena_mock_service tests/mocks/mock_service_cli.cpp)
   add_executable(
     arena_installer_tests
+    tests/unit/asset_search_index_tests.cpp
     tests/unit/setup_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
