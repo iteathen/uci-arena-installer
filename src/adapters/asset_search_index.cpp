@@ -1,17 +1,23 @@
 #include "arena/ports/asset_search_index.hpp"
 
 #include <algorithm>
-#include <tuple>
 
 namespace arena::ports {
 
 void finalize_indexed_asset_search_result(IndexedAssetSearchResult& result) {
-    std::ranges::sort(result.candidates, {}, [](const IndexedAssetCandidate& candidate) {
-        return std::tuple{
-            static_cast<int>(candidate.kind),
-            candidate.path.native(),
-        };
-    });
+    std::ranges::sort(
+        result.candidates,
+        [](const IndexedAssetCandidate& left,
+           const IndexedAssetCandidate& right) {
+            const std::size_t left_ordinal =
+                indexed_asset_kind_ordinal(left.kind);
+            const std::size_t right_ordinal =
+                indexed_asset_kind_ordinal(right.kind);
+            if (left_ordinal != right_ordinal) {
+                return left_ordinal < right_ordinal;
+            }
+            return left.path.native() < right.path.native();
+        });
     result.candidates.erase(
         std::unique(result.candidates.begin(), result.candidates.end(),
                     [](const IndexedAssetCandidate& left,
