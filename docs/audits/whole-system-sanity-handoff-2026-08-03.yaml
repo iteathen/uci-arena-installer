@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v2
-  snapshot_at: '2026-08-03T16:10:00-07:00'
+  schema: uci_arena_whole_system_sanity_handoff_v3
+  snapshot_at: '2026-08-03T16:24:00-07:00'
   status: in_progress
   soundness_conclusion: none
   release_readiness: not_established
@@ -13,7 +13,11 @@ meta:
   ledger: docs/audits/whole-system-sanity-2026-08.md
   performance_addendum: docs/audits/whole-system-performance-addendum-2026-08-03.md
   topology_addendum: docs/audits/whole-system-branch-topology-addendum-2026-08-03.md
-  previous_snapshot_commits: [d55ebc4, 6722974]
+  historical_handoff_commits:
+    - d55ebc4
+    - 6722974
+    - 2e5eddab267f2f5b6cad35bad4fcdcabd26e914e
+    - 8510c191a811cdbfde2d25f9016333cdbae1e5a2
 
 method:
   automatic_ci_enabled: false
@@ -46,10 +50,10 @@ repositories:
       - {pr: 5, branch: agent/type-service-control-actions, base_pr: 4, result_semantics_open: true}
     blockers:
       - {issue: 6, summary: platform_neutral_service_control_result}
-      - {issue: 7, summary: exact_stable_byte_tuf_catalog_and_state_admission, blocks_pkg_e2e: true}
-      - {issue: 8, summary: bounded_acquisition_cache_and_archive_expansion, blocks_pkg_e2e: true}
-      - {issue: 9, summary: transactional_apply_rollback_and_crash_recovery, blocks_pkg_e2e: true}
-      - {issue: 10, summary: exact_identity_bound_uninstall_and_purge, blocks_pkg_e2e: true}
+      - {issue: 7, summary: exact_stable_byte_tuf_catalog_state_admission, blocks_pkg_e2e: true}
+      - {issue: 8, summary: bounded_acquisition_cache_archive_expansion, blocks_pkg_e2e: true}
+      - {issue: 9, summary: transactional_apply_rollback_crash_recovery, blocks_pkg_e2e: true}
+      - {issue: 10, summary: exact_identity_bound_uninstall_purge, blocks_pkg_e2e: true}
 
   engine:
     authority: chess_search_evaluation_model_inference_runtime_tools
@@ -58,16 +62,16 @@ repositories:
       - {pr: 44, branch: agent/model-adapter-contract, base_pr: 39}
       - {pr: 47, branch: agent/integrate-engine-audit-stacks, base_pr: 44}
     reviewable_prs:
-      - {pr: 52, branch: agent/canonical-fen-admission-v2, base_pr: 47, full_native_validation_required: true}
+      - {pr: 52, branch: agent/canonical-fen-admission-v2, base_pr: 47, native_validation_required: true}
     inference:
       open_issues:
-        - {issue: 45, summary: broad_neutral_inference_and_onnx_delegation}
         - {issue: 57, summary: preferred_provider_free_contract_first}
+        - {issue: 45, summary: broad_neutral_inference_and_onnx_delegation}
         - {issue: 46, summary: composition_root_blocked_on_inference}
       rejected_prs:
         - {pr: 49, reason: setup_only_no_inference_implementation}
         - {pr: 60, task_id: '12435499143853197163', reason: unsound_contract_probe_and_main_ancestry}
-        - {pr: 61, task_id: '11856418714977393425', reason: forbidden_void_pointer_hot_path_vectors_identity_cancellation_concurrency_and_semantic_relocation, review_comment: 5172691145}
+        - {pr: 61, task_id: '11856418714977393425', reason: unsound_neutral_contract_onnx_concurrency_identity_and_semantic_relocation, review_comment: 5172691145}
     transposition_table:
       open_issues: [43, 54]
       rejected_prs:
@@ -77,32 +81,39 @@ repositories:
       - {issue: 56, summary: measured_machine_code_hot_paths}
       - {issue: 58, summary: killer_history_synchronization}
       - {issue: 59, summary: incremental_mcgs_repetition_history}
+    shared_runtime:
+      - issue: 62
+        title: timestamped_typed_foreground_revocation
+        branch: agent/timestamp-resource-lease-revocation
+        base_pr: 47
+        status: prepared_no_jules_task
+        consumer: evidence_issue_21
     next:
-      - create_branch_correct_workbench_from_pr_47_or_work_directly_on_pr_47
-      - implement_issue_57_fixed_bounded_typed_contract
+      - create_private_issue_57_workbench_from_exact_pr_47
+      - implement_fixed_bounded_typed_provider_free_contract
       - implement_small_onnx_adapter_preserving_model_tuning_identity
       - implement_issue_46_composition_root
       - implement_and_benchmark_production_tt
+      - implement_and_review_issue_62_independently
 
   manager:
     authority: installed_suite_control_plane
     base_pr: 54
     base_branch: agent/release-assembly
     reviewable_prs:
-      - {pr: 73, branch: agent/bound-match-plan-after-release-assembly, base_pr: 54, full_native_validation_required: true}
+      - {pr: 73, branch: agent/bound-match-plan-after-release-assembly, base_pr: 54, native_validation_required: true}
     blocked_prs:
       - pr: 67
         branch: agent/harden-sqlite-store-foundation
         review_comment: 4848995624
         reasons:
           - sqlite_storage_class_coercion_not_rejected
-          - ancestor_creation_and_open_identity_incomplete
+          - unsafe_ancestor_creation_and_open_identity
           - database_wal_shm_identity_not_bound
-          - schema_and_migration_authority_incomplete
+          - schema_mutation_before_classification
           - verified_backup_before_migration_absent
-          - integrity_application_identity_absent
-          - deterministic_failure_reset_and_retry_unproven
-          - missing_adversarial_platform_tests
+          - exact_schema_migration_integrity_authority_absent
+          - deterministic_failure_reset_retry_unproven
     localauth:
       issue: 69
       status: open
@@ -112,31 +123,27 @@ repositories:
         review_comment: 5172704927
         reasons:
           - main_based_and_unrelated_uci_changes
-          - unsafe_ancestor_and_state_directory_creation
-          - check_then_open_unbounded_key_read
-          - no_windows_acl_or_exact_permission_identity
-          - nonexclusive_nondurable_temp_publication
-          - commit_then_cleanup_failure_ambiguity
-          - cached_old_bearer_survives_malformed_or_unsafe_rotation
-          - incomplete_race_platform_and_failure_tests
+          - unsafe_state_directory_and_key_admission
+          - no_windows_acl_authority
+          - nonexclusive_nondurable_publication
+          - committed_cleanup_failure_ambiguity
+          - cached_bearer_survives_unsafe_rotation
     uci:
       open_issues:
         - {issue: 76, summary: preferred_pure_identity_option_override_contract}
-        - {issue: 70, summary: broad_process_path_discovery_integration_after_76}
+        - {issue: 70, summary: broad_process_path_integration_after_76}
       rejected_pr:
         pr: 74
         task_id: '5783702717709122040'
         reasons:
           - main_based_repository_snapshot
-          - duplicate_identity_not_rejected
-          - incomplete_per_type_option_grammar
+          - incomplete_identity_and_option_grammar
           - output_bound_after_materialization
           - executable_hash_launch_identity_not_bound
-          - incomplete_native_adversarial_tests
     superseded:
       - {issue: 71, replacement_pr: 73, rejected_pr: 72}
     next:
-      - reconstruct_issue_69_on_exact_pr_54_or_branch_correct_workbench
+      - reconstruct_issue_69_on_exact_pr_54_or_private_workbench
       - implement_issue_76_before_issue_70
       - reconstruct_pr_67_storage_lifecycle
       - keep_pr_73_draft_until_native_suites
@@ -154,8 +161,33 @@ repositories:
       - {pr: 19, branch: agent/fix-daemon-timing-after-path-admission}
       - {pr: 22, branch: agent/harden-resource-config-after-daemon-timing}
     blockers:
-      - {issue: 20, summary: stale_heartbeat_status_projection}
-      - {issue: 21, summary: true_end_to_end_foreground_revocation_budget}
+      - issue: 20
+        summary: typed_daemon_heartbeat_status_projection
+        branch: agent/project-daemon-heartbeat-staleness
+        base_pr: 22
+        status: prepared_no_jules_task
+        canonical_comment: 5172783286
+        required:
+          - exact_canonical_timestamp_parser
+          - missing_fresh_stale_projection
+          - nonnegative_bounded_age
+          - fixed_300000ms_threshold
+          - observational_only_not_process_lock_authority
+          - manager_consumes_projection_without_recalculation
+      - issue: 21
+        summary: true_end_to_end_foreground_revocation_deadline
+        branch: agent/end-to-end-foreground-revocation
+        base_pr: 22
+        status: prepared_blocked_on_engine_issue_62
+        canonical_comment: 5172787455
+        upstream_issue: iteathen/UCI_Arena#62
+        required:
+          - earliest_request_visibility_timestamp
+          - one_absolute_2000ms_deadline
+          - bypass_slow_resource_probe_after_foreground_detection
+          - remaining_budget_process_tree_shutdown
+          - verified_descendant_termination
+          - immediate_cooperative_lease_release_before_cleanup
     validation_required:
       - node_24_15_full_suite
       - npm_run_check
@@ -170,57 +202,57 @@ repositories:
       - {pr: 11, branch: agent/config-contract-after-system-sanity, base_pr: 8}
       - {pr: 10, branch: agent/always-release-daemon-lock, base_pr: 11}
     blockers:
-      - {issue: 12, summary: exact_acquisition_credential_bytes_at_use_time}
-      - {issue: 13, summary: single_pass_enough_recoverable_snapshot_publication}
-      - {issue: 14, summary: exact_catalog_and_64_shard_sqlite_authority}
+      - issue: 12
+        summary: exact_acquisition_credential_bytes_at_use_time
+        canonical_comment: 5172735375
+        required:
+          - exact_descriptor_handle_admission
+          - physical_ownership_reproof_at_use
+          - 4k_plus_one_overflow_detection
+          - exact_byte_grammar_no_trim
+          - callback_scoped_use_no_cache
+          - generic_redacted_external_error
+        existing_tests_to_reverse:
+          - credential_inside_workspace_after_config_validation
+          - terminal_newline_accepted
+      - issue: 13
+        summary: one_recoverable_snapshot_build_publication_transaction
+        canonical_comment: 5172750056
+        required:
+          - catalog_backed_build_lease
+          - private_exclusive_operation_workspace
+          - one_selected_row_fanout_pass
+          - one_independent_stable_descriptor_validation_pass
+          - versioned_build_activation_receipt
+          - filesystem_catalog_channel_frontier_reconciliation
+          - bounded_cleanup_evidence
+      - issue: 14
+        summary: exact_catalog_and_64_shard_sqlite_authority
+        canonical_comment: 5172758661
+        required:
+          - native_sqlite_vfs_or_isolated_storage_owner
+          - exact_catalog_shard_wal_shm_identity
+          - exact_schema_application_version_classification
+          - bigint_and_exact_storage_class_translation
+          - verified_backup_migration_recovery
+          - recoverable_cross_shard_operation_receipts
+        existing_tests_to_reverse:
+          - partial_versioned_schema_normalized_into_current
     reopened_ledger_rows: [BOOK-TRUST-017, BOOK-AUTH-018, BOOK-SCALE-020]
 
   lichess_bot:
     authority: lichess_api_policy_scheduling_persistence_provider
     broad_pr: {pr: 3, branch: agent/system-sanity, acceptance_blocked: true}
     blockers:
-      - issue: 4
-        summary: one_exact_file_publication_and_launch_identity_owner
-        canonical_comment: 5172632661
-        required:
-          - bounded_descriptor_or_handle_reads_and_streaming_hashes
-          - exact_executable_launch_identity
-          - exclusive_durable_publication
-          - windows_reparse_and_posix_nofollow_identity
-      - issue: 5
-        summary: byte_uci_framing_typed_options_and_exact_final_applied_identity
-        canonical_comment: 5172640649
-        required:
-          - bound_bytes_before_utf8_decode
-          - exact_typed_handshake_parser
-          - fixed_telemetry_record
-          - final_option_map_including_move_overhead_and_ponder
-          - one_qualification_identity_shared_by_capacity_smoke_timing_provenance
-      - issue: 6
-        summary: transactional_game_activation_and_off_loop_status_publication
-        canonical_comment: 5172653544
-        required:
-          - exact_challenge_or_recovery_correlation
-          - durable_activation_nonce_and_phase
-          - coherent_slot_session_task_publication_gate
-          - structured_terminal_and_cleanup_outcome
-          - latest_wins_serialized_status_publisher
-      - issue: 7
-        summary: exact_sqlite_storage_foundation
-        canonical_comment: 5172666890
-        required:
-          - native_sqlite_vfs_or_isolated_storage_owner
-          - exact_database_wal_shm_identity
-          - exact_schema_application_version_classification
-          - bigint_and_exact_storage_class_translation
-          - verified_backup_migration_and_recovery
-          - owner_transactions_and_destructive_platform_tests
-    confirmed_additional:
-      - pending_slot_adoption_by_opponent_or_only_slot_is_unsafe
-      - active_authority_precedes_durable_game_session_task_authority
-      - primary_session_failures_can_be_swallowed
-      - status_cleanup_failures_can_replace_causality
-      - existing_tests_normalize_partial_v1_and_v3_schemas
+      - {issue: 4, summary: exact_file_publication_launch_identity_owner, canonical_comment: 5172632661}
+      - {issue: 5, summary: byte_uci_typed_options_exact_final_identity, canonical_comment: 5172640649}
+      - {issue: 6, summary: transactional_activation_off_loop_status, canonical_comment: 5172653544}
+      - {issue: 7, summary: exact_sqlite_storage_foundation, canonical_comment: 5172666890}
+    ownership_order:
+      - exact_file_platform_identity_and_publication
+      - byte_uci_and_immutable_qualification_identity
+      - durable_activation_and_serialized_status
+      - exact_sqlite_schema_migration_recovery
     reopened_ledger_rows:
       - LICHESS-UCI-012
       - LICHESS-CRED-013
@@ -247,25 +279,16 @@ jules:
     - {repository: iteathen/UCI_Arena, pr: 51, reason: noncompiling_tt_and_copied_test}
     - {repository: iteathen/UCI_Arena, pr: 55, reason: planning_only_tt}
     - {repository: iteathen/uci-arena-manager, pr: 72, reason: empty_delivery_false_narrative}
-  mandatory_review:
-    - freeze_result_sha
-    - establish_actual_merge_base_and_authored_commit_range
-    - list_authored_commit_files
-    - reject_unrelated_ownership
-    - inspect_every_line_and_omission
-    - inspect_call_sites_lifetimes_races_cancellation_cleanup_performance
-    - prove_tests_call_production_code_and_reach_target_rule
-    - reproduce_exact_claims_or_mark_unverified
-    - reconstruct_on_authoritative_ancestry
-    - keep_destination_pr_draft_until_all_gates
 
 workbenches:
   protocol_version: 1
   purpose: adapt_stacked_authoritative_ancestry_to_jules_default_main
   active: []
+  visible_matching_repositories: []
+  connector_can_create_repository: false
+  real_project_main_may_be_repointed: false
+  creation_gate: user_account_side_private_repository_creation_and_jules_authorization
   naming: jules-wb-project-issue-attempt
-  concurrency_rule: no_unlisted_or_abandoned_workbench_before_new_creation
-  one_task_per_repository: true
   never_reuse: true
   states:
     - created
@@ -302,13 +325,16 @@ workbenches:
 
 next_actions:
   - verify_no_abandoned_jules_workbench_repository
-  - create_engine_issue_57_workbench_from_exact_pr_47_ancestry
-  - reconstruct_manager_issue_69_from_exact_pr_54_ancestry
+  - user_create_and_authorize_private_engine_issue_57_workbench
+  - seed_workbench_main_from_exact_engine_pr_47_and_register_before_jules_label
+  - implement_review_engine_issue_62
+  - implement_evidence_issue_20_on_prepared_branch
+  - implement_evidence_issue_21_after_issue_62_and_exact_vendor_update
+  - reconstruct_manager_issue_69_on_exact_pr_54
   - implement_manager_issue_76_before_issue_70
-  - reconstruct_manager_pr_67_storage_foundation
+  - reconstruct_manager_pr_67_storage_lifecycle
   - continue_lichess_issues_4_5_6_7_in_owner_order
-  - continue_book_forge_issues_12_13_14
-  - implement_evidence_issues_20_21_on_final_pr_22_ancestry
+  - continue_book_forge_issues_12_13_14_in_owner_order
   - resolve_installer_issues_7_8_9_10_before_package_conclusion
   - converge_ledger_only_after_accepted_ancestry
   - update_both_handoffs_and_pr_2_comment_before_stopping
