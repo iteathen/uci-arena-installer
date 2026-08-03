@@ -18,6 +18,20 @@ int hold_stdout() {
     return 0;
 }
 
+int close_stdin_and_hold() {
+#ifdef _WIN32
+    const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    if (input != nullptr && input != INVALID_HANDLE_VALUE) {
+        CloseHandle(input);
+        SetStdHandle(STD_INPUT_HANDLE, nullptr);
+    }
+#else
+    close(STDIN_FILENO);
+#endif
+    std::cout << "stdin-closed" << std::endl;
+    return hold_stdout();
+}
+
 #ifdef _WIN32
 int spawn_descendant() {
     std::wstring executable(32768, L'\0');
@@ -37,9 +51,10 @@ int spawn_descendant() {
             &startup, &process)) {
         return 11;
     }
+    const DWORD descendant_id = process.dwProcessId;
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
-    std::cout << "spawned" << std::endl;
+    std::cout << "spawned " << descendant_id << std::endl;
     return 0;
 }
 #else
@@ -51,7 +66,7 @@ int spawn_descendant() {
     if (child == 0) {
         return hold_stdout();
     }
-    std::cout << "spawned" << std::endl;
+    std::cout << "spawned " << child << std::endl;
     return 0;
 }
 #endif
@@ -65,6 +80,9 @@ int main(const int argc, char** argv) {
     const std::string_view operation = argv[1];
     if (operation == "--hold-stdout") {
         return hold_stdout();
+    }
+    if (operation == "--close-stdin-hold") {
+        return close_stdin_and_hold();
     }
     if (operation == "--spawn-descendant") {
         return spawn_descendant();

@@ -26,11 +26,24 @@ class ScopedSigpipeBlock final {
     ScopedSigpipeBlock() {
         sigemptyset(&blocked_);
         sigaddset(&blocked_, SIGPIPE);
-        if (pthread_sigmask(SIG_BLOCK, &blocked_, &previous_) != 0) {
-            throw std::runtime_error("failed to block SIGPIPE for process write");
+        const int mask_result = pthread_sigmask(SIG_BLOCK, &blocked_, &previous_);
+        if (mask_result != 0) {
+            throw std::runtime_error(
+                std::string("failed to block SIGPIPE for process write: ") +
+                std::strerror(mask_result));
         }
         active_ = true;
-        previously_blocked_ = sigismember(&previous_, SIGPIPE) == 1;
+
+        sigset_t pending{};
+        if (sigpending(&pending) != 0) {
+            const int pending_error = errno;
+            pthread_sigmask(SIG_SETMASK, &previous_, nullptr);
+            active_ = false;
+            throw std::runtime_error(
+                std::string("failed to inspect pending SIGPIPE state: ") +
+                std::strerror(pending_error));
+        }
+        sigpipe_was_pending_ = sigismember(&pending, SIGPIPE) == 1;
     }
 
     ~ScopedSigpipeBlock() {
@@ -43,11 +56,19 @@ class ScopedSigpipeBlock final {
     ScopedSigpipeBlock& operator=(const ScopedSigpipeBlock&) = delete;
 
     void consume_generated_sigpipe() const noexcept {
-        if (previously_blocked_) {
+        if (sigpipe_was_pending_) {
             return;
         }
         timespec timeout{};
-        while (sigtimedwait(&blocked_, nullptr, &timeout) < 0 && errno == EINTR) {
+        for (;;) {
+            const int result = sigtimedwait(&blocked_, nullptr, &timeout);
+            if (result == SIGPIPE) {
+                return;
+            }
+            if (result < 0 && errno == EINTR) {
+                continue;
+            }
+            return;
         }
     }
 
@@ -55,13 +76,42 @@ class ScopedSigpipeBlock final {
     sigset_t blocked_{};
     sigset_t previous_{};
     bool active_{};
-    bool previously_blocked_{};
+    bool sigpipe_was_pending_{};
 };
 
 void close_fd(int& descriptor) noexcept {
     if (descriptor >= 0) {
         close(descriptor);
         descriptor = -1;
+    }
+}
+
+void remember_failure(std::string& failure, std::string message) {
+    if (failure.empty()) {
+        failure = std::move(message);
+    }
+}
+
+void terminate_startup_child(const pid_t child) noexcept {
+    if (kill(-child, SIGKILL) != 0) {
+        kill(child, SIGKILL);
+    }
+    while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {
+    }
+}
+
+bool wait_for_process_group_exit(
+    const pid_t process_group,
+    const std::chrono::milliseconds timeout) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        if (kill(-process_group, 0) != 0) {
+            return errno == ESRCH;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        poll(nullptr, 0, 10);
     }
 }
 
@@ -178,6 +228,21 @@ void NativeProcess::start(
     if (running()) {
         throw std::runtime_error("process is already running");
     }
+
+    const std::string executable_string = executable.string();
+    const std::string working_directory_string = working_directory.string();
+    std::vector<std::string> owned_arguments;
+    owned_arguments.reserve(arguments.size() + 1);
+    owned_arguments.push_back(executable_string);
+    owned_arguments.insert(
+        owned_arguments.end(), arguments.begin(), arguments.end());
+    std::vector<char*> argv;
+    argv.reserve(owned_arguments.size() + 1);
+    for (auto& argument : owned_arguments) {
+        argv.push_back(argument.data());
+    }
+    argv.push_back(nullptr);
+
     int stdin_pipe[2]{-1, -1};
     int stdout_pipe[2]{-1, -1};
     if (pipe2(stdin_pipe, O_CLOEXEC) != 0) {
@@ -185,22 +250,26 @@ void NativeProcess::start(
                                  std::strerror(errno));
     }
     if (pipe2(stdout_pipe, O_CLOEXEC) != 0) {
+        const int pipe_error = errno;
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
         throw std::runtime_error(std::string("failed to create process stdout pipe: ") +
-                                 std::strerror(errno));
+                                 std::strerror(pipe_error));
     }
 
     const pid_t child = fork();
     if (child < 0) {
+        const int fork_error = errno;
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
-        throw std::runtime_error(std::string("failed to fork: ") + std::strerror(errno));
+        throw std::runtime_error(std::string("failed to fork: ") +
+                                 std::strerror(fork_error));
     }
     if (child == 0) {
-        if (setpgid(0, 0) != 0 || chdir(working_directory.c_str()) != 0 ||
+        if (setpgid(0, 0) != 0 ||
+            chdir(working_directory_string.c_str()) != 0 ||
             dup2(stdin_pipe[0], STDIN_FILENO) < 0 ||
             dup2(stdout_pipe[1], STDOUT_FILENO) < 0 ||
             dup2(stdout_pipe[1], STDERR_FILENO) < 0) {
@@ -210,39 +279,33 @@ void NativeProcess::start(
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
-
-        std::vector<std::string> owned_arguments;
-        owned_arguments.reserve(arguments.size() + 1);
-        owned_arguments.push_back(executable.string());
-        owned_arguments.insert(owned_arguments.end(), arguments.begin(), arguments.end());
-        std::vector<char*> argv;
-        argv.reserve(owned_arguments.size() + 1);
-        for (auto& argument : owned_arguments) {
-            argv.push_back(argument.data());
-        }
-        argv.push_back(nullptr);
-        execv(executable.c_str(), argv.data());
+        execv(executable_string.c_str(), argv.data());
         _exit(127);
     }
 
     close(stdin_pipe[0]);
     close(stdout_pipe[1]);
     if (setpgid(child, child) != 0 && errno != EACCES && errno != ESRCH) {
-        kill(child, SIGKILL);
-        waitpid(child, nullptr, 0);
+        const int group_error = errno;
+        terminate_startup_child(child);
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         throw std::runtime_error(std::string("failed to establish process group: ") +
-                                 std::strerror(errno));
+                                 std::strerror(group_error));
     }
     const int flags = fcntl(stdout_pipe[0], F_GETFL, 0);
-    if (flags < 0 || fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK) != 0) {
-        kill(-child, SIGKILL);
-        waitpid(child, nullptr, 0);
+    int output_error = 0;
+    if (flags < 0) {
+        output_error = errno;
+    } else if (fcntl(stdout_pipe[0], F_SETFL, flags | O_NONBLOCK) != 0) {
+        output_error = errno;
+    }
+    if (output_error != 0) {
+        terminate_startup_child(child);
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         throw std::runtime_error(std::string("failed to configure process output pipe: ") +
-                                 std::strerror(errno));
+                                 std::strerror(output_error));
     }
 
     impl_->process_id = child;
@@ -272,11 +335,12 @@ void NativeProcess::write_line(const std::string& line) {
             continue;
         }
         if (written <= 0) {
-            if (errno == EPIPE) {
+            const int write_error = errno;
+            if (write_error == EPIPE) {
                 sigpipe.consume_generated_sigpipe();
             }
             throw std::runtime_error(std::string("failed to write to process: ") +
-                                     std::strerror(errno));
+                                     std::strerror(write_error));
         }
         offset += static_cast<std::size_t>(written);
     }
@@ -321,27 +385,74 @@ std::uint64_t NativeProcess::dropped_observational_lines() const {
 }
 
 void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
+    if (graceful_timeout.count() < 0) {
+        throw std::runtime_error("process graceful timeout must be non-negative");
+    }
     if (impl_->process_id <= 0) {
         return;
     }
+
     const pid_t process_id = impl_->process_id;
-    if (running()) {
+    std::string failure;
+    bool direct_running = true;
+    try {
+        direct_running = running();
+    } catch (const std::exception& error) {
+        remember_failure(failure, error.what());
+    }
+
+    if (direct_running) {
         try {
             write_line("quit");
         } catch (...) {
         }
         const auto deadline = std::chrono::steady_clock::now() + graceful_timeout;
-        while (std::chrono::steady_clock::now() < deadline && running()) {
+        while (std::chrono::steady_clock::now() < deadline) {
+            try {
+                if (!running()) {
+                    direct_running = false;
+                    break;
+                }
+            } catch (const std::exception& error) {
+                remember_failure(failure, error.what());
+                break;
+            }
             poll(nullptr, 0, 10);
         }
     }
 
     if (kill(-process_id, SIGKILL) != 0 && errno != ESRCH) {
-        impl_->reader_stop_requested.store(true, std::memory_order_release);
+        const int group_error = errno;
+        remember_failure(
+            failure,
+            std::string("failed to terminate process group: ") +
+                std::strerror(group_error));
+        if (kill(process_id, SIGKILL) != 0 && errno != ESRCH) {
+            remember_failure(
+                failure,
+                std::string("failed to terminate direct process: ") +
+                    std::strerror(errno));
+        }
     }
+
     int status = 0;
-    while (waitpid(process_id, &status, 0) < 0 && errno == EINTR) {
+    pid_t wait_result = -1;
+    do {
+        wait_result = waitpid(process_id, &status, 0);
+    } while (wait_result < 0 && errno == EINTR);
+    if (wait_result < 0 && errno != ECHILD) {
+        remember_failure(
+            failure,
+            std::string("failed to reap direct process: ") +
+                std::strerror(errno));
     }
+
+    if (!wait_for_process_group_exit(process_id, std::chrono::seconds(2))) {
+        remember_failure(
+            failure,
+            "process group still has live members after forced shutdown");
+    }
+
     close_fd(impl_->stdin_fd);
     impl_->reader_stop_requested.store(true, std::memory_order_release);
     if (impl_->reader.joinable()) {
@@ -349,6 +460,10 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
     }
     close_fd(impl_->stdout_fd);
     impl_->process_id = -1;
+
+    if (!failure.empty()) {
+        throw std::runtime_error(failure);
+    }
 }
 
 } // namespace arena::ports
