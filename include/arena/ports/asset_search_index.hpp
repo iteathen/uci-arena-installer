@@ -66,15 +66,12 @@ inline constexpr std::size_t indexed_asset_kind_count = 3;
     return indexed_asset_kind_count;
 }
 
-[[nodiscard]] constexpr std::size_t indexed_asset_kind_budget(
+[[nodiscard]] constexpr std::size_t indexed_asset_remaining_budget(
     const std::size_t maximum_results,
-    const IndexedAssetKind kind) noexcept {
-    const std::size_t ordinal = indexed_asset_kind_ordinal(kind);
-    if (ordinal >= indexed_asset_kind_count) {
-        return 0;
-    }
-    return maximum_results / indexed_asset_kind_count +
-        (ordinal < maximum_results % indexed_asset_kind_count ? 1 : 0);
+    const std::size_t materialized_results) noexcept {
+    return materialized_results >= maximum_results
+        ? 0
+        : maximum_results - materialized_results;
 }
 
 void finalize_indexed_asset_search_result(IndexedAssetSearchResult& result);
