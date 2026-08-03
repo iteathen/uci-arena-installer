@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string_view>
@@ -60,14 +61,14 @@ std::wstring quote_argument(const std::wstring& value) {
     return result;
 }
 
-void close_handle(HANDLE& handle) {
+void close_handle(HANDLE& handle) noexcept {
     if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
         CloseHandle(handle);
         handle = nullptr;
     }
 }
 
-}  // namespace
+} // namespace
 
 struct NativeProcess::Impl {
     static constexpr std::size_t max_lines = 8192;
@@ -87,6 +88,7 @@ struct NativeProcess::Impl {
 
     ~Impl() {
         if (reader.joinable()) {
+            CancelSynchronousIo(reader.native_handle());
             close_handle(stdout_read);
             reader.join();
         }
@@ -170,14 +172,25 @@ void NativeProcess::start(
     };
     HANDLE stdin_read = nullptr;
     HANDLE stdout_write = nullptr;
-    if (!CreatePipe(&stdin_read, &impl_->stdin_write, &security, 0) ||
-        !CreatePipe(&impl_->stdout_read, &stdout_write, &security, 0)) {
+    const auto close_pipe_handles = [&] {
         close_handle(stdin_read);
         close_handle(stdout_write);
-        throw std::runtime_error("failed to create process pipes");
+        close_handle(impl_->stdin_write);
+        close_handle(impl_->stdout_read);
+    };
+    if (!CreatePipe(&stdin_read, &impl_->stdin_write, &security, 0)) {
+        close_pipe_handles();
+        throw std::runtime_error("failed to create process stdin pipe");
     }
-    SetHandleInformation(impl_->stdin_write, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(impl_->stdout_read, HANDLE_FLAG_INHERIT, 0);
+    if (!CreatePipe(&impl_->stdout_read, &stdout_write, &security, 0)) {
+        close_pipe_handles();
+        throw std::runtime_error("failed to create process stdout pipe");
+    }
+    if (!SetHandleInformation(impl_->stdin_write, HANDLE_FLAG_INHERIT, 0) ||
+        !SetHandleInformation(impl_->stdout_read, HANDLE_FLAG_INHERIT, 0)) {
+        close_pipe_handles();
+        throw std::runtime_error("failed to isolate parent process pipe handles");
+    }
 
     const std::wstring executable_wide = executable.wstring();
     std::wstring command_line = quote_argument(executable_wide);
@@ -209,8 +222,7 @@ void NativeProcess::start(
     close_handle(stdin_read);
     close_handle(stdout_write);
     if (!created) {
-        close_handle(impl_->stdin_write);
-        close_handle(impl_->stdout_read);
+        close_pipe_handles();
         throw std::runtime_error("failed to launch process, Windows error " +
                                  std::to_string(GetLastError()));
     }
@@ -220,6 +232,7 @@ void NativeProcess::start(
         TerminateProcess(process_info.hProcess, 1);
         CloseHandle(process_info.hThread);
         CloseHandle(process_info.hProcess);
+        close_pipe_handles();
         throw std::runtime_error("failed to create process Job Object");
     }
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -234,6 +247,7 @@ void NativeProcess::start(
         CloseHandle(process_info.hThread);
         CloseHandle(process_info.hProcess);
         close_handle(impl_->job);
+        close_pipe_handles();
         throw std::runtime_error("failed to contain process in Job Object");
     }
 
@@ -246,7 +260,16 @@ void NativeProcess::start(
         impl_->dropped = 0;
         impl_->reader_finished = false;
     }
-    ResumeThread(impl_->thread);
+    if (ResumeThread(impl_->thread) == static_cast<DWORD>(-1)) {
+        TerminateJobObject(impl_->job, 1);
+        close_handle(impl_->stdin_write);
+        close_handle(impl_->stdout_read);
+        close_handle(impl_->thread);
+        close_handle(impl_->process);
+        close_handle(impl_->job);
+        impl_->process_id = 0;
+        throw std::runtime_error("failed to resume process main thread");
+    }
     impl_->reader = std::thread([this] { impl_->read_output(); });
 }
 
@@ -255,6 +278,9 @@ void NativeProcess::write_line(const std::string& line) {
         throw std::runtime_error("cannot write to a stopped process");
     }
     const std::string framed = line + "\n";
+    if (framed.size() > (std::numeric_limits<DWORD>::max)()) {
+        throw std::runtime_error("process input line exceeds the Windows write bound");
+    }
     DWORD written = 0;
     if (!WriteFile(
             impl_->stdin_write,
@@ -304,14 +330,17 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
             write_line("quit");
         } catch (...) {
         }
-        if (WaitForSingleObject(impl_->process, static_cast<DWORD>(graceful_timeout.count())) ==
-            WAIT_TIMEOUT) {
-            TerminateJobObject(impl_->job, 1);
-            WaitForSingleObject(impl_->process, 2000);
-        }
+        WaitForSingleObject(impl_->process, static_cast<DWORD>(graceful_timeout.count()));
     }
+
+    if (impl_->job != nullptr) {
+        TerminateJobObject(impl_->job, 1);
+    }
+    WaitForSingleObject(impl_->process, 2000);
     close_handle(impl_->stdin_write);
     if (impl_->reader.joinable()) {
+        CancelSynchronousIo(impl_->reader.native_handle());
+        close_handle(impl_->stdout_read);
         impl_->reader.join();
     }
     close_handle(impl_->stdout_read);
@@ -321,4 +350,4 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
     impl_->process_id = 0;
 }
 
-}  // namespace arena::ports
+} // namespace arena::ports
