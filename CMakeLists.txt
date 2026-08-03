@@ -123,6 +123,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
   add_executable(
     arena_installer_tests
     tests/unit/native_process_tests.cpp
+    tests/unit/service_control_tests.cpp
     tests/unit/setup_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
