@@ -123,6 +123,8 @@ class LocateAssetSearchIndex final : public AssetSearchIndex {
             query.timeout > std::chrono::seconds(30)) {
             return finish(IndexedSearchState::failed, "invalid_search_budget");
         }
+        result.candidates.reserve(query.maximum_results);
+
         fs::path executable;
         for (const fs::path candidate : {fs::path("/usr/bin/plocate"),
                                          fs::path("/usr/bin/locate")}) {
@@ -137,21 +139,25 @@ class LocateAssetSearchIndex final : public AssetSearchIndex {
         }
 
         const auto deadline = started + query.timeout;
-        const std::size_t per_kind = std::max<std::size_t>(
-            1, query.maximum_results / 3);
         const struct {
             IndexedAssetKind kind;
             std::string_view expression;
         } queries[]{
+            {IndexedAssetKind::opening_book, R"(\.(book|bin)$)"},
             {IndexedAssetKind::syzygy, R"(\.(rtbw|rtbz)$)"},
             {IndexedAssetKind::timing_profile,
              R"((uci_time_profile_v[^/]*\.json|[^/]*(timing[^/]*profile|time[^/]*profile)[^/]*\.json)$)"},
-            {IndexedAssetKind::opening_book, R"(\.(book|bin)$)"},
         };
         try {
             for (const auto& item : queries) {
+                const std::size_t limit =
+                    indexed_asset_kind_budget(query.maximum_results, item.kind);
+                if (limit == 0) {
+                    result.truncated = true;
+                    continue;
+                }
                 if (!execute_locate_query(
-                        executable, item.expression, item.kind, per_kind,
+                        executable, item.expression, item.kind, limit,
                         deadline, result.candidates, result.truncated)) {
                     return finish(IndexedSearchState::timed_out,
                                   "search_budget_exhausted");
