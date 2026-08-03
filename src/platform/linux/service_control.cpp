@@ -17,7 +17,7 @@ int perform_service_action(
     }
     const std::string_view action_name = service_action_name(action);
     if (action_name.empty()) {
-        throw std::runtime_error("service action is invalid");
+        throw std::runtime_error("unsupported service action");
     }
 
     const pid_t child = fork();
