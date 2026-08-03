@@ -102,7 +102,7 @@ DWORD finite_wait_duration(
 bool wait_for_job_empty(
     const HANDLE job,
     const std::chrono::milliseconds timeout,
-    std::string& failure) noexcept {
+    std::string& failure) {
     const ULONGLONG deadline = GetTickCount64() +
         static_cast<ULONGLONG>(timeout.count());
     for (;;) {
