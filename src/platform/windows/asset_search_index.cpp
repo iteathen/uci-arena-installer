@@ -158,6 +158,9 @@ HRESULT execute_query(IDBCreateCommand* command_factory, const std::wstring& sql
                 candidates.push_back(
                     {kind, std::filesystem::path(std::wstring(row.value))});
                 ++accepted;
+                if (accepted >= limit) {
+                    break;
+                }
             }
         }
         rowset->ReleaseRows(row_count, rows, nullptr, nullptr, nullptr);
@@ -193,6 +196,8 @@ class WindowsSearchIndex final : public AssetSearchIndex {
             query.timeout > std::chrono::seconds(30)) {
             return finish(IndexedSearchState::failed, "invalid_search_budget");
         }
+        result.candidates.reserve(query.maximum_results);
+
         ComApartment apartment;
         if (!apartment.usable()) {
             return finish(IndexedSearchState::unavailable, "com_unavailable");
@@ -267,22 +272,26 @@ class WindowsSearchIndex final : public AssetSearchIndex {
         }
 
         const auto deadline = started + query.timeout;
-        const std::size_t per_kind = std::max<std::size_t>(
-            1, query.maximum_results / 3);
         const std::pair<IndexedAssetKind, std::wstring_view> queries[]{
+            {IndexedAssetKind::opening_book,
+             L"(System.FileExtension = '.book' OR System.FileExtension = '.bin')"},
             {IndexedAssetKind::syzygy,
              L"(System.FileExtension = '.rtbw' OR System.FileExtension = '.rtbz')"},
             {IndexedAssetKind::timing_profile,
              L"(System.ItemNameDisplay LIKE 'uci_time_profile_v%.json' OR "
              L"System.ItemNameDisplay LIKE '%timing%profile%.json' OR "
              L"System.ItemNameDisplay LIKE '%time%profile%.json')"},
-            {IndexedAssetKind::opening_book,
-             L"(System.FileExtension = '.book' OR System.FileExtension = '.bin')"},
         };
         for (const auto& [kind, predicate] : queries) {
+            const std::size_t limit =
+                indexed_asset_kind_budget(query.maximum_results, kind);
+            if (limit == 0) {
+                result.truncated = true;
+                continue;
+            }
             status = execute_query(
-                command_factory.Get(), query_sql(per_kind, predicate), kind,
-                per_kind, deadline, result.candidates, result.truncated);
+                command_factory.Get(), query_sql(limit, predicate), kind,
+                limit, deadline, result.candidates, result.truncated);
             if (status == DB_E_CANCELED || Clock::now() >= deadline) {
                 data_source->Uninitialize();
                 return finish(IndexedSearchState::timed_out,
@@ -295,20 +304,7 @@ class WindowsSearchIndex final : public AssetSearchIndex {
             }
         }
         data_source->Uninitialize();
-        std::ranges::sort(result.candidates, {}, [](const IndexedAssetCandidate& candidate) {
-            return candidate.path.native();
-        });
-        result.candidates.erase(
-            std::unique(result.candidates.begin(), result.candidates.end(),
-                        [](const IndexedAssetCandidate& left,
-                           const IndexedAssetCandidate& right) {
-                            return left.kind == right.kind && left.path == right.path;
-                        }),
-            result.candidates.end());
-        if (result.candidates.size() > query.maximum_results) {
-            result.candidates.resize(query.maximum_results);
-            result.truncated = true;
-        }
+        finalize_indexed_asset_search_result(result);
         return finish(IndexedSearchState::complete,
                       result.truncated ? "result_limit_reached" : "complete");
     }
