@@ -1,0 +1,48 @@
+{
+  "schema": "arena_manager_windows_integration_v1",
+  "component_id": "manager.core",
+  "display_name": "UCI Arena Manager",
+  "manufacturer": "UCI Arena contributors",
+  "entrypoints": {
+    "service": "service",
+    "cli": "cli",
+    "desktop": "desktop"
+  },
+  "scope_marker": "share/uci-arena/install-scope.txt",
+  "installer_runtime_manifest_destination": "share/uci-arena/installer-runtime.json",
+  "start_menu": {
+    "folder": "UCI Arena",
+    "name": "UCI Arena Manager"
+  },
+  "path": {
+    "relative_directory": "bin"
+  },
+  "scopes": {
+    "per-user": {
+      "package_scope": "perUser",
+      "root_folder": "LocalAppDataFolder",
+      "root_segments": ["Programs", "UCI Arena Manager"],
+      "data_root": "[LocalAppDataFolder]UCI Arena Manager",
+      "upgrade_code": "143E64C2-4153-4E8B-8C93-6FB590779E9E",
+      "opposite_upgrade_code": "930B856A-66FB-4A34-B998-8A61684EA345",
+      "environment_system": false,
+      "service": null
+    },
+    "per-machine": {
+      "package_scope": "perMachine",
+      "root_folder": "ProgramFiles64Folder",
+      "root_segments": ["UCI Arena Manager"],
+      "data_root": "[CommonAppDataFolder]UCI Arena Manager",
+      "upgrade_code": "930B856A-66FB-4A34-B998-8A61684EA345",
+      "opposite_upgrade_code": "143E64C2-4153-4E8B-8C93-6FB590779E9E",
+      "environment_system": true,
+      "service": {
+        "name": "UCIArenaManager",
+        "display_name": "UCI Arena Manager",
+        "description": "Local control plane for the installed UCI Arena suite",
+        "account": "NT AUTHORITY\\LocalService",
+        "arguments": "--windows-service --data-dir &quot;[ARENA_DATA_ROOT]&quot; --web-root &quot;[INSTALL_ROOT]share\\uci-arena\\web&quot;"
+      }
+    }
+  }
+}

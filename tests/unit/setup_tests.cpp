@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <optional>
 #include <sodium.h>
 #include <string>
@@ -80,6 +81,134 @@ std::string sha256_text(const std::string_view value) {
     std::array<char, crypto_hash_sha256_BYTES * 2 + 1> encoded{};
     sodium_bin2hex(encoded.data(), encoded.size(), digest.data(), digest.size());
     return encoded.data();
+}
+
+std::string sha256_path(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    const std::string contents{
+        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    return sha256_text(contents);
+}
+
+void write_mock_renderer_runtime(const SetupPaths& paths) {
+    const fs::path source = ARENA_MOCK_SERVICE_PATH;
+    const fs::path active_root =
+        paths.install_root / "components" / "runtime.host" / "1.0.0";
+    const fs::path relative = fs::path("bin") / source.filename();
+    const fs::path executable = active_root / relative;
+    fs::create_directories(executable.parent_path());
+    fs::create_directories(paths.data_root / "receipts");
+    fs::copy_file(source, executable, fs::copy_options::overwrite_existing);
+    const auto size = fs::file_size(executable);
+    const std::string digest = sha256_path(executable);
+    std::ofstream(active_root / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", "runtime.host"},
+               {"component_version", "1.0.0"},
+               {"entrypoints", {{"execute", relative.generic_string()}}},
+               {"dependencies", json::array()},
+               {"files",
+                json::array({{{"path", relative.generic_string()},
+                              {"size_bytes", size},
+                              {"sha256", digest}}})},
+           }
+               .dump(2);
+    std::ofstream(paths.data_root / "receipts" / "runtime.host.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", "runtime.host"},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array()},
+               {"configuration_path", ""},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+}
+
+fs::path write_mock_renderer_consumer(const SetupPaths& paths,
+                                      const std::string& component_id,
+                                      const std::string& locator_kind) {
+    write_mock_renderer_runtime(paths);
+    const fs::path active_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path renderer = active_root / "installer-integration.fixture";
+    const fs::path workspace = paths.workspace_root / component_id;
+    const fs::path configuration = workspace / "manager-config.json";
+    fs::create_directories(active_root);
+    fs::create_directories(workspace);
+    std::ofstream(renderer, std::ios::binary) << "renderer";
+    const json integration{
+        {"schema", "arena_provider_installer_integration_v1"},
+        {"schema_version", 1},
+        {"entrypoint", "installer_integration"},
+        {"invocation",
+         {{"kind", "dependency_runtime"},
+          {"runtime_component_id", "runtime.host"},
+          {"runtime_entrypoint", "execute"}}},
+        {"arguments", json::array({"--context"})},
+        {"workspace_name", component_id},
+        {"configure_when_disabled", true},
+        {"dependency_bindings", json::array()},
+        {"locator_bindings",
+         json::array({{{"name", "selected"},
+                       {"kind", locator_kind},
+                       {"required", false}}})},
+        {"startup_control",
+         {{"schema", "arena_provider_startup_control_v1"},
+          {"schema_version", 1},
+          {"entrypoint", "installer_integration"},
+          {"actions",
+           {{"install", json::array({"lifecycle", "enable"})},
+            {"uninstall", json::array({"lifecycle", "disable"})}}},
+          {"workspace_argument", {{"flag", "--state-root"}, {"relative_path", "runtime"}}},
+          {"configuration_argument", "--settings"},
+          {"result",
+           {{"envelope", "root"},
+            {"require_configuration_match_on_install", true},
+            {"require_live_on_install", true}}}}},
+    };
+    std::ofstream(active_root / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"entrypoints", {{"installer_integration", "installer-integration.fixture"}}},
+               {"capabilities", json::array({"startup_install", "startup_uninstall"})},
+               {"dependencies", json::array({"runtime.host"})},
+               {"workspace_name", component_id},
+               {"installer_integration", integration},
+               {"files",
+                json::array({{{"path", "installer-integration.fixture"},
+                              {"size_bytes", 8},
+                              {"sha256", sha256_text("renderer")}}})},
+           }
+               .dump(2);
+    std::ofstream(configuration, std::ios::binary) << R"({"schema":"old"})";
+    std::ofstream(paths.data_root / "receipts" / (component_id + ".json"),
+                  std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_disabled"},
+               {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array({"runtime.host"})},
+               {"data_paths", json::array({workspace.string()})},
+               {"configuration_path", configuration.string()},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    return configuration;
 }
 
 json manager_service_api(
@@ -333,6 +462,8 @@ void write_provider_service_install(const SetupPaths& paths,
     constexpr std::string_view component_version = "1.0.0";
     constexpr std::string_view cli_relative = "provider.mjs";
     constexpr std::string_view cli_contents = "provider";
+    constexpr std::string_view renderer_relative = "installer-integration.mjs";
+    constexpr std::string_view renderer_contents = "renderer";
     constexpr std::string_view contract_relative = "contracts/service-contract.json";
     constexpr std::string_view operations_relative = "contracts/manager-operations.json";
     constexpr std::string_view configuration_relative = "contracts/configuration-schema.json";
@@ -344,6 +475,7 @@ void write_provider_service_install(const SetupPaths& paths,
     fs::create_directories(active_root / "contracts");
     fs::create_directories(paths.data_root / "receipts");
     std::ofstream(active_root / cli_relative, std::ios::binary) << cli_contents;
+    std::ofstream(active_root / renderer_relative, std::ios::binary) << renderer_contents;
 
     const json closed_schema{
         {"$schema", "https://json-schema.org/draft/2020-12/schema"},
@@ -415,23 +547,46 @@ void write_provider_service_install(const SetupPaths& paths,
     json files = json::array(
         {{{"path", cli_relative},
           {"size_bytes", cli_contents.size()},
-          {"sha256", sha256_text(cli_contents)}}});
+          {"sha256", sha256_text(cli_contents)}},
+         {{"path", renderer_relative},
+          {"size_bytes", renderer_contents.size()},
+          {"sha256", sha256_text(renderer_contents)}}});
     for (const auto& [relative, contents] : documents) {
         std::ofstream(active_root / relative, std::ios::binary) << contents;
         files.push_back({{"path", relative.generic_string()},
                          {"size_bytes", contents.size()},
                          {"sha256", sha256_text(contents)}});
     }
+    const json installer_integration{
+        {"schema", "arena_provider_installer_integration_v1"},
+        {"schema_version", 1},
+        {"entrypoint", "installer_integration"},
+        {"invocation",
+         {{"kind", "dependency_runtime"},
+          {"runtime_component_id", "runtime.host"},
+          {"runtime_entrypoint", "execute"}}},
+        {"arguments", json::array({"--context"})},
+        {"workspace_name", "replaceable-provider"},
+        {"configure_when_disabled", false},
+        {"dependency_bindings", json::array()},
+        {"locator_bindings",
+         json::array({{{"name", "timing_profile"},
+                       {"kind", "timing_profile"},
+                       {"required", false}}})},
+    };
     std::ofstream(active_root / "arena-component.json", std::ios::binary)
         << json{
                {"schema", "arena_install_component_v1"},
                {"schema_version", 1},
                {"component_id", component_id},
                {"component_version", component_version},
-               {"entrypoints", {{"cli", cli_relative}}},
+               {"entrypoints",
+                {{"cli", cli_relative}, {"installer_integration", renderer_relative}}},
                {"contract_manifest", contract_relative},
                {"capabilities", json::array({"provider_status"})},
-               {"dependencies", json::array()},
+               {"dependencies", json::array({"runtime.host"})},
+               {"workspace_name", "replaceable-provider"},
+               {"installer_integration", installer_integration},
                {"startup", startup},
                {"data_paths", json::array({"workspace"})},
                {"files", files},
@@ -454,7 +609,7 @@ void write_provider_service_install(const SetupPaths& paths,
                {"state", "installed_disabled"},
                {"active_root", active_root.string()},
                {"artifact_sha256", std::string(64, 'a')},
-               {"dependencies", json::array()},
+               {"dependencies", json::array({"runtime.host"})},
                {"data_paths", json::array()},
                {"configuration_path", ""},
                {"activated_files", json::array()},
@@ -623,19 +778,32 @@ TEST_CASE("standalone service contracts are identity-bound and receipt-verified"
     REQUIRE(SetupEngine::verify(mismatched_paths).at("ok") == false);
     fs::remove_all(mismatched_root);
 
-    const fs::path missing_root = temporary_directory();
-    const SetupPaths missing_paths = paths_under(missing_root);
-    write_book_forge_service_install(missing_paths, std::nullopt);
-    REQUIRE(SetupEngine::verify(missing_paths).at("ok") == false);
-    fs::remove_all(missing_root);
 }
 
-TEST_CASE("typed provider service contracts are replaceable and receipt-verified") {
+TEST_CASE("typed provider service and installation contracts are replaceable and receipt-verified") {
     const fs::path valid_root = temporary_directory();
     const SetupPaths valid_paths = paths_under(valid_root);
     write_provider_service_install(valid_paths);
     REQUIRE(SetupEngine::verify(valid_paths).at("ok") == true);
     fs::remove_all(valid_root);
+
+    const fs::path missing_root = temporary_directory();
+    const SetupPaths missing_paths = paths_under(missing_root);
+    write_provider_service_install(missing_paths);
+    const fs::path missing_manifest =
+        missing_paths.install_root / "components" / "replaceable.provider" / "1.0.0" /
+        "arena-component.json";
+    json missing_contract = json::parse(std::ifstream(missing_manifest));
+    missing_contract.erase("contract_manifest");
+    missing_contract["manager_integration_api"] =
+        manager_service_api({"orchestration_status"});
+    std::ofstream(missing_manifest, std::ios::binary | std::ios::trunc)
+        << missing_contract.dump(2);
+    const json missing_verified = SetupEngine::verify(missing_paths);
+    REQUIRE(missing_verified.at("ok") == false);
+    REQUIRE(missing_verified.at("components").at(0).at("error") ==
+            "integrated provider component is missing its contract manifest");
+    fs::remove_all(missing_root);
 
     const fs::path incompatible_root = temporary_directory();
     const SetupPaths incompatible_paths = paths_under(incompatible_root);
@@ -753,36 +921,6 @@ TEST_CASE("inventory reports actionable missing and present knowledge assets") {
     REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "detected_unmanaged");
     REQUIRE(inventory.at("knowledge").at("syzygy").at("wdl_files") == 1);
 
-    const fs::path receipts = paths.data_root / "receipts";
-    fs::create_directories(receipts);
-    const auto activated = [](const fs::path& path) {
-        return json{
-            {"path", path.string()},
-            {"size_bytes", fs::file_size(path)},
-            {"sha256", std::string(64, '0')},
-        };
-    };
-    std::ofstream(receipts / "opening_book.standard.json")
-        << json{
-               {"schema", "arena_install_receipt_v1"},
-               {"component_id", "opening_book.standard"},
-               {"state", "installed_managed"},
-               {"activated_files",
-                json::array({activated(book_root / "strong_rare_v1.bin")})},
-           }
-               .dump();
-    std::ofstream(receipts / "syzygy.wdl.3-4-5.json")
-        << json{
-               {"schema", "arena_install_receipt_v1"},
-               {"component_id", "syzygy.wdl.3-4-5"},
-               {"state", "installed_managed"},
-               {"activated_files",
-                json::array({activated(tablebase_root / "KQvK.rtbw")})},
-           }
-               .dump();
-    inventory = SetupEngine::inventory(paths);
-    REQUIRE(inventory.at("knowledge").at("opening_book").at("state") == "installed_managed");
-    REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "installed_managed");
     fs::remove_all(root);
 }
 
@@ -790,16 +928,15 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     const fs::path root = temporary_directory();
     SetupPaths paths = paths_under(root);
     paths.bundle_owner = "{11111111-1111-1111-1111-111111111111}";
-    constexpr const char* manifest_digest =
-        "e23ab1788826a7bb5ef78e29553aadf1e429a9b2fccecf2087c6ca9beaa4f447";
-    constexpr const char* manifest =
-        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"syzygy.wdl.3-4-5","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
+    constexpr const char* component_id = "replacement.tables";
+    const std::string manifest =
+        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"replacement.tables","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
     std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
     std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
 
     const json artifact{
         {"type", "file_set"},        {"source", "syzygy.file-set.json"},
-        {"sha256", manifest_digest}, {"size_bytes", 312},
+        {"sha256", sha256_text(manifest)}, {"size_bytes", manifest.size()},
         {"file_count", 1},           {"total_size_bytes", 11},
     };
     const json plan{
@@ -808,7 +945,7 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
         {"offline", true},
         {"catalog_directory", root.string()},
         {"actions", json::array({{{"action", "install"},
-                                  {"component_id", "syzygy.wdl.3-4-5"},
+                                  {"component_id", component_id},
                                   {"version", "1.0.0"},
                                   {"enabled", true},
                                   {"artifact", artifact}}})},
@@ -816,6 +953,13 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     const json applied = SetupEngine::apply(json::object(), plan, paths, true, false);
     REQUIRE(applied.at("state") == "committed");
     REQUIRE(applied.at("components").at(0).at("bundle_owner") == paths.bundle_owner);
+    REQUIRE(applied.at("components").at(0).at("component_id") == component_id);
+    REQUIRE(applied.at("components").at(0).at("activated_resources").at(0).at("kind") ==
+            "syzygy");
+    const json inventory = SetupEngine::inventory(paths);
+    REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "installed_managed");
+    REQUIRE(inventory.at("knowledge").at("syzygy").at("managed_components") ==
+            json::array({component_id}));
     REQUIRE(fs::is_regular_file(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
     REQUIRE(fs::file_size(paths.knowledge_root / "tablebases" / "KQvK.rtbw") == 11);
     const fs::path locator_path = paths.data_root / "locators" / "syzygy.json";
@@ -826,7 +970,17 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     REQUIRE(fs::path(locator.at("path").get<std::string>()) ==
             fs::absolute(paths.knowledge_root / "tablebases").lexically_normal());
     locator_stream.close();
-    REQUIRE(SetupEngine::verify(paths).at("ok") == true);
+    const json verified = SetupEngine::verify(paths);
+    INFO(verified.dump(2));
+    REQUIRE(verified.at("ok") == true);
+    const json uninstall_plan = SetupEngine::plan_uninstall(paths, {component_id});
+    const json uninstall = SetupEngine::uninstall(paths, uninstall_plan, true);
+    REQUIRE(uninstall.at("components").size() == 1);
+    REQUIRE(fs::is_regular_file(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
+    REQUIRE(fs::is_regular_file(locator_path));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts" /
+                             (std::string(component_id) + ".json")));
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id / "1.0.0"));
 
     fs::remove_all(root);
 }
@@ -834,8 +988,8 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
 TEST_CASE("file-set catalog totals fail closed before activation") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    constexpr const char* manifest =
-        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"syzygy.wdl.3-4-5","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
+    const std::string manifest =
+        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"opening_book.misleading","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
     std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
     std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
     const json plan{
@@ -844,21 +998,74 @@ TEST_CASE("file-set catalog totals fail closed before activation") {
         {"offline", true},
         {"catalog_directory", root.string()},
         {"actions", json::array({{{"action", "install"},
-                                  {"component_id", "syzygy.wdl.3-4-5"},
+                                  {"component_id", "opening_book.misleading"},
                                   {"version", "1.0.0"},
                                   {"enabled", true},
                                   {"artifact",
                                    {{"type", "file_set"},
                                     {"source", "syzygy.file-set.json"},
-                                    {"sha256", "e23ab1788826a7bb5ef78e29553aadf1e429a9b2fcc"
-                                               "ecf2087c6ca9beaa4f447"},
-                                    {"size_bytes", 312},
+                                     {"sha256", sha256_text(manifest)},
+                                     {"size_bytes", manifest.size()},
                                     {"file_count", 1},
                                     {"total_size_bytes", 12}}}}})},
     };
     REQUIRE_THROWS(SetupEngine::apply(json::object(), plan, paths, true, false));
     REQUIRE_FALSE(fs::exists(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
     REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "syzygy.json"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("later failure restores prior knowledge and removes activation authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path tablebases = paths.knowledge_root / "tablebases";
+    fs::create_directories(tablebases);
+    std::ofstream(tablebases / "existing.rtbw", std::ios::binary) << "operator-state";
+    const std::string manifest =
+        R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"replacement.tables","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
+    std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
+    std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array(
+             {{{"action", "install"},
+               {"component_id", "replacement.tables"},
+               {"version", "1.0.0"},
+               {"enabled", true},
+               {"artifact",
+                {{"type", "file_set"},
+                 {"source", "syzygy.file-set.json"},
+                 {"sha256", sha256_text(manifest)},
+                 {"size_bytes", manifest.size()},
+                 {"file_count", 1},
+                 {"total_size_bytes", 11}}}},
+              {{"action", "install"},
+               {"component_id", "later.failure"},
+               {"version", "1.0.0"},
+               {"enabled", true},
+               {"artifact",
+                {{"type", "file_set"},
+                 {"source", "missing.file-set.json"},
+                 {"sha256", std::string(64, '0')},
+                 {"size_bytes", 1},
+                 {"file_count", 1},
+                 {"total_size_bytes", 1}}}}})},
+    };
+    REQUIRE_THROWS(SetupEngine::apply(json::object(), plan, paths, true, false));
+    REQUIRE(fs::is_regular_file(tablebases / "existing.rtbw"));
+    std::ifstream prior(tablebases / "existing.rtbw", std::ios::binary);
+    REQUIRE(std::string(std::istreambuf_iterator<char>(prior),
+                        std::istreambuf_iterator<char>()) == "operator-state");
+    prior.close();
+    REQUIRE_FALSE(fs::exists(tablebases / "KQvK.rtbw"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "syzygy.json"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts" / "replacement.tables.json"));
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / "replacement.tables" /
+                             "1.0.0"));
     fs::remove_all(root);
 }
 
@@ -871,8 +1078,12 @@ TEST_CASE("inventory returns bounded versioned discovery and browse contracts") 
     std::ofstream(book_forge / "arena-component.json")
         << json{
                {"schema", "arena_install_component_v1"},
-               {"component_id", "book_forge.service"},
+               {"component_id", "replacement.forge"},
                {"component_version", "1.0.0"},
+               {"files", json::array()},
+               {"discovery",
+                json::array({{{"kind", "book_forge"},
+                              {"locator", {{"source", "active_root"}}}}})},
            }
                .dump();
 
@@ -881,8 +1092,23 @@ TEST_CASE("inventory returns bounded versioned discovery and browse contracts") 
     std::ofstream(too_deep / "arena-component.json")
         << json{
                {"schema", "arena_install_component_v1"},
-               {"component_id", "uci_arena_evidence.service"},
+               {"component_id", "replacement.evidence"},
                {"component_version", "1.0.0"},
+               {"files", json::array()},
+               {"discovery",
+                json::array({{{"kind", "evidence_service"},
+                              {"locator", {{"source", "active_root"}}}}})},
+           }
+               .dump();
+
+    const fs::path misleading_name = provider_root / "legacy-name-only";
+    fs::create_directories(misleading_name);
+    std::ofstream(misleading_name / "arena-component.json")
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"component_id", "book_forge.service"},
+               {"component_version", "99.0.0"},
+               {"files", json::array()},
            }
                .dump();
 
@@ -891,6 +1117,11 @@ TEST_CASE("inventory returns bounded versioned discovery and browse contracts") 
     REQUIRE(book.at("schema") == "arena_setup_discovery_v1");
     REQUIRE(book.at("schema_version") == 1);
     REQUIRE(book.at("selection").at("source") == "provider_manifest");
+    REQUIRE(std::none_of(book.at("candidates").begin(), book.at("candidates").end(),
+                         [](const json& candidate) {
+                             return candidate.value("details", json::object())
+                                        .value("component_id", "") == "book_forge.service";
+                         }));
     REQUIRE(book.at("browse").at("selection") == "file_or_directory");
     REQUIRE_FALSE(book.at("browse").at("hints").empty());
     REQUIRE(inventory.at("discovery").at("opening_book").at("browse").at("managed_copy_allowed") ==
@@ -1086,13 +1317,18 @@ TEST_CASE("saved in-place Syzygy locator is projected into knowledge inventory")
 TEST_CASE("discovery precedence is receipt then locator then provider manifest") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const fs::path provider_root = root / "book-forge";
+    const fs::path provider_root =
+        paths.install_root / "components" / "replacement.forge" / "1.0.0";
     fs::create_directories(provider_root);
     std::ofstream(provider_root / "arena-component.json")
         << json{
                {"schema", "arena_install_component_v1"},
-               {"component_id", "book_forge.service"},
+               {"component_id", "replacement.forge"},
                {"component_version", "1.0.0"},
+               {"files", json::array()},
+               {"discovery",
+                json::array({{{"kind", "book_forge"},
+                              {"locator", {{"source", "active_root"}}}}})},
            }
                .dump();
     const fs::path cli = provider_root / "book-forge.mjs";
@@ -1110,10 +1346,10 @@ TEST_CASE("discovery precedence is receipt then locator then provider manifest")
 
     const fs::path receipts = paths.data_root / "receipts";
     fs::create_directories(receipts);
-    std::ofstream(receipts / "book_forge.service.json")
+    std::ofstream(receipts / "replacement.forge.json")
         << json{
                {"schema", "arena_install_receipt_v1"},
-               {"component_id", "book_forge.service"},
+               {"component_id", "replacement.forge"},
                {"component_version", "1.0.0"},
                {"state", "installed_managed"},
                {"active_root", provider_root.string()},
@@ -1195,95 +1431,67 @@ TEST_CASE("dashboard token reference save persists only path metadata") {
     fs::remove_all(root);
 }
 
-TEST_CASE("Lichess token path imports refresh installed Book Forge configuration") {
+TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const fs::path receipts = paths.data_root / "receipts";
-    const fs::path stockfish_root =
-        paths.install_root / "components" / "stockfish.engine" / "1.0.0";
-    const fs::path book_forge_root =
-        paths.install_root / "components" / "book_forge.service" / "0.1.0";
-    const fs::path stockfish = stockfish_root / "bin" / "stockfish.exe";
-    const fs::path book_forge_cli = book_forge_root / "tools" / "book_forge" / "cli.mjs";
-    const fs::path book_forge_config =
-        paths.workspace_root / "book-forge" / "manager-config.json";
-    fs::create_directories(stockfish.parent_path());
-    fs::create_directories(book_forge_cli.parent_path());
-    fs::create_directories(book_forge_config.parent_path());
-    fs::create_directories(receipts);
-    std::ofstream(stockfish, std::ios::binary) << "stockfish";
-    std::ofstream(book_forge_cli, std::ios::binary) << "book-forge";
-    std::ofstream(stockfish_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "stockfish.engine"},
-               {"component_version", "1.0.0"},
-               {"entrypoints", {{"executable", "bin/stockfish.exe"}}},
-               {"files",
-                json::array(
-                    {{{"path", "bin/stockfish.exe"},
-                      {"size_bytes", 9},
-                      {"sha256",
-                       "92126dfcf0d4176dec9631a2a00a6d840ca672b62eccb67f637850e70aa9be8a"}}})},
-           }
-               .dump(2);
-    std::ofstream(book_forge_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "book_forge.service"},
-               {"component_version", "0.1.0"},
-               {"entrypoints", {{"cli", "tools/book_forge/cli.mjs"}}},
-               {"files",
-                json::array(
-                    {{{"path", "tools/book_forge/cli.mjs"},
-                      {"size_bytes", 10},
-                      {"sha256",
-                       "f7628bf86d7b79dab3847e8f5101b3f82224d7bdf694a9817cc0bfc710d553ad"}}})},
-           }
-               .dump(2);
-    const auto write_receipt = [&](const std::string& id, const fs::path& active_root,
-                                   const std::string& configuration_path = "",
-                                   const std::string& component_version = "1.0.0") {
-        std::ofstream(receipts / (id + ".json"))
-            << json{
-                   {"schema", "arena_install_receipt_v1"},
-                   {"schema_version", 1},
-                   {"component_id", id},
-                   {"component_version", component_version},
-                   {"state", "installed_managed"},
-                   {"active_root", active_root.string()},
-                   {"artifact_sha256", std::string(64, 'a')},
-                   {"dependencies", json::array()},
-                   {"data_paths", json::array()},
-                   {"configuration_path", configuration_path},
-                   {"activated_files", json::array()},
-               }
-                   .dump(2);
-    };
-    write_receipt("stockfish.engine", stockfish_root);
-    write_receipt("book_forge.service", book_forge_root, book_forge_config.string(), "0.1.0");
-    std::ofstream(book_forge_config)
-        << json{
-               {"schema", "uci_arena_book_forge_config_v1"},
-               {"stockfish", stockfish.string()},
-           }
-               .dump(2);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.token.consumer", "lichess_token_path");
 
     const fs::path token = root / "lichess-token.txt";
     const std::string token_contents = "TEST_TOKEN_CONTENT_MUST_NOT_ESCAPE";
     std::ofstream(token) << token_contents;
     const json imported = SetupEngine::import_path(paths, "lichess_token_path", token);
-    REQUIRE(imported.at("refreshed_consumers") == json::array({"book_forge.service"}));
-    std::ifstream generated_input(book_forge_config);
+    REQUIRE(imported.at("refreshed_consumers") ==
+            json::array({"replaceable.token.consumer"}));
+    std::ifstream generated_input(configuration);
     json generated;
     generated_input >> generated;
-    REQUIRE(generated.at("acquisition").at("tokenFile") ==
+    REQUIRE(generated.at("locators").at("selected") ==
             fs::absolute(token).lexically_normal().string());
-    REQUIRE(generated.at("stockfish") == fs::absolute(stockfish).lexically_normal().string());
     REQUIRE(generated.dump().find(token_contents) == std::string::npos);
+    const fs::path projection = configuration.parent_path() /
+                                "generated" / "context-projection.json";
+    REQUIRE(fs::is_regular_file(projection));
+    REQUIRE(json::parse(std::ifstream(projection))
+                .at("locators")
+                .at("selected") == fs::absolute(token).lexically_normal().string());
     generated_input.close();
+    fs::remove_all(root);
+}
+
+TEST_CASE("component names do not grant knowledge activation authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string payload = "ordinary";
+    const std::string manifest =
+        std::string(R"({"schema":"arena_install_file_set_v1","schema_version":1,"component_id":"syzygy.misleading","component_version":"1.0.0","total_size_bytes":8,"files":[{"path":"payload.dat","size_bytes":8,"sha256":")") +
+        sha256_text(payload) + R"(","source":"payload.dat"}]})";
+    std::ofstream(root / "payload.dat", std::ios::binary) << payload;
+    std::ofstream(root / "generic.file-set.json", std::ios::binary) << manifest;
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions", json::array({{{"action", "install"},
+                                  {"component_id", "syzygy.misleading"},
+                                  {"version", "1.0.0"},
+                                  {"enabled", true},
+                                  {"artifact",
+                                   {{"type", "file_set"},
+                                    {"source", "generic.file-set.json"},
+                                    {"sha256", sha256_text(manifest)},
+                                    {"size_bytes", manifest.size()},
+                                    {"file_count", 1},
+                                    {"total_size_bytes", payload.size()}}}}})},
+    };
+    const json applied = SetupEngine::apply(json::object(), plan, paths, true, false);
+    REQUIRE(applied.at("components").at(0).at("activated_resources").empty());
+    REQUIRE_FALSE(fs::exists(paths.knowledge_root / "tablebases" / "payload.dat"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "syzygy.json"));
+    const json verified = SetupEngine::verify(paths);
+    INFO(verified.dump(2));
+    REQUIRE(verified.at("ok") == true);
     fs::remove_all(root);
 }
 
@@ -1374,126 +1582,11 @@ TEST_CASE("Book Forge credential recovery retries only a well-formed blocked sta
     REQUIRE(calls == 3);
 }
 
-TEST_CASE("profile imports refresh a safely disabled installed Lichess adapter") {
+TEST_CASE("disabled providers refresh through declared locator subscriptions") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const fs::path receipts = paths.data_root / "receipts";
-    const fs::path engine_root =
-        paths.install_root / "components" / "uci_arena.engine" / "1.0.0";
-    const fs::path adapter_root =
-        paths.install_root / "components" / "lichess.adapter" / "1.0.0";
-    const fs::path engine = engine_root / "bin" / "uci_arena_engine";
-    const fs::path checkpoint =
-        engine_root / "models" / "default" / "checkpoint_manifest.json";
-    const fs::path adapter = adapter_root / "app" / "adapter.mjs";
-    const fs::path adapter_template =
-        adapter_root / "deploy" / "lichess" /
-        "config.uci_arena.template.yml";
-    const fs::path configuration =
-        paths.workspace_root / "lichess-adapter" / "manager-config.json";
-    fs::create_directories(engine.parent_path());
-    fs::create_directories(checkpoint.parent_path());
-    fs::create_directories(adapter.parent_path());
-    fs::create_directories(adapter_template.parent_path());
-    fs::create_directories(configuration.parent_path());
-    fs::create_directories(receipts);
-    std::ofstream(engine, std::ios::binary) << "fixture";
-    std::ofstream(checkpoint, std::ios::binary)
-        << R"({"checkpoint_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","model_id":"model-1"})";
-    std::ofstream(adapter, std::ios::binary) << "fixture";
-    std::ofstream(adapter_template, std::ios::binary)
-        << R"({"schema":"uci_arena_lichess_adapter_v6","engine":{"uci_options":{}},"capacity":{"total_slots":1,"bot":{"target_active":0}},"scheduler":{"enabled":false},"timing":{}})";
-    std::ofstream(engine_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "uci_arena.engine"},
-               {"component_version", "1.0.0"},
-               {"entrypoints", {{"uci", "bin/uci_arena_engine"}}},
-               {"files",
-                json::array({
-                    {
-                        {"path", "bin/uci_arena_engine"},
-                        {"size_bytes", 7},
-                        {"sha256",
-                         "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"},
-                    },
-                    {
-                        {"path", "models/default/checkpoint_manifest.json"},
-                        {"size_bytes", 107},
-                        {"sha256",
-                         "63d67d4aa35ea116824e4b267866f5a3e3a797f1a94ebb2e34eded84d479a511"},
-                    },
-                })},
-           }
-               .dump(2);
-    std::ofstream(adapter_root / "arena-component.json")
-        << json{
-               {"schema", "arena_install_component_v1"},
-               {"schema_version", 1},
-               {"component_id", "lichess.adapter"},
-               {"component_version", "1.0.0"},
-               {"entrypoints", {{"adapter", "app/adapter.mjs"}}},
-               {"files",
-                json::array({
-                    {
-                        {"path", "app/adapter.mjs"},
-                        {"size_bytes", 7},
-                        {"sha256",
-                         "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"},
-                    },
-                    {
-                        {"path",
-                         "deploy/lichess/config.uci_arena.template.yml"},
-                        {"size_bytes", 166},
-                        {"sha256",
-                         "93c4b2eb1b64db5a021d92316ab162cdefd433ff2c19e19b62ca69294d29694b"},
-                    },
-                })},
-           }
-               .dump(2);
-    const auto write_receipt = [&receipts](
-                                   const std::string& id,
-                                   const fs::path& active_root,
-                                   const std::string& state,
-                                   const fs::path& configuration_path =
-                                       fs::path{}) {
-        std::ofstream(receipts / (id + ".json"))
-            << json{
-                   {"schema", "arena_install_receipt_v1"},
-                   {"schema_version", 1},
-                   {"component_id", id},
-                   {"component_version", "1.0.0"},
-                   {"state", state},
-                   {"active_root", active_root.string()},
-                   {"artifact_sha256", std::string(64, 'a')},
-                   {"dependencies", json::array()},
-                   {"data_paths", json::array()},
-                   {"configuration_path", configuration_path.string()},
-                   {"activated_files", json::array()},
-               }
-                   .dump(2);
-    };
-    write_receipt(
-        "uci_arena.engine", engine_root, "installed_managed");
-    write_receipt(
-        "lichess.adapter",
-        adapter_root,
-        "installed_disabled",
-        configuration);
-    std::ofstream(configuration)
-        << json{
-               {"schema", "uci_arena_lichess_adapter_v6"},
-               {"engine", {{"uci_options", json::object()}}},
-               {"capacity",
-                {
-                    {"total_slots", 1},
-                    {"bot", {{"target_active", 0}}},
-                }},
-               {"scheduler", {{"enabled", false}}},
-               {"timing", json::object()},
-           }
-               .dump(2);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.profile.consumer", "lichess_transport_profile");
 
     const fs::path transport = root / "transport_profile_v2.json";
     std::ofstream(transport)
@@ -1507,13 +1600,34 @@ TEST_CASE("profile imports refresh a safely disabled installed Lichess adapter")
             paths, "lichess_transport_profile", transport);
     REQUIRE(
         imported.at("refreshed_consumers") ==
-        json::array({"lichess.adapter"}));
+        json::array({"replaceable.profile.consumer"}));
     std::ifstream updated_input(configuration);
     const json updated = json::parse(updated_input);
     REQUIRE(
-        updated.at("timing").at("transport_profile_path") ==
+        updated.at("locators").at("selected") ==
         fs::absolute(transport).lexically_normal().string());
+    REQUIRE(updated.at("enabled") == false);
     updated_input.close();
+    fs::remove_all(root);
+}
+
+TEST_CASE("provider startup cleanup uses only the declared startup control") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "replaceable.lifecycle.consumer";
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile");
+    const fs::path workspace = configuration.parent_path();
+    std::ofstream(workspace / "valuable-state.json") << "{}";
+
+    const json plan = SetupEngine::plan_uninstall(paths, {component_id});
+    REQUIRE(plan.at("components").at(0).at("startup_cleanup_required") == true);
+    const json result = SetupEngine::uninstall(paths, plan, true);
+
+    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("installed") ==
+            false);
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id));
+    REQUIRE(fs::is_regular_file(workspace / "valuable-state.json"));
     fs::remove_all(root);
 }
 
@@ -1731,6 +1845,8 @@ TEST_CASE("managed copy is restricted to small flat opening books") {
     const json inventory = SetupEngine::inventory(paths);
     REQUIRE(inventory.at("discovery").at("opening_book").at("selection").at("source") ==
             "install_receipt");
+    REQUIRE(inventory.at("knowledge").at("opening_book").at("state") ==
+            "installed_managed");
     const fs::path managed_root = imported.at("path").get<std::string>();
     const std::string managed_id =
         imported.at("receipt").at("component_id").get<std::string>();

@@ -45,7 +45,7 @@
     {
       "role": "book_forge",
       "component_id": "book_forge.service",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "repository": "iteathen/uci-arena-book-forge",
       "required": false,
       "default_enabled": true,

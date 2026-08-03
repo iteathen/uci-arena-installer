@@ -36,7 +36,21 @@ Required scenarios:
 - post-install health success and failure;
 - arbitrary component identities exercising declarative selection, default
   activation, capacity policy, and knowledge accounting without engine changes;
+- declarative knowledge activation with an unrelated component identity,
+  misleading knowledge-shaped identity without activation authority, bounded
+  source/destination validation, receipt-consistent managed inventory, prior
+  destination restoration after later failure, and normal-uninstall
+  preservation after receipt and binary authority are removed;
 - cleanup after success and failure;
+- Manager artifact byte/manifest mismatch and version-drift rejection before
+  MSI generation;
+- WiX compilation of both fixed-scope Manager MSIs from a synthetic immutable
+  component artifact, including user/machine PATH ownership, Personal service
+  exclusion, and All-users LocalService registration;
+- catalog/policy feature mismatch and secret-bearing suite-media rejection;
+- WiX compilation of both fixed-scope suite bundles with default-on persisted
+  Modify controls, explicit apply/repair operations, and normal uninstall with
+  no purge path;
 - Personal delegation without elevation;
 - All-users delegation to the elevation-requiring machine bundle;
 - deterministic online and offline launcher envelopes, exact embedded bundle
