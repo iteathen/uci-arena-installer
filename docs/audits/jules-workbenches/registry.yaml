@@ -1,0 +1,28 @@
+schema: uci_arena_jules_workbench_registry_v1
+updated_at: '2026-08-03T16:45:00-07:00'
+concurrency:
+  maximum_active_workbenches: 1
+  active_workbenches: 0
+  rule: >-
+    Do not create a second workbench until the active workbench is transferred,
+    equivalence-verified, represented by a draft PR in the source repository,
+    and deleted.
+workbenches:
+  - id: engine-62-20260803
+    repository: iteathen/jules-wb-engine-62-20260803
+    state: awaiting_repository_creation
+    source_repository: iteathen/UCI_Arena
+    source_branch: agent/integrate-engine-audit-stacks
+    source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+    destination_branch: agent/timestamp-resource-lease-revocation
+    destination_base: agent/integrate-engine-audit-stacks
+    source_issue: 62
+    task_manifest: docs/audits/jules-workbenches/engine-62-20260803.yaml
+    task_body: docs/audits/jules-workbenches/engine-62-20260803-task.md
+    created_at: null
+    jules_task_id: null
+    workbench_result_sha: null
+    transferred_sha: null
+    destination_pr: null
+    equivalence_verified: false
+    deleted_at: null
