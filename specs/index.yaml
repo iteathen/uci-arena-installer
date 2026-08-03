@@ -17,6 +17,15 @@ specs:
       - tools/release
       - tests
       - docs/installer
+  - spec_id: arena_service_control_result_v1
+    path: specs/service_control_result_v1.yaml
+    owner: installer_platform_service_control
+    applies_to:
+      - include/arena/platform/service_control.hpp
+      - src/platform/linux/service_control.cpp
+      - src/platform/windows/service_control.cpp
+      - tests/unit/service_control_tests.cpp
+      - specs/service_control_result_v1.yaml
   - spec_id: arena_suite_lego_boundaries_v1
     path: specs/suite_lego_boundaries_v1.yaml
     owner: suite_architecture
