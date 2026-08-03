@@ -150,11 +150,11 @@ class LocateAssetSearchIndex final : public AssetSearchIndex {
         };
         try {
             for (const auto& item : queries) {
-                const std::size_t limit =
-                    indexed_asset_kind_budget(query.maximum_results, item.kind);
+                const std::size_t limit = indexed_asset_remaining_budget(
+                    query.maximum_results, result.candidates.size());
                 if (limit == 0) {
                     result.truncated = true;
-                    continue;
+                    break;
                 }
                 if (!execute_locate_query(
                         executable, item.expression, item.kind, limit,
