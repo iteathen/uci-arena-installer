@@ -119,17 +119,21 @@ if(ARENA_INSTALLER_BUILD_TESTS)
   add_executable(
     arena_mock_service tests/mocks/mock_service_cli.cpp)
   add_executable(
+    arena_mock_process_tree tests/mocks/mock_process_tree.cpp)
+  add_executable(
     arena_installer_tests
+    tests/unit/native_process_tests.cpp
     tests/unit/setup_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
   add_dependencies(
-    arena_installer_tests arena_mock_uci arena_mock_service)
+    arena_installer_tests arena_mock_uci arena_mock_service arena_mock_process_tree)
   target_compile_definitions(
     arena_installer_tests
     PRIVATE
       ARENA_MOCK_UCI_PATH="$<TARGET_FILE:arena_mock_uci>"
       ARENA_MOCK_SERVICE_PATH="$<TARGET_FILE:arena_mock_service>"
+      ARENA_MOCK_PROCESS_TREE_PATH="$<TARGET_FILE:arena_mock_process_tree>"
   )
   target_include_directories(
     arena_installer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
