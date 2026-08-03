@@ -1,371 +1,340 @@
 # Whole-system sanity audit handoff — 2026-08-03
 
 Status: **in progress; no soundness or release conclusion exists**  
-Snapshot time: 2026-08-03 15:00 America/Los_Angeles  
+Snapshot time: 2026-08-03 16:10 America/Los_Angeles  
 Canonical repository: `iteathen/uci-arena-installer`  
 Canonical branch: `agent/release-assembly` / Installer PR #2  
 Scope: `UCI_Arena`, `uci-arena-manager`, `uci-arena-lichess-bot`, `uci-arena-book-forge`, `uci-arena-evidence-service`, and `uci-arena-installer`
 
-This document is the continuation handoff for the six-repository sanity audit. It is deliberately redundant with the ledger, branch-topology addendum, performance addendum, issue bodies, and pull-request descriptions so another chat or agent can continue without reconstructing critical decisions from conversation history.
+This file is the canonical continuation state for the six-repository audit. It supersedes the 15:00 snapshot committed as `d55ebc4` / `6722974` while preserving those commits as immutable historical evidence. The detailed ledger, architecture, performance addendum, topology addendum, issue bodies, and hostile-review comments remain authoritative evidence for their ownership slices.
 
-## 1. Governing authority and non-negotiable method
+## 1. Read-first authority and method
 
-Read these first:
+Read, in order:
 
 1. `docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md`
 2. `docs/audits/whole-system-sanity-2026-08.md`
 3. `docs/audits/whole-system-performance-addendum-2026-08-03.md`
 4. `docs/audits/whole-system-branch-topology-addendum-2026-08-03.md`
-5. this handoff
+5. this handoff and its YAML companion
 6. each touched repository's `AGENTS.md`, read-first specification, active spec registry, and ownership specification
+7. the issue and hostile-review comments named below
 
-The governing engineering principles are:
+Non-negotiable rules:
 
-- **LEGO boundaries:** project-owned neutral contracts at repository and component boundaries; concrete adapters behind ports; composition owns concrete construction.
-- **Strict ownership:** one authority per concern. Manager is not Installer. Providers own their private domains. Engine owns chess/search/evaluation/model/inference and Engine runtime tools.
-- **Branch ancestry is product correctness:** a valid fix outside the candidate's ancestry is absent from the product.
-- **No source-tree coupling:** repositories exchange immutable artifacts, manifests, receipts, and typed versioned contracts—not peer source imports or private-store inspection.
-- **No hidden discovery or product-name dispatch:** discovery is bounded, declarative, receipt/manifest/locator driven, and non-mutating.
-- **Hot-path discipline:** no JSON, FEN/string round-trips, filesystem, logging, blocking mutexes, repeated validation, heap allocation, per-element virtual dispatch, or unnecessary full-buffer copies in node/tensor/record loops.
-- **Domain-appropriate foundations:** ranges, precision, identities, schemas, and representations must survive the real domain rather than the first observed example.
-- **Evidence before claims:** exact commands and output are required. A PR body or aggregate test count is not proof.
-- **Jules output is untrusted:** inspect every changed line, ancestry, omission, test, and claim. Reconstruct accepted slices on authoritative ancestry; never merge a Jules snapshot wholesale.
-- **Fix by ownership boundary:** coherent owner-sized changes, not small arbitrary batches and not broad cross-owner rewrites.
-- **No release conclusion from source review:** packaged execution, native platform behavior, install lifecycle, recovery, and performance must be capable of disproving the source theory.
+- **LEGO boundaries:** project-owned neutral contracts at repository/component boundaries; concrete adapters behind ports; composition owns construction.
+- **One owner per concern:** Manager is not Installer; providers own their private domains; Engine owns chess/search/evaluation/model/inference/runtime tools.
+- **Branch ancestry is product correctness:** a fix outside the candidate ancestry is absent from the product.
+- **No source-tree coupling or hidden discovery:** repositories exchange immutable artifacts, manifests, receipts, typed versioned contracts, and bounded locators.
+- **Hot-path discipline:** no JSON, filesystem, logging, blocking locks, repeated transformations, avoidable allocation/copy, or per-element virtual dispatch in node/tensor/record loops.
+- **Domain-appropriate foundations:** exact types, identities, ranges, schemas, and lifecycle authority must survive the real domain.
+- **Evidence before claims:** exact commands/output are required; aggregate counts and PR prose are not proof.
+- **Jules output is untrusted:** inspect authored commits, omissions, call sites, tests, races, cleanup, and performance; reconstruct accepted work on authoritative ancestry.
+- **Fix by ownership boundary:** coherent owner-sized changes, not arbitrary small patches or broad cross-owner rewrites.
+- **No release conclusion from source review:** native, packaged, installed, destructive, recovery, and performance gates must be capable of disproving the source theory.
 
-All automatic CI is intentionally disabled. Required validation is local/manual and must be recorded exactly.
+Automatic CI remains disabled by project policy. Validation is local/manual and must be recorded exactly.
 
-## 2. Environment and validation limitations
+## 2. Environment limits
 
-The connected GitHub tool can inspect and modify private repositories. The current execution environment does **not** provide a complete private checkout with the required Windows/Linux native toolchains and installed provider payloads.
+The connected GitHub tool can inspect and modify the private repositories, but the current execution environment does not provide the complete private checkouts, Node 24.15 runtime, Windows/Linux native toolchains, installed provider payloads, real ONNX-linked Engine build, or complete installer lifecycle environment.
 
-Known limitations:
+Therefore:
 
-- Node available for focused local probes has been 22.16; Evidence and Book Forge require Node >=24.15.0.
-- No trustworthy full Windows native build, Linux native build, complete CTest run, installer package construction, or installed-suite lifecycle can be inferred from connector-only work.
-- No final Engine ONNX-linked build or representative real search benchmark has been completed for the current audit stack.
-- No final complete-suite clean install → use → repair → upgrade → reinstall → uninstall → purge cycle has been completed.
+- connector review and focused source evidence are useful but are not native/package evidence;
+- no complete Windows/Linux Engine, Manager, or Installer build/CTest has been established for the final ancestry;
+- no final Node >=24.15 Evidence, Book Forge, or Lichess package-installed suite has been established;
+- no representative current Engine useful-search benchmark has been completed;
+- no complete clean install → use → repair → upgrade → reinstall → recovery → uninstall → purge cycle has been completed.
 
-Focused syntax, semantic harness, compiler, sanitizer, and line-review evidence remains useful but must be labelled exactly as such.
+## 3. Overall conclusion
 
-## 3. Current overall conclusion
-
-The sanity check is **not complete**.
-
-The architecture and ownership map are substantially understood, many branch-topology defects have been repaired, and several focused owner boundaries now have reviewable draft PRs. However, critical trust, storage, lifecycle, inference, search-concurrency, provider, Installer transaction, uninstall, and packaged end-to-end findings remain open.
+The sanity check is **not complete**. Critical trust, exact-file, storage, lifecycle, inference, search-concurrency, provider, installer transaction, uninstall, and packaged end-to-end findings remain open.
 
 `PKG-E2E-011` remains unknown. No soundness conclusion and no release-readiness conclusion may be issued.
 
-## 4. Canonical repository topology and current status
+## 4. Canonical repository state
 
 ### 4.1 Installer — suite composition and deployment authority
 
 Authoritative base:
 
-- PR #2 — `agent/release-assembly` — independent suite release assembly and whole-system audit ledger.
+- PR #2 — `agent/release-assembly` — canonical release assembly, audit ledger, and this handoff.
 
-Reviewed child topology:
+Reviewed children:
 
-- PR #3 — `agent/bound-indexed-asset-results` → base PR #2. Global large-asset result/materialization bound. Mergeable draft; repository-native Windows/Linux index integration still required.
-- PR #4 — `agent/harden-native-process-tree-stop` → base PR #2. Process-tree shutdown and descendant proof. Mergeable draft; full Windows Job Object and Linux CMake/CTest still required.
-- PR #5 — `agent/type-service-control-actions` → base PR #4. Fixed typed action vocabulary. Mergeable draft; result semantics remain non-substitutable.
+- PR #3 — bounded indexed-asset results → base #2; native Windows/Linux integration still required.
+- PR #4 — native process-tree stop → base #2; Windows Job Object and Linux CMake/CTest still required.
+- PR #5 — typed service-control actions → base #4; result semantics remain non-substitutable.
 
-Open critical Installer issues:
+Open critical issues:
 
-- #6 — platform-neutral service-control result. Windows raw SCM state and Linux `systemctl` exit status still escape behind one `int` port.
-- #7 — exact stable-byte TUF/catalog/state admission. Current trust chain can authenticate one file and parse another after path replacement. Blocks signed-release trust and `PKG-E2E-011`.
-- #8 — bounded acquisition/cache/archive expansion. Download totals/stalls/partials and archive expansion/types/ratios are not yet fully bounded. Blocks `PKG-E2E-011`.
-- #9 — truthful transactional apply/rollback/crash recovery. Current mutation lifecycle lacks one durable transaction authority and can misreport rollback/commit. Blocks install lifecycle soundness and `PKG-E2E-011`.
-- #10 — exact identity-bound uninstall and purge. Current check-then-delete path behavior and recursive deletion can remove bytes/tree not matching the reviewed plan. Blocks uninstall/purge soundness and `PKG-E2E-011`.
+- #6 platform-neutral service-control result;
+- #7 exact stable-byte TUF/catalog/state admission;
+- #8 bounded acquisition/cache/archive expansion;
+- #9 truthful transactional apply/rollback/crash recovery;
+- #10 exact identity-bound uninstall and purge.
 
-Installer merge/test order for current drafts:
-
-1. PR #2
-2. PR #3 independently onto #2
-3. PR #4 onto #2
-4. PR #5 onto #4
-5. reconcile issues #6–#10 on final ancestry
-6. run complete package/lifecycle evidence
+Issues #7–#10 block `PKG-E2E-011` and all lifecycle conclusions.
 
 ### 4.2 Engine — chess/search/evaluation/model/inference/runtime authority
 
-Authoritative architecture stack:
+Authoritative stack:
 
 1. PR #39 — `agent/system-sanity`
-2. PR #44 — `agent/model-adapter-contract` → base #39
-3. PR #47 — `agent/integrate-engine-audit-stacks` → base #44
+2. PR #44 — `agent/model-adapter-contract` → #39
+3. PR #47 — `agent/integrate-engine-audit-stacks` → #44
 
-Reviewed child:
+Reviewable child:
 
-- PR #52 — `agent/canonical-fen-admission-v2` → base #47. Clean reconstruction of Jules FEN work. The public out-of-line `Position::from_fen` remains one authority; macro aliasing and the unchecked compile-definition path were removed. Static review and standalone strict compilation passed; full Engine build/probes/CTest remain required.
+- PR #52 — canonical FEN admission → #47; static/standalone evidence exists, full Engine gates remain.
 
-Inference state:
+Inference:
 
-- Issue #45 is the broad neutral inference-port extraction and concrete ONNX delegation task.
-- The first Jules attempt produced PR #49, a `main`-based 47-file setup snapshot with no inference implementation. PR #49 was closed.
-- Issue #57 is the deliberately smaller provider-free contract slice.
-- Jules task `12435499143853197163` produced PR #60, but PR #60 targets `main` and exposes the stale broad repository snapshot. It is **untrusted and not accepted**. Any useful contract/probe files must be isolated onto exact PR #47 ancestry and reviewed line by line.
-- A second broad issue #45 Jules task, `11856418714977393425`, was retriggered. This overlaps the completed smaller #57 attempt. Do not accept overlapping outputs as separate authorities. Prefer the smaller provider-free contract first, then concrete ONNX delegation as a separate reviewed slice.
-- Issue #46 composition root is blocked until the neutral inference boundary and concrete inference implementation are reviewed. UCI must not remain the concrete provider graph owner.
+- Issue #45 remains open.
+- Issue #57 remains open as the preferred first provider-free contract slice.
+- Jules PR #60 (task `12435499143853197163`) was rejected and closed: wrong ancestry plus unsound contract/probe semantics.
+- Jules PR #61 (task `11856418714977393425`) was hostile-reviewed, rejected, and closed. Its neutral header used forbidden `void*`, hot-path vectors, unbounded identities, no typed per-call failure/cancellation/stale-completion authority, and omitted model-graph identity. Its 2,562-line ONNX source relocated model/chess semantics, cleared `input_adapter_id_`, lacked safe concurrent binding ownership and provider cancellation, and did not preserve the required validation/performance evidence. See PR #61 comment `5172691145`.
+- Issue #46 composition root remains blocked until the neutral contract and concrete inference adapter are accepted.
 
-Transposition table state:
+Transposition table and performance:
 
-- Issue #43 / PR #51 first Jules TT attempt was rejected. It did not compile, duplicated the TT implementation in the test, used unsafe reset/spinning behavior, omitted required lock-free and memory proofs, and made misleading test claims.
-- Issue #54 is the corrected production TT task. Jules PR #55 contained only planning/setup and a stale 43-file snapshot; it was closed.
-- No accepted production lock-free TT implementation exists. The 4,096 sharded OS mutexes remain a critical per-node multicore blocker until a stable-or-miss production design is implemented, compiled, stress-tested against production code, memory-accounted, and benchmarked.
+- Issues #43/#54 remain open; no accepted production lock-free TT exists.
+- PRs #51 and #55 remain rejected source evidence.
+- Issues #56, #58, and #59 remain open for measured machine-code hot paths, killer/history synchronization, and incremental MCGS repetition history.
 
-Additional Engine performance findings:
+Next Engine order:
 
-- #56 — profile and optimize machine-code hot paths only after inference/TT ownership stabilizes.
-- #58 — remove shared killer/history synchronization and telemetry false sharing from the node hot path.
-- #59 — replace repeated ~4 KiB MCGS repetition-history copies, linear scans, and full-capacity shifts with exact incremental state.
-
-Engine acceptance sequence:
-
-1. review/reconstruct provider-free inference PR #60 onto PR #47 or replace it;
-2. implement concrete ONNX inference behind the neutral port;
-3. implement composition root (#46);
-4. implement and benchmark production TT (#54/#43);
-5. run Engine correctness/substitution/provider parity/full CTest;
-6. run representative one-thread and multicore useful-search benchmarks;
-7. then address measured #56/#58/#59 work without conflating ownership changes.
+1. construct a disposable branch-correct workbench or work directly on exact PR #47 ancestry;
+2. implement/review the small provider-free contract with fixed bounded views, explicit capacities, checked products, typed per-call cancellation/result semantics, and complete probe evidence;
+3. implement a small concrete ONNX adapter preserving model/tuning identity and safe concurrency;
+4. implement composition root #46;
+5. implement/benchmark production TT;
+6. run full correctness, parity, cancellation, reload, CTest, and useful-search performance gates.
 
 ### 4.3 Manager — installed-suite control-plane authority
 
 Authoritative base:
 
-- PR #54 — `agent/release-assembly` — Manager as neutral installed control plane, not Installer.
+- PR #54 — `agent/release-assembly`.
 
-Current reviewed children:
+Reviewable child:
 
-- PR #73 — `agent/bound-match-plan-after-release-assembly` → base #54. Independent corrected match-plan admission. Validates by reference before copying, proves cardinality before allocation, discards caller pairings, bounds aggregate options, rejects invalid UTF-8/control characters and nonfinite SPRT values, and checks opening-index overflow. GCC, Clang, ASan, UBSan, and focused semantics passed; native Windows/Linux full tests remain required.
-- PR #67 — `agent/harden-sqlite-store-foundation` → base #54. **Blocked by adversarial review; do not merge.**
+- PR #73 — bounded match-plan admission → #54; focused compiler/sanitizer semantics passed, complete Windows/Linux suites remain.
 
-Confirmed PR #67 gaps:
+Blocked storage child:
 
-- `required_uint64()` calls `sqlite3_column_int64()` without requiring `SQLITE_INTEGER`; SQLite text and real storage classes silently coerce (`abc`→0, `1.5`→1).
-- exact schema authority is incomplete: current-table creation can partially normalize malformed/unversioned storage before full shape proof.
-- migration authority is not a constrained exact singleton schema contract.
-- only the immediate parent directory is checked; every ancestor/junction/reparse/mount substitution is not proven safe.
-- database/WAL/SHM checks are path-based and not bound to the opened database identity.
-- test claims exceed coverage: missing exact storage-class corruption, negative stored projections, symlinked ancestor/directory, malformed/partial schema/index/constraint, pragma refusal, post-open replacement, and deterministic retry after initialization failure.
-- the persistence spec requires backup verification before migration; PR #67 does not establish that lifecycle.
+- PR #67 — SQLite foundation → #54 — **do not merge**.
+- Existing findings remain: coercive storage-class projection, unsafe ancestor creation, incomplete schema/migration authority, missing adversarial tests.
+- Continued review added: no verified backup before migration; inspected paths not bound to opened database/WAL/SHM identities; coercive pragma/text reads; no exact singleton migration or schema contract; `CREATE IF NOT EXISTS` mutates before classification; no application/integrity admission; rollback/close/retry evidence absent. Review comment ID `4848995624`.
 
-Manager delegated work:
+LocalAuth:
 
-- Issue #69 LocalAuth reconciliation. Current Jules task `15207249830771102373` is active. Preserve PR #54 loopback-origin proof and session/CSRF behavior; integrate exact lowercase key admission, non-symlink state, non-overwriting publication, permissions, rotation, and fail-closed pre-init behavior. Review every line.
-- Issue #70 broad UCI-probe reconciliation. Current Jules task `5783702717709122040` is active. It overlaps the smaller pure-contract issue #76.
-- Issue #76 defines the preferred small pure UCI identity/option/override contract. Two Jules task-creation attempts failed. Architecturally, implement/review #76 before integrating subprocess/path/discovery work from #70. Do not let a broad #70 PR bury a copied or weak parser.
-- Issue #71 match-plan replay is superseded by independent PR #73. Jules PR #72 changed zero files while claiming four files and passing checks; it is closed and untrusted.
+- Issue #69 remains open.
+- Jules PR #77 (task `15207249830771102373`) was hostile-reviewed, rejected, and closed. It was main-based and also changed unrelated UCI owners. Its LocalAuth slice created directories before exact ancestor proof, used check-then-open unbounded key reads, path-based permissions without Windows ACL proof, nonexclusive/non-durable temporary publication, ambiguous success after cleanup failure, and cached old bearer authority before validating malformed/unsafe rotation. Tests did not establish the required platform/race/durability matrix. See PR #77 comment `5172704927`.
+
+UCI admission:
+
+- Issue #70 remains open.
+- Jules PR #74 (task `5783702717709122040`) was rejected/closed. It was main-based and repository-wide; the UCI slice accepted duplicate identity, lacked exact per-type option grammar, bounded output acquisition, exact launch-byte identity, and the required adversarial/native evidence.
+- Issue #76 remains the preferred small pure UCI identity/option/override contract and should precede broad subprocess/path integration.
 
 Manager next order:
 
-1. finish/review #69 LocalAuth;
-2. establish pure UCI contract #76, then reconcile #70 around it;
-3. correct/reconstruct SQLite PR #67 with exact path, storage-class, schema, migration, pragma, retry, and test authority;
-4. retain PR #73 on #54;
-5. run spec check plus full Windows/Linux build/CTest and installed Manager authentication/probe/tournament traces.
+1. reconstruct LocalAuth #69 on exact #54 ancestry, preferably through the disposable workbench protocol;
+2. establish pure UCI contract #76, then integrate #70 around it;
+3. reconstruct PR #67's storage owner with exact path/open identity, typed projection, schema classification, verified backup, transactional migration, integrity/pragma admission, and deterministic recovery;
+4. retain PR #73 as draft until complete native tests;
+5. run spec checks, Windows/Linux build/CTest, and installed authentication/probe/tournament traces.
 
 ### 4.4 Evidence Service — evidence scheduling/publication authority
 
 Authoritative stack:
 
-1. PR #10 — `agent/system-sanity`
-2. PR #13 — strict CLI grammar
-3. PR #14 — streaming dataset export
-4. PR #15 — streaming dataset show
-5. PR #16 — transactional crash-recoverable prune
-6. PR #17 — integrate orphaned external-owner and target-identity fixes
-7. PR #18 — exact config/pointer/owner-root admission
-8. PR #19 — immutable daemon timing contract
-9. PR #22 — resource configuration type/cardinality bounds
+1. PR #10
+2. PR #13 strict CLI grammar
+3. PR #14 streaming export
+4. PR #15 streaming display
+5. PR #16 transactional crash-recoverable prune
+6. PR #17 orphan-boundary integration
+7. PR #18 exact config/pointer/owner-root admission
+8. PR #19 immutable daemon timing
+9. PR #22 resource configuration type/cardinality bounds
 
-Important reviewed details:
+Open blockers:
 
-- PR #18 is one coherent commit on PR #17. It adds bounded exact configuration reads, safe JSON merge/prototype-key rejection, exact owner directories, exact active pointer, descriptor-bound stable engine hashing, path/type bounds, and adversarial tests. Local Node 22 identity suite passed 13/13; configuration probes passed with a clearly documented local version-gate bypass. Node 24.15/full suite remains required.
-- PR #19 freezes heartbeat/cycle/stale values at 15,000/60,000/300,000 ms while preserving config compatibility. It intentionally does not claim stale-status projection.
-- PR #22 requires safe integers for idle samples/timers, retains continuous GiB/percentage thresholds, and bounds/uniquifies priority-process basenames.
+- #20 stale-heartbeat status projection;
+- #21 true end-to-end foreground revocation budget.
 
-Open Evidence issues:
-
-- #20 — status records heartbeat timestamp but never projects missing/fresh/stale at the declared 300-second boundary.
-- #21 — foreground revocation is not truly end-to-end two seconds: up to `pollMs` detection plus up to `revokeWithinMs` shutdown can exceed the contract.
-
-All Evidence PRs #18/#19/#22 still require Node >=24.15.0, `npm run check`, `npm run acceptance:idle`, packaged runtime tests, and Windows/Linux behavior. Their Node 22 probes are not release evidence.
+All later Evidence PRs still require Node >=24.15, `npm run check`, `npm run acceptance:idle`, package-installed Windows/Linux behavior, and destructive recovery evidence. Node 22 probes are not release evidence.
 
 ### 4.5 Book Forge — opening-book production authority
 
-Current documented stack:
+Documented stack:
 
-1. PR #8 — `agent/system-sanity`
-2. PR #11 — configuration contract → base #8
-3. PR #10 — daemon-lock cleanup → base #11
+1. PR #8
+2. PR #11 → #8
+3. PR #10 → #11
 
-PR #9 is closed/superseded; its focused acquisition resource-probe test was carried into #11.
-
-Adversarial override: broad PR #8, PR #11, and PR #10 are **blocked as acceptance evidence** until reopened findings are repaired.
+All remain blocked as acceptance evidence.
 
 Open critical issues:
 
-- #12 — exact acquisition credential bytes at use time. Current credential `stat`/`readFile` follows/reopens paths and can send swapped token bytes.
-- #13 — snapshot compiler must become single-pass enough and publication/recovery truthful. Current work is memory bounded but retains avoidable full passes/copies, predictable work paths, race/orphan and check-then-open publication defects.
-- #14 — catalog and 64 shard SQLite foundation: exact paths/ancestors/WAL/SHM, no-follow identity, pragma verification, schema/migration/storage-class proof, typed translation, and recoverable cross-shard authority remain incomplete.
+- #12 exact acquisition credential bytes at use time;
+- #13 single-pass-enough recoverable snapshot compilation/publication;
+- #14 exact catalog and 64-shard SQLite authority.
 
-Reopened ledger rows:
-
-- `BOOK-TRUST-017` — reopened.
-- `BOOK-AUTH-018` — partially reopened; daemon-lock cleanup is not a complete transactional lifecycle and cleanup errors can replace primary failures.
-- `BOOK-SCALE-020` — reopened.
-
-Do not use PR #8's 59/59 aggregate count or deterministic candidate as proof that these reopened boundaries are sound.
+Reopened ledger rows remain `BOOK-TRUST-017`, `BOOK-AUTH-018`, and `BOOK-SCALE-020`. Aggregate 59/59 and deterministic candidate claims do not close them.
 
 ### 4.6 Lichess Bot — Lichess provider authority
 
-Current broad audit:
+- PR #3 — `agent/system-sanity` — mergeable draft but **blocked by adversarial review**. Its 148-pass aggregate is not acceptance evidence.
 
-- PR #3 — `agent/system-sanity` — mergeable draft but **blocked by adversarial review**. Its 148-pass aggregate is not acceptance evidence for reopened boundaries.
+Open issues and expanded canonical comments:
 
-Open critical issues:
+- #4 exact credential/profile/engine/runtime files — comment `5172632661`.
+  - Exact-file authority is fragmented across token/config/profile/evidence/executable/argument/model/tablebase/status/log/publication paths and both startup adapters.
+  - Required: one provider-local exact-file/publication component, bounded descriptor/handle reads and streaming hashes, exact executable launch identity, exclusive durable publication, native Windows reparse identity and POSIX no-follow/descriptor operations.
+- #5 byte UCI framing, typed options, and exact final applied identity — comment `5172640649`.
+  - Required: raw-byte framer before UTF-8 decode, exact typed handshake parser, fixed telemetry record, one final option map/SHA including automatic `Move Overhead` and `Ponder`, and one immutable qualification identity shared by capacity/smoke/timing/provenance.
+- #6 transactional game activation and nonblocking status — comment `5172653544`.
+  - Required: exact challenge/recovery correlation, durable activation nonce/phase record, coherent slot/session/task publication behind a start gate, structured terminal/cleanup outcome, and one off-loop latest-wins serialized status publisher.
+- #7 exact SQLite storage foundation — comment `5172666890`.
+  - Required: native SQLite/VFS or isolated storage owner capable of exact database/WAL/SHM identity; exact schema/application/version classification; BigInt/exact storage-class translation; verified backup/migration/recovery; owner transactions and destructive platform tests.
 
-- #4 — exact credential/profile/engine/runtime file admission and atomic publication. Token and identity files still have check-then-read/hash and symlink/replacement risks.
-- #5 — byte-oriented UCI framing, typed identity/options, exact final applied-option identity, and hot-path allocation/copy removal. Automatic `Move Overhead`/`Ponder` are omitted from current applied-option hash; duplicate/conflicting option/identity grammar is insufficiently admitted.
-- #6 — transactional game activation and nonblocking serialized status publication. Slot authority can be published before durable/session/task publication; synchronous status work can block game clocks.
-- #7 — exact SQLite storage foundation, schema/migration/storage-class/pragma/path authority and deterministic retry.
+Additional confirmed Lichess facts:
 
-Reopened ledger rows:
+- `findPending()` currently falls back to opponent or sole-slot adoption;
+- active authority can be exposed before challenge/reservation/session/task/durable game authority;
+- session failures can be swallowed while cleanup/status failures replace causality;
+- current tests intentionally normalize partial v1/v3 schemas rather than rejecting malformed admitted versions.
 
-- `LICHESS-UCI-012`
-- `LICHESS-CRED-013`
-- `LICHESS-LIFECYCLE-014`
-- persistence foundation separately reopened under #7
+Reopened ledger rows remain `LICHESS-UCI-012`, `LICHESS-CRED-013`, `LICHESS-LIFECYCLE-014`, plus storage #7. Do not merge PR #3 or promote a candidate until #4–#7 are resolved on final ancestry and exercised with real process, loopback API, storage, race, startup, active-game latency, package, and recovery evidence.
 
-Do not merge PR #3 or promote a provider candidate until #4–#7 are resolved, line-reviewed, and exercised with loopback API, real process, storage, race, and active-game latency evidence.
+## 5. Jules execution and trust protocol
 
-## 5. Jules trust record and current tasks
+### Observed behavior
 
-### Rejected or superseded Jules outputs
+- Intermediate Jules error comments are **not terminal task status**. Both issue #45 and #69 later produced PRs after earlier error/failure-looking comments.
+- The GitHub issue-label route has repeatedly produced one-commit branches from repository default `main`, even when the issue text names a prepared branch.
+- Wrong ancestry is an integration classification, not proof that the Jules task failed.
+- A completed Jules PR is still untrusted until its authored commit is reviewed.
 
-- Engine PR #50 — main-based/stale FEN snapshot. Useful slice was reconstructed as clean PR #52; #50 closed.
-- Engine PR #51 — TT code did not compile and the test duplicated the implementation; closed.
-- Engine PR #55 — TT planning/setup only, no implementation, stale snapshot; closed.
-- Engine PR #49 — inference environment/setup only, no port implementation, 47-file stale snapshot; closed.
-- Manager PR #72 — empty commit/zero changed files with false replay/test narrative; closed.
-- Manager match-plan work was independently reconstructed as PR #73.
-- Engine PR #60 — completed smaller inference contract task, but targets `main` and carries stale snapshot changes. Untrusted; not accepted.
+### Rejected/closed outputs
 
-### Current task state at this snapshot
+- Engine #49 setup only/no inference implementation.
+- Engine #50 stale FEN snapshot; useful work reconstructed as PR #52.
+- Engine #51 noncompiling TT and copied test implementation.
+- Engine #55 TT planning only.
+- Engine #60 unsound provider-free contract/probe.
+- Engine #61 unsound broad inference/ONNX relocation.
+- Manager #72 empty delivery with false narrative.
+- Manager #74 unsound broad UCI reconciliation.
+- Manager #77 unsound LocalAuth reconciliation and unrelated UCI changes.
 
-- Engine issue #45 task `11856418714977393425` — active broad inference task.
-- Manager issue #69 task `15207249830771102373` — active LocalAuth task.
-- Manager issue #70 task `5783702717709122040` — active broad UCI-probe task.
-- Engine issue #57 task `12435499143853197163` — completed as untrusted PR #60.
-- Manager issue #76 smaller UCI contract — task creation failed twice and is not active.
+No Jules task is currently treated as active in this handoff. Issue #76 task creation had previously failed; do not infer terminal state from an intermediate bot comment without the Jules UI or later code/PR evidence.
 
-### Mandatory Jules review protocol
+### Mandatory hostile review
 
-For every Jules result:
+For every result:
 
-1. Confirm task is actually complete; intermediate error comments are not task completion.
-2. Verify requested base branch and compare against that base.
-3. List changed filenames before reading implementation.
-4. Reject full-repository snapshots and unrelated ownership changes.
-5. Read every changed line and every omitted requirement.
-6. Verify declarations, aggregation, call sites, error paths, lifetimes, races, and cleanup.
-7. Ensure tests call production code rather than a copied implementation.
-8. Reproduce compile/test claims or mark them unverified.
-9. Check test fixtures reach the intended assertion rather than failing earlier.
-10. Check memory, allocation, copy, blocking, and hot-path consequences.
-11. Reconstruct accepted files onto authoritative ancestry rather than merging the Jules branch wholesale.
-12. Keep PR draft until all required native/platform/package gates pass.
+1. freeze the result SHA;
+2. establish the actual merge base and authored commit range;
+3. list files changed by the authored commit, not merely the PR comparison against another ancestry;
+4. reject unrelated ownership changes;
+5. read every changed line and omitted requirement;
+6. inspect declarations, aggregation, call sites, error paths, lifetimes, races, cancellation, cleanup, and performance;
+7. prove tests call production code and reach the intended assertion;
+8. reproduce exact compile/test/benchmark claims or mark them unverified;
+9. reconstruct accepted work on authoritative ancestry;
+10. keep the destination PR draft until native/platform/package gates pass.
 
-## 6. Repairs produced during the current continuation
+## 6. Disposable Jules workbench protocol
 
-### Accepted as reviewable drafts, not release-ready
+Use this when the issue-label route must start from a stacked authoritative ancestry.
 
-- Engine PR #52 — canonical FEN admission on correct ancestry.
-- Manager PR #73 — bounded match planning before allocation.
-- Evidence PR #18 — exact path/config/pointer/engine identity admission.
-- Evidence PR #19 — canonical immutable daemon timing.
-- Evidence PR #22 — resource config types/counts/process-name bounds.
-- Installer PRs #3/#4/#5 — focused asset, process-tree, and typed action children, still requiring platform-native gates.
+A workbench is a temporary transaction, not a development repository.
 
-### New explicit blocker issues
+Required flow:
 
-- Evidence #20 — stale heartbeat projection.
-- Evidence #21 — end-to-end foreground revocation budget.
-- Installer #6–#10 — substitutable service result, stable-byte trust, bounded acquisition/archive, transactional mutation/recovery, exact uninstall/purge.
-- Engine #56/#58/#59 — measured hot-path, heuristic synchronization, repetition history.
-- Lichess #4–#7.
-- Book Forge #12–#14.
-- Manager #76 smaller UCI contract.
+1. create one private repository under `iteathen`, explicitly authorized for Jules;
+2. flatten only the exact accepted prerequisite ancestry into workbench `main`;
+3. commit a baseline manifest recording source repo, source branch/SHA, destination branch, task/issue, permitted files/owners, and cleanup state;
+4. verify workbench `main` equals the recorded baseline;
+5. create one task/issue only; never reuse a workbench;
+6. when Jules produces code, freeze the result SHA and stop mutation;
+7. extract only `baseline..result` authored commits/diff;
+8. transfer the accepted delta to a fresh branch from the original repository's authoritative destination ancestry;
+9. verify patch equivalence and run hostile review in the original repository before opening/advancing the real draft PR;
+10. after the original branch/PR, SHAs, equivalence, and transcript are recorded, remove Jules access if separately granted, delete the workbench repository, remove local clones/worktrees, and mark cleanup complete here.
 
-## 7. Immediate restart procedure for the next agent/chat
+State machine:
 
-Do this in order:
+`created → baseline_verified → jules_active → result_frozen → transferred → equivalence_verified → destination_pr_open → deleted`
 
-1. Read this handoff and the four canonical audit/architecture files listed at the top.
-2. Fetch current heads and compare every listed branch; do not assume the SHAs in old PR bodies remain current.
-3. Check Jules task comments for #45, #69, and #70. Do not create more tasks while three are active.
-4. Review Engine PR #60 as hostile input. Because it targets `main`, isolate only the issue #57-owned files onto a review branch based on PR #47. Reject unrelated release/governance/evaluation changes. Compile the provider-free target before accepting anything.
-5. When #45, #69, or #70 completes, apply the mandatory Jules review protocol. Broad #70 must not replace the smaller #76 pure-parser ownership design.
-6. Continue Manager SQLite PR #67 review. Correct storage-class proof first; then exact ancestor/path/open identity, schema/migration/pragma authority, failure reset, and adversarial tests. Do not merge the current PR.
-7. Keep Manager PR #73 draft until full native suites pass.
-8. Continue Lichess issues #4–#7 in owner-sized branches; PR #3 remains blocked.
-9. Continue Book Forge issues #12–#14; PRs #8/#11/#10 remain blocked as acceptance evidence.
-10. Implement Evidence #20/#21 only on final #22 ancestry and run Node 24.15/full/provider acceptance.
-11. Address Installer issues #7–#10 before any package-cycle conclusion. These are critical trust and destructive-lifecycle blockers.
-12. Update the ledger statuses in one convergence commit after the corresponding fixes enter authoritative ancestry. Until then the PR #2 adversarial override supersedes older `corrected` rows.
-13. Before stopping work, update this handoff with new PR/issue/task IDs, rejected approaches, exact validation, remaining blockers, and the next ownership boundary.
+Rules:
 
-## 8. Final required gates before a soundness decision
+- deterministic name: `jules-wb-<project>-<issue>-<attempt>`;
+- one task and one source repository per workbench;
+- no rejected/superseded/overlapping branch in baseline;
+- never merge workbench `main` into the product repository;
+- no new workbench while an unlisted or abandoned one exists;
+- keep a central registry in this handoff/YAML;
+- no workbench currently exists.
+
+## 7. Immediate restart order
+
+1. Read this handoff, YAML, architecture, ledger, performance, and topology files.
+2. Fetch current heads before trusting any recorded SHA.
+3. Confirm there are no abandoned `jules-wb-*` repositories before creating one.
+4. Use a disposable Engine workbench based exactly on PR #47 for the small issue #57 provider-free contract; do not retry the broad #45 monolith first.
+5. Use a disposable Manager workbench based exactly on PR #54 for LocalAuth #69, or reconstruct directly with the exact secret-file/platform owner.
+6. Implement Manager pure UCI contract #76 before broad #70 integration.
+7. Reconstruct Manager SQLite #67 rather than patching its current lifecycle.
+8. Continue Lichess #4–#7 in the owner order: exact-file platform owner; UCI byte/identity owner; activation/status owner; SQLite owner. Coordinate shared platform identity without collapsing concerns.
+9. Continue Book Forge #12–#14.
+10. Implement Evidence #20/#21 on final #22 ancestry and run Node 24.15/package acceptance.
+11. Resolve Installer #7–#10 before any package/lifecycle conclusion.
+12. Converge ledger statuses only after accepted fixes enter authoritative ancestry.
+13. Before stopping, update both handoff files, workbench registry, PR #2 discoverability comment, exact validation, and next action.
+
+## 8. Final gates before any soundness decision
 
 ### Source and architecture
 
 - all active specs/preflight/boundary checks pass;
-- no orphan fixes outside candidate ancestry;
-- no copied ownership or source-tree imports;
-- all neutral substitution probes pass;
+- one authoritative ancestry per repository with no orphan fixes;
+- no copied ownership or peer-source imports;
+- all substitution probes pass;
 - all reopened ledger rows are reclassified with concrete evidence.
 
 ### Native and runtime
 
-- Windows and Linux native configure/build/CTest for Engine, Manager, and Installer;
+- Windows/Linux Engine, Manager, and Installer configure/build/CTest;
 - Node >=24.15 full suites for Evidence and Book Forge;
-- complete Lichess loopback API and active-game lifecycle tests;
-- real ONNX/provider parity, cancellation, reload, and composition traces;
-- TT correctness, race, memory, one-thread and multicore useful-search benchmarks;
-- Evidence/Book resource preemption and idle acceptance;
+- complete Lichess loopback API, real process, storage, startup, and active-game lifecycle tests;
+- real ONNX parity/cancellation/reload/composition traces;
+- TT correctness/race/memory and one-thread/multicore useful-search benchmarks;
+- Evidence/Book preemption and idle acceptance;
 - storage reopen/migration/corruption/race/recovery tests on both platforms.
 
 ### Package and lifecycle
 
-- clean immutable provider candidates from accepted ancestry;
+- immutable provider candidates from accepted ancestry;
 - exact manifests, receipts, inventories, digests, SBOMs, provenance, and dependency closure;
-- Windows personal and all-users package behavior;
-- Linux package behavior;
-- clean install;
-- ordinary use across Engine, tournaments, Lichess, Book Forge, Evidence;
-- repair;
-- upgrade;
-- reinstall;
-- restart/crash recovery at injected checkpoints;
+- Windows personal/all-users and Linux package behavior;
+- clean install and ordinary use across all providers;
+- repair, upgrade, reinstall;
+- injected crash/restart recovery;
 - normal uninstall with preservation proof;
-- reinstall with safe revalidation and no retained-state authority confusion;
-- explicit previewed purge with exact ownership and symlink/reparse safety;
-- repeated cycle with no stale startup, receipt, lock, cache, or transaction authority.
+- safe reinstall revalidation;
+- explicit previewed purge with exact ownership and link/reparse safety;
+- repeated cycle without stale startup, receipt, lock, cache, transaction, or workbench authority.
 
 No partial source-level success substitutes for these gates.
 
 ## 9. Handoff maintenance rule
 
-This file must be updated whenever any of the following changes:
+Update this file and its YAML companion whenever any authoritative ancestry, finding, Jules task/result, workbench state, PR/issue disposition, validation result, or next restart action changes.
 
-- authoritative branch ancestry;
-- a finding changes status;
-- a Jules task starts, completes, fails, or produces a PR;
-- a PR is accepted, blocked, superseded, reconstructed, closed, or merged;
-- a new critical issue is opened;
-- validation is executed;
-- the next restart action changes.
-
-A handoff is incomplete if a new agent would need conversation memory to determine what is authoritative, what was rejected, what was tested, or what to do next.
+A handoff is incomplete if a new agent would need conversation memory to determine what is authoritative, what was rejected, what was tested, which temporary repositories exist, or what to do next.
