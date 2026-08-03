@@ -128,6 +128,9 @@ int perform_service_action(
     if (platform_name.empty()) {
         throw std::runtime_error("service name is required");
     }
+    if (!valid_service_action(action)) {
+        throw std::runtime_error("unsupported Windows service action");
+    }
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (manager == nullptr) {
         throw std::runtime_error("cannot open Windows Service Control Manager");
@@ -156,8 +159,6 @@ int perform_service_action(
             CloseServiceHandle(service);
             CloseServiceHandle(manager);
             return state;
-        } else {
-            throw std::runtime_error("unsupported Windows service action");
         }
         CloseServiceHandle(service);
         CloseServiceHandle(manager);
