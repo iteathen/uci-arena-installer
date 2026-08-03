@@ -9,29 +9,41 @@ namespace {
 using arena::ports::IndexedAssetKind;
 using arena::ports::IndexedAssetSearchResult;
 using arena::ports::finalize_indexed_asset_search_result;
-using arena::ports::indexed_asset_kind_budget;
+using arena::ports::indexed_asset_remaining_budget;
 
-TEST_CASE("indexed asset category budgets sum to the global maximum") {
-    for (std::size_t maximum = 0; maximum <= 64; ++maximum) {
-        const std::size_t opening = indexed_asset_kind_budget(
-            maximum, IndexedAssetKind::opening_book);
-        const std::size_t syzygy = indexed_asset_kind_budget(
-            maximum, IndexedAssetKind::syzygy);
-        const std::size_t timing = indexed_asset_kind_budget(
-            maximum, IndexedAssetKind::timing_profile);
-        REQUIRE(opening + syzygy + timing == maximum);
-        REQUIRE(opening >= syzygy);
-        REQUIRE(syzygy >= timing);
-        REQUIRE(opening - timing <= 1);
+TEST_CASE("indexed asset search carries unused global budget forward") {
+    for (std::size_t maximum = 0; maximum <= 4096; ++maximum) {
+        for (std::size_t materialized = 0; materialized <= maximum + 1; ++materialized) {
+            const std::size_t expected = materialized >= maximum
+                ? 0
+                : maximum - materialized;
+            REQUIRE(indexed_asset_remaining_budget(maximum, materialized) == expected);
+        }
     }
 
-    REQUIRE(indexed_asset_kind_budget(1, IndexedAssetKind::opening_book) == 1);
-    REQUIRE(indexed_asset_kind_budget(1, IndexedAssetKind::syzygy) == 0);
-    REQUIRE(indexed_asset_kind_budget(2, IndexedAssetKind::opening_book) == 1);
-    REQUIRE(indexed_asset_kind_budget(2, IndexedAssetKind::syzygy) == 1);
-    REQUIRE(indexed_asset_kind_budget(4, IndexedAssetKind::opening_book) == 2);
-    REQUIRE(indexed_asset_kind_budget(4, IndexedAssetKind::syzygy) == 1);
-    REQUIRE(indexed_asset_kind_budget(4, IndexedAssetKind::timing_profile) == 1);
+    REQUIRE(indexed_asset_remaining_budget(1, 0) == 1);
+    REQUIRE(indexed_asset_remaining_budget(1, 1) == 0);
+    REQUIRE(indexed_asset_remaining_budget(4, 0) == 4);
+    REQUIRE(indexed_asset_remaining_budget(4, 1) == 3);
+    REQUIRE(indexed_asset_remaining_budget(4, 3) == 1);
+    REQUIRE(indexed_asset_remaining_budget(4, 4) == 0);
+}
+
+TEST_CASE("empty earlier asset kinds leave the complete budget for later kinds") {
+    constexpr std::size_t maximum = 3;
+    std::size_t materialized = 0;
+
+    const std::size_t opening_budget =
+        indexed_asset_remaining_budget(maximum, materialized);
+    REQUIRE(opening_budget == 3);
+    // Opening-book query returns no rows.
+    REQUIRE(indexed_asset_remaining_budget(maximum, materialized) == 3);
+
+    // Syzygy query fills two rows, leaving one slot for timing evidence.
+    materialized += 2;
+    REQUIRE(indexed_asset_remaining_budget(maximum, materialized) == 1);
+    materialized += 1;
+    REQUIRE(indexed_asset_remaining_budget(maximum, materialized) == 0);
 }
 
 TEST_CASE("indexed asset finalization enforces the global result bound") {
