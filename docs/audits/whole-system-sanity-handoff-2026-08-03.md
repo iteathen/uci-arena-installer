@@ -1,12 +1,12 @@
 # Whole-system sanity audit handoff — 2026-08-03
 
 Status: **in progress; no soundness or release conclusion exists**  
-Snapshot time: 2026-08-03 16:24 America/Los_Angeles  
+Snapshot time: 2026-08-03 16:55 America/Los_Angeles  
 Canonical repository: `iteathen/uci-arena-installer`  
 Canonical branch: `agent/release-assembly` / Installer PR #2  
 Scope: `UCI_Arena`, `uci-arena-manager`, `uci-arena-lichess-bot`, `uci-arena-book-forge`, `uci-arena-evidence-service`, and `uci-arena-installer`
 
-This is the canonical continuation handoff for the six-repository sanity audit. It supersedes the earlier 15:00 and 16:10 snapshots while preserving their commits and issue/PR comments as immutable evidence. A later agent must be able to determine authoritative ancestry, rejected work, active temporary repositories, validation status, and the next ownership boundary without conversation history.
+This is the canonical continuation state for the six-repository sanity audit. It supersedes earlier same-day handoff snapshots while preserving their commits, issue bodies, PRs, and review comments as immutable evidence. A new agent must be able to identify authoritative ancestry, accepted and rejected work, temporary Jules state, validation performed, validation still required, and the exact next action without conversation memory.
 
 ## 1. Governing authority and method
 
@@ -17,18 +17,19 @@ Read, in order:
 3. `docs/audits/whole-system-performance-addendum-2026-08-03.md`
 4. `docs/audits/whole-system-branch-topology-addendum-2026-08-03.md`
 5. this handoff and its YAML companion
-6. each touched repository's `AGENTS.md`, read-first specification, active spec registry, issue body, and hostile-review comments named below
+6. `docs/audits/jules-workbenches/registry.yaml`
+7. each touched repository's `AGENTS.md`, read-first spec, active spec registry, issue body, and review comments named below
 
 Non-negotiable rules:
 
 - project-owned neutral LEGO contracts at repository and component boundaries;
 - one authority per concern; Manager is not Installer and providers own private domains;
 - branch ancestry is product correctness;
-- immutable artifacts/manifests/receipts replace peer-source imports and hidden discovery;
-- no JSON, filesystem, blocking locks, repeated transformations, avoidable allocation/copy, or per-element dispatch in hot loops;
-- domain-appropriate exact types, ranges, identities, schemas, and lifecycle authority;
-- exact evidence before claims; aggregate test counts and PR prose are not proof;
-- Jules output is hostile input until its authored commit, omissions, call sites, tests, races, cleanup, and performance are reviewed;
+- immutable artifacts, manifests, and receipts replace peer-source imports and hidden discovery;
+- no filesystem, JSON, logging, blocking locks, repeated transformations, avoidable allocation/copy, or per-element dispatch in hot paths;
+- domain-appropriate exact types, ranges, schemas, identities, and lifecycle authority;
+- exact evidence before claims; PR prose and aggregate test counts are not proof;
+- Jules output is hostile input until its authored delta, omissions, call sites, tests, races, cleanup, and performance are reviewed;
 - repairs are ownership-sized, not arbitrary patches or broad cross-owner rewrites;
 - source review cannot establish release readiness without native, packaged, destructive, recovery, and performance evidence.
 
@@ -36,21 +37,31 @@ Automatic CI remains disabled by project policy. Required validation is local/ma
 
 ## 2. Environment and validation limits
 
-The connected GitHub tool can inspect and modify the private repositories. It does not provide the complete private checkouts, Node 24.15 runtime, Windows/Linux native toolchains, installed provider payloads, real ONNX-linked Engine environment, or complete installer lifecycle environment.
+The connected GitHub capability can inspect and modify the private repositories, create branches/files/issues/commits/PRs, and compare ancestry. It cannot create a new GitHub repository, authorize Jules, or provide the complete private checkout/toolchain environment.
+
+Available local execution during this continuation:
+
+- Linux C++20 compiler with strict warnings;
+- Node 22.16 for isolated pure JavaScript semantic tests;
+- no repository-required Node 24.15 runtime;
+- no Windows SDK/SCM host;
+- no complete Linux systemd host;
+- no complete private repository checkout or GitHub CLI authentication;
+- no real ONNX-linked Engine, installed-suite, or complete Installer lifecycle environment.
 
 No final evidence currently exists for:
 
 - complete Windows/Linux Engine, Manager, or Installer configure/build/CTest on final ancestry;
 - Node >=24.15 complete Evidence, Book Forge, or Lichess installed-package suites;
 - current real ONNX parity, cancellation, reload, and composition;
-- current representative one-thread/multicore useful-search benchmarks;
+- representative one-thread/multicore useful-search benchmarks;
 - complete clean install → use → repair → upgrade → reinstall → recovery → uninstall → purge.
 
-Connector review and focused source evidence remain useful but are not native or release evidence.
+Focused source and semantic evidence remain useful but are not native or release evidence.
 
 ## 3. Current conclusion
 
-The sanity check is **not complete**. Critical trust, exact-file, storage, lifecycle, inference, search-concurrency, provider, Installer transaction, uninstall, and packaged end-to-end findings remain open.
+The audit is **not complete**. Critical trust, exact-file, storage, lifecycle, inference, search-concurrency, provider, Installer transaction, uninstall, and packaged end-to-end findings remain open.
 
 `PKG-E2E-011` remains unknown. No soundness conclusion and no release-readiness conclusion may be issued.
 
@@ -60,15 +71,33 @@ The sanity check is **not complete**. Critical trust, exact-file, storage, lifec
 
 Authoritative base: PR #2, `agent/release-assembly`.
 
-Reviewed children:
+Reviewed stack:
 
 - PR #3 bounded indexed-asset results → #2; native Windows/Linux integration still required.
 - PR #4 native process-tree stop → #2; Windows Job Object and Linux native evidence still required.
-- PR #5 typed service-control actions → #4; result semantics remain non-substitutable.
+- PR #5 typed service-control actions → #4.
+- **PR #11 platform-neutral service-control results → #5**, draft and mergeable.
+
+Installer PR #11 details:
+
+- branch: `agent/platform-neutral-service-control-result`;
+- base: `agent/type-service-control-actions` / PR #5;
+- head SHA: `58da2deac5a8952ed844471fdc08ac85b53935a0`;
+- zero commits behind PR #5; exactly six ownership files changed;
+- replaces ambiguous `int` results with `ServiceActionResult` containing action, completed/failed outcome, neutral state, bounded operator-only platform code, and bounded sanitized diagnostic;
+- Linux performs bounded `systemctl` execution, exact `ActiveState` query, inactive/query-failure distinction, and final-state validation;
+- Windows preserves SCM wait hints/deadline, closes handles through RAII, and maps OS failures/states into the same result;
+- new governing spec: `specs/service_control_result_v1.yaml`.
+
+Validation performed for PR #11:
+
+- exact Linux adapter/header compiled under C++20 with `-Wall -Wextra -Wpedantic -Werror`;
+- pure mapping/result probe passed;
+- missing/unqueryable service probe returned typed `failed / unknown`, platform code `1`, bounded diagnostic;
+- Windows compile and real SCM integration remain required.
 
 Open critical issues:
 
-- #6 platform-neutral service-control result;
 - #7 exact stable-byte TUF/catalog/state admission;
 - #8 bounded acquisition/cache/archive expansion;
 - #9 truthful transactional apply/rollback/crash recovery;
@@ -92,25 +121,29 @@ Inference remains open:
 - issue #45 remains the broader neutral inference plus ONNX delegation task;
 - issue #46 composition root remains blocked;
 - Jules PRs #60 and #61 were hostile-reviewed, rejected, and closed;
-- PR #61 review is recorded in comment `5172691145`; its task-owned slice used forbidden `void*`, hot-path vectors, incomplete identity/cancellation/error contracts, unsafe concurrent provider objects, and relocated model/chess semantics without required parity/performance proof.
+- PR #61 review comment `5172691145` records forbidden `void*`, hot-path vectors, incomplete identity/cancellation/error contracts, unsafe concurrent provider objects, and relocated model/chess semantics without parity or performance proof.
 
 Transposition-table issues #43/#54 remain open; PRs #51/#55 remain rejected. Performance issues #56/#58/#59 remain open.
 
-New shared-runtime prerequisite:
+Shared-runtime prerequisite:
 
-- issue #62, **Expose timestamped typed foreground revocation from the shared resource lease**;
-- prepared branch `agent/timestamp-resource-lease-revocation`, based exactly on PR #47 ancestry;
-- owns a provider-neutral typed revocation observation/notification carrying the earliest foreground request visibility time for Evidence #21;
-- no Jules label or task was launched.
+- issue #62: **Expose timestamped typed foreground revocation from the shared resource lease**;
+- source branch `agent/timestamp-resource-lease-revocation` is byte-identical to PR #47 head;
+- exact authoritative source SHA: `60f7bc9fe64dd1c405bcc6009232ecb875b760ef`;
+- consumer: Evidence issue #21;
+- direct source-repository Jules label is forbidden;
+- workbench package is prepared and registered, but the private workbench repository has not been created.
 
 Next Engine order:
 
-1. create a private disposable workbench from exact PR #47 for issue #57, or implement directly on #47 ancestry;
-2. accept the small fixed/bounded typed provider-free contract before broad ONNX work;
-3. implement a small ONNX adapter preserving exact model/adapter/tuning identity and safe concurrency;
-4. implement composition root #46;
-5. implement and benchmark production TT;
-6. review/land shared-runtime issue #62 independently of inference work.
+1. create and authorize the registered private issue #62 workbench;
+2. seed its `main` from exact PR #47 SHA and record the workbench baseline commit;
+3. launch Jules only in that workbench;
+4. transfer and hostile-review the issue #62 delta in the source repository;
+5. implement/review issue #57 provider-free inference contract;
+6. implement the small ONNX adapter preserving exact model/adapter/tuning identity and safe concurrency;
+7. implement issue #46 composition root;
+8. implement and benchmark production TT.
 
 ### 4.3 Manager — installed-suite control-plane authority
 
@@ -118,15 +151,15 @@ Authoritative base: PR #54, `agent/release-assembly`.
 
 Reviewable child: PR #73 bounded match-plan admission → #54; complete native suites remain.
 
-Blocked storage child: PR #67 — **do not merge**. Review comments record coercive storage projection, unsafe ancestor creation, unbound database/WAL/SHM identity, schema mutation before classification, missing verified backup, incomplete migration/integrity authority, and unproven deterministic failure recovery. Latest detailed review ID: `4848995624`.
+Blocked storage child: PR #67 — **do not merge**. Review comment `4848995624` records coercive storage projection, unsafe ancestor creation, unbound database/WAL/SHM identity, schema mutation before classification, missing verified backup, incomplete migration/integrity authority, and unproven deterministic failure recovery.
 
-LocalAuth issue #69 remains open. Jules PR #77 was rejected and closed; comment `5172704927` records unsafe path/key admission, nonexclusive/nondurable publication, no Windows ACL authority, ambiguous committed cleanup failure, and cached bearer authority surviving malformed/unsafe rotation.
+LocalAuth issue #69 remains open. Jules PR #77 was rejected and closed; comment `5172704927` records unsafe path/key admission, nonexclusive/nondurable publication, no Windows ACL authority, ambiguous cleanup failure after publication, and cached bearer authority surviving malformed/unsafe rotation.
 
 UCI issues #70/#76 remain open. Issue #76 is the preferred pure identity/option/override contract before broad process/path integration. Jules PR #74 was rejected and closed.
 
 Next Manager order:
 
-1. reconstruct #69 on exact PR #54 ancestry, preferably through a private workbench;
+1. reconstruct #69 on exact PR #54 ancestry, using a later private workbench only after the current Engine workbench transaction is deleted;
 2. implement #76 before #70;
 3. reconstruct PR #67 as one exact storage lifecycle rather than patching it;
 4. keep PR #73 draft until full native evidence.
@@ -145,22 +178,32 @@ Authoritative stack:
 8. PR #19 immutable daemon timing
 9. PR #22 resource configuration type/cardinality bounds
 
-Issue #20 heartbeat status projection:
+**Issue #20 is implemented in draft PR #23**:
 
-- prepared branch `agent/project-daemon-heartbeat-staleness`, based on final current PR #22 ancestry;
-- canonical expanded review comment `5172783286`;
-- one pure liveness projector must parse exact canonical timestamps with an injected clock and expose `missing|fresh|stale`, nonnegative bounded age, and fixed 300000 ms threshold without implying process/lock ownership;
-- public/Manager status must consume the typed projection rather than recalculate it;
-- no Jules task launched.
+- branch: `agent/project-daemon-heartbeat-staleness`;
+- base: PR #22 branch `agent/harden-resource-config-after-daemon-timing`;
+- head SHA: `3991983c397a222871cba70c6232da1a8be5b265`;
+- zero commits behind PR #22; exactly six files changed; draft and mergeable;
+- pure `src/daemon_liveness.mjs` owns timestamp parsing, future clamping, age, and fixed 300000 ms threshold;
+- public fields: `heartbeat_state` (`missing|fresh|stale`) and nullable `heartbeat_age_ms`;
+- existing `heartbeatAt` is preserved;
+- direct CLI init/status and Manager CLI-JSON status consume one immutable projector;
+- liveness remains observational and does not imply lock/PID/process ownership;
+- new governing spec: `specs/daemon_liveness_v1.yaml`.
+
+Validation performed for PR #23:
+
+- isolated semantic suite under available Node 22.16: 5 passed, 0 failed;
+- exact 299999/300000 boundaries, missing/malformed, future timestamp, phase independence, immutability, compatibility, invalid clock/threshold;
+- Node >=24.15 complete suite remains required.
 
 Issue #21 foreground revocation deadline:
 
 - prepared branch `agent/end-to-end-foreground-revocation`, based on PR #22 ancestry;
-- canonical expanded review comment `5172787455`;
-- blocked on Engine shared-runtime issue #62;
-- current loop can spend almost one second waiting for the next poll, then await resource probing, then start a fresh two-second shutdown allowance, and releases the cooperative lease only after later cleanup;
-- required design uses the earliest request visibility timestamp, one absolute 2000 ms deadline, remaining-budget tree shutdown, verified descendant termination, and immediate lease release before guard/catalog/status cleanup;
-- no Jules task launched.
+- canonical review comment `5172787455`;
+- blocked on Engine issue #62;
+- current loop can spend almost one second waiting for the next poll, await resource probing, then start a fresh two-second shutdown allowance, and release the cooperative lease only after later cleanup;
+- required design uses earliest request visibility time, one absolute 2000 ms deadline, remaining-budget tree shutdown, verified descendant termination, and immediate lease release before guard/catalog/status cleanup.
 
 All Evidence work still requires Node >=24.15, `npm run check`, `npm run acceptance:idle`, package-installed Windows/Linux behavior, and destructive recovery evidence.
 
@@ -172,27 +215,25 @@ Issue #12 exact acquisition credential bytes:
 
 - canonical expanded comment `5172735375`;
 - current `stat` then `readFile` can read different objects, decodes/materializes before enforcing the byte limit, and `trim()` silently changes credential authority;
-- existing tests incorrectly place credentials inside the workspace after validation and accept terminal newlines; those fixtures must be reversed;
-- required owner performs exact descriptor/handle admission at use time, physical ownership proof, 4 KiB plus one-byte overflow detection, exact byte grammar, callback-scoped use, no cache, and generic redacted external diagnostics.
+- existing tests incorrectly place credentials inside the workspace after validation and accept terminal newlines; reverse those fixtures;
+- required owner performs exact descriptor/handle admission at use time, physical ownership proof, 4 KiB plus one-byte overflow detection, exact byte grammar, callback-scoped use, no cache, and generic redacted diagnostics.
 
 Issue #13 recoverable snapshot compilation/publication:
 
 - canonical expanded comment `5172750056`;
-- current lifecycle uses predictable recursively removed work paths, no build lease, unawaited writer destruction, repeated selected-row scans/full-artifact rereads, path-based validation, filesystem activation before catalog/frontier authority, and unsafe publisher rollback;
 - required one `SnapshotBuildOperation` owns lease, private workspace, one selected-row fanout pass, one independent stable-descriptor validation pass, versioned receipt, filesystem/catalog/channel/frontier reconciliation, and bounded cleanup evidence.
 
 Issue #14 catalog and 64-shard SQLite authority:
 
 - canonical expanded comment `5172758661`;
-- current storage creates current tables before version classification, uses path-only catalog/shard/WAL/SHM access, coercive `Number`/raw-row projection, incomplete migrations, and split cross-shard transactions;
-- existing tests normalize partial versioned schemas rather than reject them;
-- required local native SQLite/VFS or isolated storage owner, exact schema/application/version identity, BigInt/exact storage-class translation, verified backup/migration/recovery, and catalog-backed cross-shard operation receipts.
+- required local native SQLite/VFS or isolated storage owner, exact schema/application/version identity, BigInt/exact storage-class translation, verified backup/migration/recovery, and catalog-backed cross-shard operation receipts;
+- existing tests that normalize partial versioned schemas must be reversed.
 
 Reopened ledger rows remain `BOOK-TRUST-017`, `BOOK-AUTH-018`, and `BOOK-SCALE-020`.
 
 ### 4.6 Lichess Bot — Lichess provider authority
 
-PR #3 remains blocked; its aggregate passing count is not acceptance evidence.
+PR #3 remains blocked; aggregate passing counts are not acceptance evidence.
 
 Canonical issue comments:
 
@@ -201,18 +242,18 @@ Canonical issue comments:
 - #6 transactional game activation and off-loop serialized status — `5172653544`;
 - #7 exact SQLite foundation — `5172666890`.
 
-Required ownership sequence:
+Required ownership order:
 
 1. exact-file/platform identity and durable publication;
 2. raw-byte UCI framing plus one immutable qualification identity shared by capacity/smoke/timing/provenance;
-3. durable game activation nonce/phase, exact slot correlation, structured terminal cleanup, latest-wins off-loop status publisher;
+3. durable activation nonce/phase, exact slot correlation, structured terminal cleanup, latest-wins off-loop status publisher;
 4. exact database/WAL/SHM owner, typed translation, schema/migration/recovery.
 
 Do not merge PR #3 or promote a provider candidate until #4–#7 pass real-process, loopback API, storage, startup, active-game latency, package, race, and recovery evidence.
 
 ## 5. Jules trust and disposable-workbench protocol
 
-Observed rule: issue-label Jules tasks repeatedly started from repository default `main`, even when issue text named a prepared branch. Intermediate Jules error comments are not terminal; completed PRs remain untrusted until the authored commit is reviewed.
+Observed behavior: issue-label Jules tasks started from repository default `main` even when issue text named prepared branches. Intermediate Jules error comments are not terminal. Completed PRs remain untrusted until the authored commit is reviewed.
 
 Rejected/closed outputs include Engine #49/#50/#51/#55/#60/#61 and Manager #72/#74/#77.
 
@@ -220,40 +261,48 @@ A workbench is a temporary transaction, not a development repository:
 
 `created → baseline_verified → jules_active → result_frozen → transferred → equivalence_verified → destination_pr_open → deleted`
 
-Required workflow:
+Rules:
 
 1. create one private `iteathen/jules-wb-<project>-<issue>-<attempt>` repository and authorize Jules;
 2. flatten only exact accepted prerequisite ancestry into workbench `main`;
 3. commit a baseline manifest with source repo/branch/SHA, destination branch, task, permitted owners/files, and cleanup state;
 4. run one task only and never reuse the repository;
-5. freeze the result SHA and extract only `baseline..result`;
-6. transfer the accepted delta to a fresh branch from the original authoritative ancestry;
-7. verify patch equivalence and perform hostile review in the original repository;
-8. record all SHAs/PR/transcript, remove Jules access if separately granted, delete the workbench repository and local clones/worktrees, and mark state `deleted` here.
+5. freeze result SHA and extract only `baseline..result`;
+6. transfer accepted delta to a fresh branch from original authoritative ancestry;
+7. verify patch equivalence and hostile-review in the original repository;
+8. record SHAs/PR/transcript, delete workbench repository and local clones/worktrees, and mark state `deleted`.
 
-Current registry:
+Central registry: `docs/audits/jules-workbenches/registry.yaml`.
 
-- no `jules-wb-*` repository is visible through the connected GitHub installation;
-- no active workbench exists;
-- the connected GitHub capability can create branches, files, issues, commits, and PRs inside existing repositories but **cannot create the new private repository** required for a safe workbench;
-- do not repoint or contaminate any product repository's real `main` as a substitute;
-- creation of the first private workbench is therefore an explicit user/account-side gate.
+Registered transaction:
+
+- id: `engine-62-20260803`;
+- intended private repository: `iteathen/jules-wb-engine-62-20260803`;
+- state: `awaiting_repository_creation`;
+- source: `iteathen/UCI_Arena`, PR #47 branch, SHA `60f7bc9fe64dd1c405bcc6009232ecb875b760ef`;
+- destination: `agent/timestamp-resource-lease-revocation`;
+- source issue: #62;
+- manifest: `docs/audits/jules-workbenches/engine-62-20260803.yaml`;
+- task body: `docs/audits/jules-workbenches/engine-62-20260803-task.md`;
+- no Jules task ID, result SHA, transfer SHA, or destination PR exists yet;
+- no `jules-wb-*` repository is visible through the connected installation;
+- connector cannot create the private repository or authorize Jules;
+- no second workbench transaction should be started until this one is transferred or abandoned and deleted.
 
 ## 6. Immediate restart order
 
-1. Read this handoff, YAML, architecture, ledger, performance, and topology documents.
-2. Fetch current heads before trusting any recorded SHA.
-3. Confirm no abandoned `jules-wb-*` repository exists before creating one.
-4. User creates/authorizes the first private Engine issue #57 workbench; seed its `main` from exact PR #47 and register it here before applying a Jules label.
-5. Review/implement Engine shared-runtime issue #62 independently.
-6. Implement Evidence #20 on its prepared PR #22-based branch.
-7. After #62 is accepted and vendored exactly, implement Evidence #21 on its prepared branch.
-8. Reconstruct Manager #69, #76/#70, and PR #67 on exact #54 ancestry.
-9. Continue Lichess #4–#7 in ownership order.
-10. Continue Book Forge #12–#14 in ownership order.
-11. Resolve Installer #7–#10 before any package/lifecycle conclusion.
-12. Converge ledger statuses only after accepted fixes enter authoritative ancestry.
-13. Before stopping, update both handoff files, the workbench registry, exact validation, and the discoverability comment on Installer PR #2.
+1. Read this handoff, YAML, workbench registry, architecture, ledger, performance, and topology documents.
+2. Fetch current heads before trusting recorded SHAs.
+3. Review Evidence PR #23 and Installer PR #11 on their exact stacked bases; run required native/Node suites when environments exist.
+4. User creates private `iteathen/jules-wb-engine-62-20260803`, authorizes Jules, and seeds `main` from exact Engine SHA `60f7bc9f...`.
+5. Commit the workbench manifest/task into that repository, record the resulting baseline SHA in the registry, then apply the `jules` label there.
+6. Freeze, transfer, equivalence-check, hostile-review, and delete the Engine #62 workbench before creating another.
+7. Implement Evidence #21 after accepted #62 code is vendored exactly.
+8. Continue direct ownership-sized repairs where safe: Manager #76, Book Forge #12, or another small pure contract.
+9. Use later workbenches for large cross-platform exact-file/SQLite/lifecycle reconstructions only after the active transaction is cleaned up.
+10. Resolve Installer #7–#10 before any package/lifecycle conclusion.
+11. Converge ledger statuses only after accepted fixes enter authoritative ancestry.
+12. Before stopping, update both handoff files, workbench registry, exact validation, and the discoverability comment on Installer PR #2.
 
 ## 7. Final gates before any soundness decision
 
@@ -268,7 +317,7 @@ Source/architecture:
 Native/runtime:
 
 - Windows/Linux Engine, Manager, and Installer configure/build/CTest;
-- Node >=24.15 complete Evidence and Book Forge suites;
+- Node >=24.15 complete Evidence, Book Forge, and Lichess suites;
 - complete Lichess loopback, real-process, storage, startup, and active-game tests;
 - real ONNX parity/cancellation/reload/composition;
 - TT race/memory and one-thread/multicore useful-search benchmarks;
@@ -289,6 +338,6 @@ No partial source-level success substitutes for these gates.
 
 ## 8. Maintenance rule
 
-Update this file and its YAML companion whenever authoritative ancestry, a finding, Jules task/result, workbench state, PR/issue disposition, validation result, or the next restart action changes.
+Update this file and its YAML companion whenever authoritative ancestry, a finding, Jules task/result, workbench state, PR/issue disposition, validation result, or next restart action changes.
 
 The handoff is incomplete if a new agent would need conversation memory to determine what is authoritative, rejected, tested, temporary, or next.
