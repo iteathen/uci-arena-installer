@@ -122,15 +122,20 @@ void stop_service(const SC_HANDLE service) {
 
 }  // namespace
 
-int perform_service_action(const std::string& platform_name, const std::string& action) {
+int perform_service_action(
+    const std::string& platform_name,
+    const ServiceAction action) {
+    if (platform_name.empty()) {
+        throw std::runtime_error("service name is required");
+    }
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (manager == nullptr) {
         throw std::runtime_error("cannot open Windows Service Control Manager");
     }
     const DWORD access =
         SERVICE_QUERY_STATUS |
-        (action == "start" || action == "restart" ? SERVICE_START : 0) |
-        (action == "stop" || action == "restart" ? SERVICE_STOP : 0);
+        (action == ServiceAction::start || action == ServiceAction::restart ? SERVICE_START : 0) |
+        (action == ServiceAction::stop || action == ServiceAction::restart ? SERVICE_STOP : 0);
     const std::wstring service_name = wide(platform_name);
     SC_HANDLE service = OpenServiceW(manager, service_name.c_str(), access);
     if (service == nullptr) {
@@ -139,20 +144,20 @@ int perform_service_action(const std::string& platform_name, const std::string& 
     }
 
     try {
-        if (action == "start") {
+        if (action == ServiceAction::start) {
             start_service(service);
-        } else if (action == "stop") {
+        } else if (action == ServiceAction::stop) {
             stop_service(service);
-        } else if (action == "restart") {
+        } else if (action == ServiceAction::restart) {
             stop_service(service);
             start_service(service);
-        } else if (action == "status") {
+        } else if (action == ServiceAction::status) {
             const int state = static_cast<int>(query_service_status(service).dwCurrentState);
             CloseServiceHandle(service);
             CloseServiceHandle(manager);
             return state;
         } else {
-            throw std::runtime_error("unsupported Windows service action: " + action);
+            throw std::runtime_error("unsupported Windows service action");
         }
         CloseServiceHandle(service);
         CloseServiceHandle(manager);
