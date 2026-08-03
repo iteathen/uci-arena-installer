@@ -1,0 +1,15 @@
+[Unit]
+Description=UCI Arena Manager privileged service broker
+Documentation=https://github.com/iteathen/uci-arena-manager
+
+[Service]
+Type=oneshot
+# Installer owns the fixed platform path; Manager owns only broker behavior.
+ExecStart=/usr/bin/arena-broker --policy /etc/uci-arena/broker-policy.json --validate
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

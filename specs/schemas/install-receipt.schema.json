@@ -57,10 +57,39 @@
           "size_bytes": {"type": "integer", "minimum": 0}
         }
       }
+    },
+    "activated_resources": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/activated_resource"}
     }
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "activated_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "activated_resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "activated_files"],
+      "properties": {
+        "kind": {"enum": ["opening_book", "syzygy"]},
+        "path": {"type": "string", "minLength": 1},
+        "activated_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/activated_file"}
+        }
+      }
+    },
     "ownership_entry": {
       "type": "object",
       "additionalProperties": false,
