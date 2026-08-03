@@ -29,6 +29,11 @@ enum class ServiceAction {
     return "";
 }
 
+[[nodiscard]] constexpr bool valid_service_action(
+    const ServiceAction action) noexcept {
+    return !service_action_name(action).empty();
+}
+
 [[nodiscard]] constexpr std::optional<ServiceAction> service_action_from_name(
     const std::string_view action) noexcept {
     if (action == "status") {
@@ -52,10 +57,10 @@ enum class ServiceAction {
 
 [[nodiscard]] inline int perform_service_action(
     const std::string& platform_name,
-    const std::string& action) {
+    const std::string_view action) {
     const auto parsed = service_action_from_name(action);
     if (!parsed.has_value()) {
-        throw std::runtime_error("unsupported service action: " + action);
+        throw std::runtime_error("unsupported service action");
     }
     return perform_service_action(platform_name, *parsed);
 }
