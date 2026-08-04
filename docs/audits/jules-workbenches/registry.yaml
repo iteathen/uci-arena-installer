@@ -1,33 +1,30 @@
 schema: uci_arena_jules_execution_registry_v12
-updated_at: '2026-08-03T23:19:00-07:00'
+updated_at_utc: '2026-08-04T07:05:14Z'
+
 control:
   repository: iteathen/Jules-control
   branch: main
   workflow: .github/workflows/jules-control.yml
   transport: official_jules_rest_api
-  configured_guard: {sessions: 15, window: rolling_24_hours, api_limit_field_present: false}
-  last_usage: {observed_rolling_24h: 10, active_or_waiting: 1, estimated_remaining: 5}
   maximum_active_sessions: 1
   queue_order: oldest_eligible_control_issue_first
   blocked_label_prefix: blocked-
-  watcher: {kind: chatgpt_condition_watch, cadence: hourly, command: /jules launch}
   rules:
     - treat_every_jules_line_and_completion_claim_as_hostile_input
-    - require_exact_source_and_starting_branch
-    - require_plan_approval_for_broad_or_security_sensitive_work
-    - queue_rather_than_fail_on_dependency_review_concurrency_or_budget_gates
-    - never_launch_blocked_prefix_issues
-    - require_earlier_control_issue_terminal_review_and_close
-    - capacity_limits_never_stop_independent_audit_and_direct_repair
+    - require_exact_source_branch_and_sha
+    - require_terminal_hostile_review_before_closing_control_issue
+    - never_launch_blocked_label_task
+    - never_launch_while_any_session_active_or_waiting
+    - capacity_never_stops_independent_audit_work
 
-active_session:
+active_or_resuming_session:
   id: engine-62-20260803
   session: sessions/13034909149691235140
   control_issue: 1
   source_repository: iteathen/UCI_Arena
+  source_issue: 62
   source_branch: agent/integrate-engine-audit-stacks
   source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
-  source_issue: 62
   output_pr: 63
   output_branch: jules-13034909149691235140-b7c89938
   reviewed_heads:
@@ -36,49 +33,48 @@ active_session:
     - {head: bc2c27f65d24b51c69c6ac953656fae78cb01b64, disposition: rejected}
     - {head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b, review: 4850334357, disposition: rejected}
     - {head: 2106482635969e1e9c6b28b76fb80aca35890af6, review: 4850967412, disposition: rejected}
-  latest_substantive_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
-  current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab
-  current_head_compare: {ahead_by: 1, changed_files: 0, substantive: false}
-  current_state: in_progress
-  last_confirmed_at: '2026-08-04T06:18:53.275899Z'
-  local_disposition: changes_required_blocked_parent_replayable
-  session_transition:
-    correction_message: 5175041945
-    session_reported_completed_without_new_head: 5175044883
-    state_aware_continue_command: 5175048852
-    state_aware_recovery_acknowledgement: 5175050145
-    recovery_result: empty_commit_head_only
-    current_instruction: do_not_send_control_command_while_active
-    terminal_without_substantive_head_action: replay_latest_correction_via_existing_state_aware_path
+    - {head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab, disposition: empty_commit_no_file_delta}
+    - {head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0, review: 4851511234, disposition: rejected_changes_required}
+  current_reviewed_head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0
+  local_disposition: changes_required_blocked_parent_replayable_package_slice
+  latest_audit: docs/audits/engine-pr63-resource-lease-sixth-hostile-review-2026-08-03.md
+  latest_audit_commit: 7dcdf4acef6b4f6258fcb14dfdaf08736ebd077b
+  transitions:
+    - {kind: completed, status_comment: 5175618975, updated_at: '2026-08-04T06:53:25.552460Z'}
+    - {kind: correction_sent, comment: 5175680936, review: 4851511234}
+    - {kind: state_aware_continue, command: 5175682230, acknowledgement: 5175685564, observed_state: COMPLETED, correction_replayed: true}
+    - {kind: post_replay_status_requested, comment: 5175705079}
+  next_rule: check_post_replay_status_then_do_not_interrupt_if_active
   blocked_parents:
     - {pr: 39, review: 4850912840}
     - {pr: 44, review: 4850859460}
     - {pr: 47, review: 4850880052}
-  latest_audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md
-  last_reviewed_blockers:
-    - persisted_safe_integer_visibility_authority_missing
-    - invalid_timing_invents_observation_time
-    - unversioned_result_and_unchanged_package_version
-    - replacement_destructive_delete_update
+  remaining_blockers:
+    - persisted_safe_integer_visibility_authority_absent
+    - invalid_or_future_timing_rewritten_to_filesystem_time
+    - future_heartbeat_negative_elapsed_tolerance
+    - package_result_failure_version_migration_absent
+    - reason_algebra_exceeds_required_set
+    - path_based_update_and_close_then_unlink_races
     - windows_and_ancestor_reparse_identity_absent
-    - exported_mutable_cache_metrics_test_seams_and_waiters
-    - weak_cache_identity_and_cross_root_interference
-    - false_directory_byte_and_allocation_bounds
-    - locale_dependent_ordering
-    - inconsistent_public_failure_algebra
-    - wait_registration_and_cleanup_races
-    - debug_output_in_shared_runtime
-    - incomplete_clock_timing_and_producer_bounds
-    - adversarial_windows_linux_node_24_15_evidence_missing
-  control_issue_closed_at: null
+    - cleanup_failures_swallowed
+    - release_can_report_success_while_holder_remains
+    - synchronous_notifier_callback_handle_leak
+    - incomplete_bounds_and_false_metrics
+    - locale_sensitive_ordering
+    - private_path_exposure
+    - inconsistent_failure_semantics
+    - decisive_node_24_15_windows_linux_evidence_absent
+    - stale_pr_body
 
 queue:
   - position: 1
     id: evidence-20-catalog-integration
     control_issue: 2
-    status: queued_review_bound
+    status: blocked_by_control_issue_1
     review: 4850754712
-    launch_after_control_issue_terminally_reviewed_and_closed: 1
+    existing_pr: 23
+    expected_head: 3991983c397a222871cba70c6232da1a8be5b265
   - position: 2
     id: manager-70-verified-launch-identity
     control_issue: 3
@@ -93,12 +89,12 @@ queue:
 
 review_dispositions:
   engine:
-    - {pr: 39, review: 4850912840, disposition: foundation_reconstruction_split_required, audit: docs/audits/engine-pr39-evaluation-release-hostile-review-2026-08-03.md}
-    - {pr: 44, review: 4850859460, disposition: foundation_redesign_blocked_parent, audit: docs/audits/engine-pr44-model-adapter-hostile-review-2026-08-03.md}
-    - {pr: 47, review: 4850880052, disposition: governance_reconstruction_blocked_parent, audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md}
-    - {pr: 52, review: 4850845427, disposition: changes_required_blocked_parent, audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md}
-    - {pr: 63, reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6, current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab, current_head_substantive: false, review: 4850967412, disposition: changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md}
-    - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate_probe}
+    - {pr: 39, review: 4850912840, disposition: foundation_reconstruction_split_required}
+    - {pr: 44, review: 4850859460, disposition: foundation_redesign_blocked_parent}
+    - {pr: 47, review: 4850880052, disposition: governance_reconstruction_blocked_parent}
+    - {pr: 52, review: 4850845427, disposition: changes_required_blocked_parent}
+    - {pr: 63, review: 4851511234, disposition: changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-sixth-hostile-review-2026-08-03.md}
+    - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate}
     - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
   manager:
     - {pr: 67, reviews: [4847815394, 4848995624], disposition: reconstruction_required}
@@ -111,30 +107,21 @@ review_dispositions:
     - {pr: 5, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
     - {pr: 11, review: 4850690366, disposition: changes_required}
   evidence:
-    authoritative_chain: none_reconstruction_required
-    reviews:
-      - {pr: 23, head: 3991983c397a222871cba70c6232da1a8be5b265, review: 4850754712, disposition: changes_required_queue_prompt_refreshed}
-      - {pr: 22, head: 3e9d9609382a3706aa82db66bca51096ea0dc0b1, review: 4850984541, disposition: local_validation_slice_acceptable_blocked_pr19}
-      - {pr: 19, head: 6b4988066751b40b7231597b2b19a2177d4d2284, review: 4850992135, disposition: changes_required}
-      - {pr: 18, head: 117cf64976fe179989bddee8dbfc534966370ec6, review: 4851001435, disposition: changes_required}
-      - {pr: 17, head: 640545739abe8db15d147c0202dabc684281b16f, review: 4851009132, disposition: changes_required}
-      - {pr: 16, head: 7dfc4388f5ce57105e8de515fdcb0526e9298df0, review: 4851046968, disposition: changes_required, audit: docs/audits/evidence-pr16-transactional-prune-hostile-review-2026-08-03.md}
-      - {pr: 15, head: a66fece5f8096622a53784479fe2c8da97fbc4f9, review: 4851061354, disposition: changes_required, audit: docs/audits/evidence-pr15-dataset-show-hostile-review-2026-08-03.md}
-      - {pr: 14, head: fbb1a9aa8d0ae1a2ad14be6a00d3bb229285a173, review: 4851124960, disposition: changes_required_reconstruction_required, audit: docs/audits/evidence-pr14-dataset-export-hostile-review-2026-08-03.md, audit_commit: 2b4ad1aa44ef49082e3d4e11e133f542f29099cf}
-      - {pr: 13, head: 7b5e7f90476e17e5157f4a782a27122aa210a90b, review: 4851148254, disposition: changes_required_reconstruction_required, audit: docs/audits/evidence-pr13-cli-contract-hostile-review-2026-08-03.md, audit_commit: 7173555e3562f31ddf58bbcb57c48092e992665b}
-      - {pr: 10, head: b09abb9aecf6aba6ca04358c8789eef86ecb763b, review: 4851184668, disposition: changes_required_split_reconstruct_by_owner, audit: docs/audits/evidence-pr10-system-sanity-hostile-review-2026-08-03.md, audit_commit: a39c5d31eeda3cd824ba16f6158657467f9e8681}
+    - {pr: 23, review: 4850754712, disposition: changes_required_queued_correction}
+    - {pr: 22, review: 4850984541, disposition: narrow_slice_acceptable_blocked_parent}
+    - {pr: 19, review: 4850992135, disposition: changes_required}
+    - {pr: 18, review: 4851001435, disposition: changes_required}
+    - {pr: 17, review: 4851009132, disposition: changes_required}
+    - {pr: 16, review: 4851046968, disposition: changes_required}
+    - {pr: 15, review: 4851061354, disposition: changes_required}
+    - {pr: 14, review: 4851124960, disposition: reconstruction_required}
+    - {pr: 13, review: 4851148254, disposition: reconstruction_required}
+    - {pr: 10, review: 4851184668, disposition: split_reconstruct_by_owner}
   book_forge:
     - {pr: 10, review: 4848065237, disposition: changes_required}
     - {pr: 11, review: 4848083104, disposition: changes_required}
   lichess:
     - {pr: 3, review: 4848125095, disposition: changes_required}
-
-canonical_commits:
-  evidence_pr14_audit: 2b4ad1aa44ef49082e3d4e11e133f542f29099cf
-  evidence_pr13_audit: 7173555e3562f31ddf58bbcb57c48092e992665b
-  evidence_pr10_audit: a39c5d31eeda3cd824ba16f6158657467f9e8681
-  narrative: aa3efa66bed71b266b48b813de90555920106901
-  yaml: 6ff0d2748beefe66d27308e342236bac004dea2e
 
 final_state:
   sanity_complete: false
