@@ -197,6 +197,8 @@ struct ServiceActionResult final {
 [[nodiscard]] constexpr ServiceState service_state_from_windows_error(
     const std::uint32_t error_code) noexcept {
     return error_code == 1060U // ERROR_SERVICE_DOES_NOT_EXIST
+        || error_code == 1072U // ERROR_SERVICE_MARKED_FOR_DELETE
+        || error_code == 1722U // RPC_S_SERVER_UNAVAILABLE
         ? ServiceState::unavailable
         : ServiceState::unknown;
 }
