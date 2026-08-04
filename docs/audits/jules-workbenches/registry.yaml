@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v13
-updated_at_utc: '2026-08-04T07:04:44.292177Z'
+schema: uci_arena_jules_execution_registry_v14
+updated_at_utc: '2026-08-04T08:33:09Z'
 
 control:
   repository: iteathen/Jules-control
@@ -14,7 +14,7 @@ control:
     - require_exact_source_branch_and_sha
     - require_terminal_hostile_review_before_closing_control_issue
     - never_launch_blocked_label_task
-    - never_launch_while_any_session_active_or_waiting
+    - never_launch_while_any_session_active_waiting_or_control_transition_unresolved
     - capacity_never_stops_independent_audit_work
 
 active_session:
@@ -35,37 +35,41 @@ active_session:
     - {head: 2106482635969e1e9c6b28b76fb80aca35890af6, review: 4850967412, disposition: rejected}
     - {head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab, disposition: empty_commit_no_file_delta}
     - {head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0, review: 4851511234, disposition: rejected_changes_required}
-  current_reviewed_head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0
-  local_disposition: changes_required_blocked_parent_replayable_package_slice
-  latest_audit: docs/audits/engine-pr63-resource-lease-sixth-hostile-review-2026-08-03.md
-  latest_audit_commit: 7dcdf4acef6b4f6258fcb14dfdaf08736ebd077b
+    - {head: ebf510670da82a22ca55626c8e520fd1af494d6f, review: 4852208692, disposition: rejected_changes_required}
+  current_reviewed_head: ebf510670da82a22ca55626c8e520fd1af494d6f
+  local_disposition: rejected_changes_required_blocked_parent_replayable_package_slice
+  latest_audit: docs/audits/engine-pr63-resource-lease-seventh-hostile-review-2026-08-04.md
+  latest_audit_commit: 67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7
   transitions:
-    - {kind: completed, status_comment: 5175618975, updated_at: '2026-08-04T06:53:25.552460Z'}
-    - {kind: correction_sent, comment: 5175680936, review: 4851511234}
-    - {kind: state_aware_continue, command: 5175682230, acknowledgement: 5175685564, observed_state: COMPLETED, correction_replayed: true}
-    - {kind: resumed, status_request: 5175705079, status_response: 5175706829, state: IN_PROGRESS, updated_at: '2026-08-04T07:04:44.292177Z'}
-  next_rule: do_not_interrupt_and_review_only_substantive_head_beyond_e7eb5edf
+    - {kind: completed, status_comment: 5176310334, updated_at: '2026-08-04T07:46:56.532963Z'}
+    - {kind: seventh_review, review: 4852208692, head: ebf510670da82a22ca55626c8e520fd1af494d6f}
+    - {kind: correction_sent, comment: 5176539894, audit_commit: 67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7}
+    - {kind: state_aware_continue_requested, command: 5176541573, acknowledgement: pending}
+  next_rule: do_not_duplicate_pending_command_and_review_only_substantive_head_beyond_ebf510670
   blocked_parents:
     - {pr: 39, review: 4850912840}
     - {pr: 44, review: 4850859460}
     - {pr: 47, review: 4850880052}
   remaining_blockers:
-    - persisted_safe_integer_visibility_authority_absent
-    - invalid_or_future_timing_rewritten_to_filesystem_time
-    - future_heartbeat_negative_elapsed_tolerance
-    - package_result_failure_version_migration_absent
-    - reason_algebra_exceeds_required_set
-    - path_based_update_and_close_then_unlink_races
-    - windows_and_ancestor_reparse_identity_absent
-    - cleanup_failures_swallowed
-    - release_can_report_success_while_holder_remains
-    - synchronous_notifier_callback_handle_leak
-    - incomplete_bounds_and_false_metrics
-    - locale_sensitive_ordering
-    - private_path_exposure
+    - safe_unlink_close_before_path_unlink_replacement_race
+    - request_heartbeat_mutable_path_truncate_and_identity_adoption
+    - holder_create_close_reopen_replacement_gap
+    - transient_truncated_holder_can_be_deleted_as_malformed
+    - release_closes_authority_before_unsafe_deletion
+    - primary_failure_replaced_or_cleanup_swallowed
+    - requested_at_ms_not_validated_or_bound_to_iso
+    - future_1000ms_tolerance_clamps_visibility_to_observation
+    - stale_live_pid_foreground_permanent_phantom_demand
+    - incomplete_packet_result_failure_and_consumer_lock_migration
+    - public_test_seam_released_field_and_filename_leakage
+    - synchronous_terminal_notifier_handle_leak
+    - unbounded_waiters_watchers_timers_and_success_cleanup_loss
+    - windows_reparse_claim_without_retained_handle_authority
+    - false_byte_work_allocation_metrics
+    - date_range_and_multiple_clock_authority_incomplete
     - inconsistent_failure_semantics
+    - authoritative_spec_tests_and_pr_body_overclaim
     - decisive_node_24_15_windows_linux_evidence_absent
-    - stale_pr_body
 
 queue:
   - {position: 1, id: evidence-20-catalog-integration, control_issue: 2, status: blocked_by_control_issue_1, review: 4850754712, existing_pr: 23, expected_head: 3991983c397a222871cba70c6232da1a8be5b265}
@@ -78,7 +82,7 @@ review_dispositions:
     - {pr: 44, review: 4850859460, disposition: foundation_redesign_blocked_parent}
     - {pr: 47, review: 4850880052, disposition: governance_reconstruction_blocked_parent}
     - {pr: 52, review: 4850845427, disposition: changes_required_blocked_parent}
-    - {pr: 63, review: 4851511234, disposition: changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-sixth-hostile-review-2026-08-03.md}
+    - {pr: 63, review: 4852208692, disposition: rejected_changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-seventh-hostile-review-2026-08-04.md}
     - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate}
     - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
   manager:
@@ -91,6 +95,7 @@ review_dispositions:
     - {pr: 4, review: 4850781709, disposition: changes_required_stale_ancestry}
     - {pr: 5, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
     - {pr: 11, review: 4850690366, disposition: changes_required}
+    - {issue: 12, disposition: accidental_placeholder_closed_not_planned_no_authority}
   evidence:
     - {pr: 23, review: 4850754712, disposition: changes_required_queued_correction}
     - {pr: 22, review: 4850984541, disposition: narrow_slice_acceptable_blocked_parent}
