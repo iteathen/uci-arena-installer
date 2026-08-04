@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v12
-  snapshot_at_utc: '2026-08-04T07:04:44.292177Z'
+  schema: uci_arena_whole_system_sanity_handoff_v13
+  snapshot_at_utc: '2026-08-04T08:33:09Z'
   status: in_progress
   sanity_complete: false
   soundness_conclusion: none
@@ -38,42 +38,39 @@ jules:
     source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
-    reviewed_head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0
-    formal_review: 4851511234
-    audit: docs/audits/engine-pr63-resource-lease-sixth-hostile-review-2026-08-03.md
-    audit_commit: 7dcdf4acef6b4f6258fcb14dfdaf08736ebd077b
-    disposition: changes_required_blocked_parent_replayable_package_slice
-    previous_terminal:
+    reviewed_head: ebf510670da82a22ca55626c8e520fd1af494d6f
+    formal_review: 4852208692
+    audit: docs/audits/engine-pr63-resource-lease-seventh-hostile-review-2026-08-04.md
+    audit_commit: 67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7
+    disposition: rejected_changes_required_blocked_parent_replayable_package_slice
+    terminal_before_review:
       state: COMPLETED
-      updated_at: '2026-08-04T06:53:25.552460Z'
-      status_comment: 5175618975
-    correction_comment: 5175680936
-    continue_command: 5175682230
-    continue_acknowledgement: 5175685564
-    correction_replayed: true
-    post_replay_status:
-      state: IN_PROGRESS
-      updated_at: '2026-08-04T07:04:44.292177Z'
-      request_comment: 5175705079
-      response_comment: 5175706829
-    next_rule: do_not_interrupt_while_active_and_review_only_substantive_head_beyond_e7eb5edf
+      updated_at: '2026-08-04T07:46:56.532963Z'
+      status_comment: 5176310334
+    correction_comment: 5176539894
+    continue_command: 5176541573
+    continue_acknowledgement: pending
+    next_rule: do_not_duplicate_command_and_review_only_substantive_head_beyond_ebf510670
     blockers:
-      - persisted_safe_integer_visibility_authority_absent
-      - invalid_or_future_timing_rewritten_to_filesystem_time
-      - future_heartbeat_negative_elapsed_tolerance
-      - package_result_failure_version_migration_absent
-      - reason_algebra_exceeds_required_set
-      - path_based_update_and_close_then_unlink_races
-      - windows_and_ancestor_reparse_identity_absent
-      - cleanup_failures_swallowed
-      - release_can_report_success_while_holder_remains
-      - synchronous_notifier_callback_handle_leak
-      - incomplete_bounds_and_false_metrics
-      - locale_sensitive_ordering
-      - private_path_exposure
+      - safe_unlink_close_before_path_unlink_replacement_race
+      - request_heartbeat_mutable_path_truncate_and_identity_adoption
+      - holder_create_close_reopen_replacement_gap
+      - transient_truncated_holder_can_be_deleted_as_malformed
+      - release_closes_authority_before_unsafe_deletion
+      - primary_failure_replaced_or_cleanup_swallowed
+      - requested_at_ms_not_validated_or_bound_to_iso
+      - future_1000ms_tolerance_clamps_visibility_to_observation
+      - stale_live_pid_foreground_becomes_permanent_phantom_demand
+      - incomplete_packet_result_failure_and_consumer_lock_migration
+      - public_test_seam_released_field_and_filename_leakage
+      - synchronous_terminal_notifier_handle_leak
+      - unbounded_waiters_watchers_timers_and_success_cleanup_loss
+      - windows_reparse_claim_is_path_check_not_handle_authority
+      - false_byte_work_allocation_metrics
+      - date_range_and_multiple_clock_authority_incomplete
       - inconsistent_failure_semantics
+      - authoritative_spec_tests_and_pr_body_overclaim
       - decisive_node_24_15_windows_linux_evidence_absent
-      - stale_pr_body
   queue:
     - {position: 1, control_issue: 2, task: evidence_20_catalog_heartbeat_projection, status: blocked_by_control_issue_1, review: 4850754712}
     - {position: 2, control_issue: 3, task: manager_70_verified_launch_identity, status: blocked_base_review, blocking_label: blocked-base-review, blocked_by_prs: [78, 79, 80]}
@@ -88,7 +85,7 @@ repositories:
       - {pr: 44, head: d37ab900486cad25b5dff5cd6fa11724c8fc3929, review: 4850859460, disposition: foundation_redesign_blocked_parent}
       - {pr: 47, head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef, review: 4850880052, disposition: governance_reconstruction_blocked_parent}
       - {pr: 52, head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff, review: 4850845427, disposition: changes_required_blocked_parent}
-      - {pr: 63, head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0, review: 4851511234, disposition: changes_required_blocked_parent_replayable}
+      - {pr: 63, head: ebf510670da82a22ca55626c8e520fd1af494d6f, review: 4852208692, disposition: rejected_changes_required_blocked_parent_replayable, audit_commit: 67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7}
       - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate}
       - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
 
@@ -110,6 +107,7 @@ repositories:
       - {pr: 5, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
       - {pr: 11, review: 4850690366, disposition: changes_required}
     open_issues: [7, 8, 9, 10]
+    accidental_issue_12: {state: closed, reason: not_planned, authority: none}
 
   evidence_service:
     authoritative_stack: none
@@ -137,9 +135,9 @@ repositories:
     ownership_order: [4, 5, 6, 7]
 
 next_actions:
-  - do_not_interrupt_active_jules_session
-  - review_only_substantive_head_beyond_e7eb5edf
-  - keep_queue_blocked_while_control_issue_1_open_or_active
+  - resolve_pending_state_aware_continue_without_duplicate_command
+  - review_only_substantive_head_beyond_ebf510670
+  - keep_queue_blocked_while_control_issue_1_open_active_or_unresolved
   - continue_independent_ownership_sized_reviews_and_repairs
   - reconstruct_engine_pr39_then_pr44_then_pr47_before_replay
   - correct_manager_pr78_then_pr79_then_pr80
