@@ -1,20 +1,38 @@
-schema: uci_arena_jules_execution_registry_v7
-updated_at: '2026-08-03T20:14:00-07:00'
+schema: uci_arena_jules_execution_registry_v8
+updated_at: '2026-08-03T21:09:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
   control_branch: main
   workflow: .github/workflows/jules-control.yml
   controller: scripts/jules_control.py
-  creation_entrypoint: scripts/jules_entrypoint.py
+  creation_and_queue_entrypoint: scripts/jules_entrypoint.py
+  usage_controller: scripts/jules_usage.py
   continue_controller: scripts/jules_continue.py
   secret_location: github_environment_secret
   environment: jules
   secret_name: JULES_API_KEY
-  review_protocol_commits:
-    entrypoint: 69dce51d7dea95555ee3c4677da0c7b635e43d85
-    workflow: 54da22d057f7a4b2a4705519b4ef2da2f7aea3dc
-    documentation: 748e6a9fabe128e5aa6ec4600d3a72bfaf0a1bb0
+  free_account_daily_task_limit: 15
+  limit_window_used_for_local_guard: rolling_24_hours
+  last_api_usage_observation:
+    observed_at: '2026-08-03T20:54:00-07:00'
+    sessions_created_rolling_24h: 10
+    active_or_waiting: 1
+    estimated_remaining: 5
+    total_sessions_returned: 14
+    explicit_server_quota_metadata_returned: false
+  control_commits:
+    mandatory_review_entrypoint: 69dce51d7dea95555ee3c4677da0c7b635e43d85
+    usage_collector: 2df6b093000a602f0f5c3a5fff74365f0f5ffe1a
+    limit_default_15: bfff9d133ca0feeef6146c4bf096f64ce0b2a6ff
+    durable_queue_entrypoint: 2da368878f9d2d2ccc6a52bdfcff5467a9e4b4e6
+    prior_output_review_gate: b05602510ffcf5fa747aa05110905c55ba0c5c68
+    queue_help: 9f6f2411921f8cc688c42aa588c8e6b18d8f54bf
+  queue_watcher:
+    kind: chatgpt_condition_watch
+    cadence: hourly
+    notification_policy: notify_only_on_launch_or_concrete_control_failure
+    launch_command: /jules launch
   rules:
     - never expose the API key in chat, issues, logs, argv, files, or prompts
     - resolve exactly one Jules source and require an exact startingBranch
@@ -24,16 +42,21 @@ preferred_transport:
     - preserve exact branch, scope, approved plan, existing output PR, and all later corrective instructions
     - review every output as hostile input in the source repository
     - never trust Jules completion claims, test names, or self-review without direct code and evidence inspection
+    - new tasks become durable control issues and queue instead of failing when a session is active or the daily limit is exhausted
+    - queue order is oldest open queued control issue first
+    - launch exactly one task only after the prior control issue is closed with accepted_or_terminally_rejected disposition
+    - the controller revalidates prior-review closure, one-active-session, and rolling-24-hour budget gates on every /jules launch
+    - Jules capacity limits never stop independent direct audit, implementation, testing, or review work
     - close a control issue only after output identity and review disposition are recorded
 concurrency:
   maximum_active_jules_sessions: 1
   active_sessions: 1
-  prepared_not_launched: 3
-  rule: one broad implementation session remains active until its output is frozen and accepted_or_rejected
+  durable_queued_control_issues: 3
+  rule: one broad implementation session remains active until its output is frozen and accepted_or_rejected and its control issue is closed
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: formal_architectural_correction_requested_and_continue_sent
+    state: formal_architectural_correction_in_progress_or_under_review
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -46,6 +69,7 @@ sessions:
     output_base_branch: agent/integrate-engine-audit-stacks
     output_base_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     output_draft: true
+    output_mergeable: true
     first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
     second_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
     third_output_head_sha: bc2c27f65d24b51c69c6ac953656fae78cb01b64
@@ -103,11 +127,13 @@ sessions:
       - public_lease_facade_exposes_only_versioned_provider_neutral_types
       - private_dependency_injection_for_tests_no_public_runtime_private_hooks
     control_issue_closed_at: null
-prepared_tasks:
+queued_tasks:
   - id: evidence-20-catalog-integration
     queue_position: 1
-    state: prepared_not_launched
-    launch_after: engine-62-20260803-terminal-and-reviewed
+    state: durable_queued
+    control_issue: 2
+    queue_comment: 5174478527
+    launch_after_control_issue_closed: 1
     source_repository: iteathen/uci-arena-evidence-service
     source_branch: agent/project-daemon-heartbeat-staleness
     expected_source_sha: 3991983c397a222871cba70c6232da1a8be5b265
@@ -119,8 +145,10 @@ prepared_tasks:
     task_body: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md
   - id: manager-70-verified-launch-identity
     queue_position: 2
-    state: prepared_not_launched
-    launch_after: evidence-20-catalog-integration-terminal-and-reviewed
+    state: durable_queued
+    control_issue: 3
+    queue_comment: 5174480243
+    launch_after_control_issue_closed: 2
     source_repository: iteathen/uci-arena-manager
     source_branch: agent/bind-verified-uci-launch-identity
     expected_source_sha: 683d7ae20a161d0b40d176d82173a87a961c77ea
@@ -133,8 +161,10 @@ prepared_tasks:
     task_body: docs/audits/jules-workbenches/manager-70-verified-launch-task.md
   - id: book-forge-12-exact-credential
     queue_position: 3
-    state: prepared_not_launched
-    launch_after: manager-70-verified-launch-identity-terminal-and-reviewed
+    state: durable_queued
+    control_issue: 4
+    queue_comment: 5174481308
+    launch_after_control_issue_closed: 3
     source_repository: iteathen/uci-arena-book-forge
     source_branch: agent/exact-acquisition-credential-use
     expected_source_sha: f698d49b6f9b7bdf8105dde3c598b053502e08f0
@@ -145,6 +175,14 @@ prepared_tasks:
     require_plan_approval: true
     manifest: docs/audits/jules-workbenches/book-forge-12-exact-credential.yaml
     task_body: docs/audits/jules-workbenches/book-forge-12-exact-credential-task.md
+independent_work_policy:
+  while_jules_active_or_budget_exhausted:
+    - continue_direct_ownership_sized_fixes
+    - continue_hostile_pr_review
+    - continue_spec_and_cross_repository_audit
+    - continue_local_or_connector_supported_validation
+    - prepare_but_do_not_launch_future_jules_tasks
+    - update_handoffs_and_registry
 legacy_workbench_fallback:
   enabled: true
   use_only_when:
