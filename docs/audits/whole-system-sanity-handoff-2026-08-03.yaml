@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v9
-  snapshot_at: '2026-08-03T22:30:00-07:00'
+  schema: uci_arena_whole_system_sanity_handoff_v10
+  snapshot_at: '2026-08-03T23:14:00-07:00'
   status: in_progress
   sanity_complete: false
   soundness_conclusion: none
@@ -19,10 +19,10 @@ method:
   jules_output_trusted_before_hostile_review: false
   rules:
     - one_owner_per_concern
-    - project_owned_neutral_contracts
+    - project_owned_provider_neutral_contracts
     - domain_appropriate_foundations
-    - exact_bounded_bytes_types_identities_paths_lifetimes_deadlines_and_cleanup
-    - preserve_primary_failure_and_bounded_cleanup_diagnostics
+    - exact_bounded_bytes_strings_lists_memory_paths_identities_timestamps_deadlines_retries_diagnostics_cleanup
+    - preserve_primary_failure_and_attach_bounded_cleanup_failures
     - no_peer_source_imports_or_hidden_discovery
     - hostile_review_before_acceptance
     - exact_evidence_before_claim
@@ -30,8 +30,8 @@ method:
 jules:
   transport: official_rest_api
   control_repository: iteathen/Jules-control
-  free_daily_limit: 15
-  last_usage: {rolling_24h: 10, active: 1, estimated_remaining: 5}
+  configured_rolling_guard: 15
+  last_usage: {rolling_24h: 10, active: 1, estimated_remaining: 5, api_limit_field_present: false}
   active:
     id: engine-62-20260803
     session: sessions/13034909149691235140
@@ -40,22 +40,29 @@ jules:
     source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
-    current_head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
+    latest_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
+    latest_formal_review: 4850967412
+    current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab
+    current_head_reviewed: false
     state: in_progress
-    formal_review: 4850334357
+    last_confirmed_at: '2026-08-04T06:12:51.408323Z'
+    correction_message: 5175041945
+    state_aware_continue_command: 5175048852
+    recovery_acknowledgement: 5175050145
     local_disposition: changes_required
     ancestry_disposition: blocked_parent_replayable_package_slice_only
     blocked_parents:
       - {pr: 39, review: 4850912840}
       - {pr: 44, review: 4850859460}
       - {pr: 47, review: 4850880052}
-    ancestry_instruction_comment: 5174933429
+    latest_audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md
+    instruction: do_not_send_correction_or_continue_while_active
   queue:
     - id: evidence-20-catalog-integration
       control_issue: 2
       status: queued_review_bound
       review: 4850754712
-      launch_after_control_issue_closed: 1
+      launch_after_control_issue_terminally_reviewed_and_closed: 1
     - id: manager-70-verified-launch-identity
       control_issue: 3
       status: blocked_base_review
@@ -80,7 +87,7 @@ repositories:
         head: 1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee
         review: 4850912840
         disposition: changes_required_foundation_reconstruction_split_required
-        reusable_slices: [remove_concrete_onnx_include_from_search, reject_os_owned_windows_runtime_files]
+        reusable_slices: [remove_concrete_onnx_include_from_search, reject_obvious_os_owned_windows_runtime_files]
         blockers:
           - ordering_score_reset_fixed_array_overflow
           - cache_capacity_can_exceed_declared_budget
@@ -109,36 +116,21 @@ repositories:
         head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
         review: 4850880052
         disposition: changes_required_governance_reconstruction_blocked_parent
-        blockers:
-          - registry_deauthorizes_preflight_required_specs
-          - removed_specs_lack_complete_migration_register
-          - heartbeat_loss_does_not_cancel_protected_work
-          - heartbeat_failure_is_unversioned_string
-          - public_api_changed_without_package_version
-          - failed_monitor_timer_not_self_cleaning
-          - weak_timer_and_stale_interval_bounds
-          - cleanup_failure_causality_incomplete
         audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md
       - pr: 52
         head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff
         review: 4850845427
         disposition: changes_required_blocked_parent
-        blockers:
-          - adjacent_empty_run_digits_accepted
-          - validator_not_private_or_globally_single_owner
-          - no_fen_byte_bound
-          - canonical_counter_text_unresolved
-          - canonical_castling_order_unresolved
         audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md
       - pr: 63
-        head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-        review: 4850334357
+        latest_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
+        current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab
+        review: 4850967412
         disposition: changes_required_blocked_parent_replayable
         state: jules_correction_in_progress
-    open_issue_families:
-      inference: [57, 45, 46]
-      transposition_table: [43, 54]
-      performance: [56, 58, 59]
+        audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md
+      - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate_tt_probe}
+      - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
 
   installer:
     base_pr: 2
@@ -165,11 +157,34 @@ repositories:
     issue_70_task: blocked_until_78_79_80_corrected_and_branch_refreshed
 
   evidence_service:
-    accepted_stack_ends_at_pr: 22
-    pr_23:
-      head: 3991983c397a222871cba70c6232da1a8be5b265
-      review: 4850754712
-      disposition: changes_required_partial_only
+    authoritative_pr_chain: none_reconstruction_required
+    review_order_completed: [23, 22, 19, 18, 17, 16, 15, 14, 13, 10]
+    reviews:
+      - {pr: 23, head: 3991983c397a222871cba70c6232da1a8be5b265, review: 4850754712, disposition: changes_required_queued_correction}
+      - {pr: 22, head: 3e9d9609382a3706aa82db66bca51096ea0dc0b1, review: 4850984541, disposition: narrow_validation_slice_locally_acceptable_blocked_pr19}
+      - {pr: 19, head: 6b4988066751b40b7231597b2b19a2177d4d2284, review: 4850992135, disposition: changes_required}
+      - {pr: 18, head: 117cf64976fe179989bddee8dbfc534966370ec6, review: 4851001435, disposition: changes_required}
+      - {pr: 17, head: 640545739abe8db15d147c0202dabc684281b16f, review: 4851009132, disposition: changes_required}
+      - {pr: 16, head: 7dfc4388f5ce57105e8de515fdcb0526e9298df0, review: 4851046968, disposition: changes_required, audit: docs/audits/evidence-pr16-transactional-prune-hostile-review-2026-08-03.md}
+      - {pr: 15, head: a66fece5f8096622a53784479fe2c8da97fbc4f9, review: 4851061354, disposition: changes_required, audit: docs/audits/evidence-pr15-dataset-show-hostile-review-2026-08-03.md}
+      - pr: 14
+        head: fbb1a9aa8d0ae1a2ad14be6a00d3bb229285a173
+        review: 4851124960
+        disposition: changes_required_reconstruction_required
+        audit: docs/audits/evidence-pr14-dataset-export-hostile-review-2026-08-03.md
+        audit_commit: 2b4ad1aa44ef49082e3d4e11e133f542f29099cf
+      - pr: 13
+        head: 7b5e7f90476e17e5157f4a782a27122aa210a90b
+        review: 4851148254
+        disposition: changes_required_reconstruction_required
+        audit: docs/audits/evidence-pr13-cli-contract-hostile-review-2026-08-03.md
+        audit_commit: 7173555e3562f31ddf58bbcb57c48092e992665b
+      - pr: 10
+        head: b09abb9aecf6aba6ca04358c8789eef86ecb763b
+        review: 4851184668
+        disposition: changes_required_split_reconstruct_by_owner
+        audit: docs/audits/evidence-pr10-system-sanity-hostile-review-2026-08-03.md
+        audit_commit: a39c5d31eeda3cd824ba16f6158657467f9e8681
     issue_20_task: queued_control_issue_2_review_bound
     issue_21:
       blocked_on: corrected_replayed_engine_resource_lease_contract
@@ -179,7 +194,6 @@ repositories:
     reviews:
       - {pr: 10, review: 4848065237, disposition: changes_required}
       - {pr: 11, review: 4848083104, disposition: changes_required}
-    broad_pr_8: blocked
     issue_12: queued_control_issue_4_isolated_child
     open_issues:
       - {issue: 13, summary: recoverable_snapshot_publication}
@@ -194,13 +208,14 @@ repositories:
       - {issue: 7, summary: exact_sqlite_foundation}
 
 next_actions:
-  - review_engine_pr_63_only_after_head_moves_beyond_cc2ead92
-  - do_not_continue_jules_while_session_is_in_progress
+  - do_not_interrupt_active_jules_session
+  - recheck_jules_state_and_engine_pr63_head_before_any_control_command
+  - hostile_review_newest_substantive_pr63_head_after_stable_terminal_state
   - continue_independent_hostile_review_and_ownership_sized_repairs
   - reconstruct_engine_pr39_then_pr44_then_pr47_then_replay_children
   - reconstruct_installer_pr3_pr4_then_replay_pr5_then_correct_pr11
   - correct_manager_pr78_then_pr79_then_pr80_then_refresh_issue70_task
-  - launch_evidence_control_issue_2_only_after_engine_control_issue_1_closes
+  - launch_evidence_control_issue_2_only_after_engine_control_issue_1_terminal_review_and_close
   - continue_evidence_21_manager_67_69_lichess_4_to_7_book_forge_12_to_14_installer_7_to_10
   - keep_narrative_yaml_registry_and_pr2_comment_synchronized
 
