@@ -1,5 +1,5 @@
 schema: uci_arena_jules_execution_registry_v12
-updated_at: '2026-08-03T23:14:00-07:00'
+updated_at: '2026-08-03T23:19:00-07:00'
 control:
   repository: iteathen/Jules-control
   branch: main
@@ -36,19 +36,20 @@ active_session:
     - {head: bc2c27f65d24b51c69c6ac953656fae78cb01b64, disposition: rejected}
     - {head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b, review: 4850334357, disposition: rejected}
     - {head: 2106482635969e1e9c6b28b76fb80aca35890af6, review: 4850967412, disposition: rejected}
-  latest_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
+  latest_substantive_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
   current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab
-  current_head_reviewed: false
+  current_head_compare: {ahead_by: 1, changed_files: 0, substantive: false}
   current_state: in_progress
-  last_confirmed_at: '2026-08-04T06:12:51.408323Z'
+  last_confirmed_at: '2026-08-04T06:18:53.275899Z'
   local_disposition: changes_required_blocked_parent_replayable
   session_transition:
     correction_message: 5175041945
     session_reported_completed_without_new_head: 5175044883
     state_aware_continue_command: 5175048852
     state_aware_recovery_acknowledgement: 5175050145
-    recovery_result: new_substantive_head_created
+    recovery_result: empty_commit_head_only
     current_instruction: do_not_send_control_command_while_active
+    terminal_without_substantive_head_action: replay_latest_correction_via_existing_state_aware_path
   blocked_parents:
     - {pr: 39, review: 4850912840}
     - {pr: 44, review: 4850859460}
@@ -96,7 +97,7 @@ review_dispositions:
     - {pr: 44, review: 4850859460, disposition: foundation_redesign_blocked_parent, audit: docs/audits/engine-pr44-model-adapter-hostile-review-2026-08-03.md}
     - {pr: 47, review: 4850880052, disposition: governance_reconstruction_blocked_parent, audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md}
     - {pr: 52, review: 4850845427, disposition: changes_required_blocked_parent, audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md}
-    - {pr: 63, reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6, current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab, review: 4850967412, disposition: changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md}
+    - {pr: 63, reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6, current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab, current_head_substantive: false, review: 4850967412, disposition: changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md}
     - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate_probe}
     - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
   manager:
@@ -132,8 +133,8 @@ canonical_commits:
   evidence_pr14_audit: 2b4ad1aa44ef49082e3d4e11e133f542f29099cf
   evidence_pr13_audit: 7173555e3562f31ddf58bbcb57c48092e992665b
   evidence_pr10_audit: a39c5d31eeda3cd824ba16f6158657467f9e8681
-  narrative: 4de9c7473dbd52efbb3d6f1b8c4c07afdeffd93f
-  yaml: 6493b3b5491b672a2f01d8e6805982d4bc62e1ea
+  narrative: aa3efa66bed71b266b48b813de90555920106901
+  yaml: 6ff0d2748beefe66d27308e342236bac004dea2e
 
 final_state:
   sanity_complete: false
