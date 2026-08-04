@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v8
-updated_at: '2026-08-03T21:09:00-07:00'
+schema: uci_arena_jules_execution_registry_v9
+updated_at: '2026-08-03T22:06:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
@@ -27,36 +27,40 @@ preferred_transport:
     limit_default_15: bfff9d133ca0feeef6146c4bf096f64ce0b2a6ff
     durable_queue_entrypoint: 2da368878f9d2d2ccc6a52bdfcff5467a9e4b4e6
     prior_output_review_gate: b05602510ffcf5fa747aa05110905c55ba0c5c68
+    blocked_dependency_label_gate: fd2651bae8ea57d82e2a7b94cdb8dba3f1b1080a
     queue_help: 9f6f2411921f8cc688c42aa588c8e6b18d8f54bf
   queue_watcher:
     kind: chatgpt_condition_watch
     cadence: hourly
     notification_policy: notify_only_on_launch_or_concrete_control_failure
     launch_command: /jules launch
+    blocked_label_prefix: blocked-
   rules:
     - never expose the API key in chat, issues, logs, argv, files, or prompts
     - resolve exactly one Jules source and require an exact startingBranch
     - append the standing hostile-self-review protocol to every new Jules session
     - require plan approval for broad or security-sensitive tasks
-    - use /jules continue for recoverable stops, awaiting feedback, or apparent completion without valid output
+    - use /jules continue only for recoverable stops, awaiting feedback, or apparent completion without valid output
     - preserve exact branch, scope, approved plan, existing output PR, and all later corrective instructions
     - review every output as hostile input in the source repository
     - never trust Jules completion claims, test names, or self-review without direct code and evidence inspection
     - new tasks become durable control issues and queue instead of failing when a session is active or the daily limit is exhausted
-    - queue order is oldest open queued control issue first
-    - launch exactly one task only after the prior control issue is closed with accepted_or_terminally_rejected disposition
-    - the controller revalidates prior-review closure, one-active-session, and rolling-24-hour budget gates on every /jules launch
+    - skip any queue issue carrying a label whose name starts with blocked-
+    - launch exactly one oldest eligible task only after every prior output review is terminally disposed and its control issue is closed
+    - revalidate dependency labels, prior-review closure, one-active-session, and rolling-24-hour budget on every /jules launch
     - Jules capacity limits never stop independent direct audit, implementation, testing, or review work
     - close a control issue only after output identity and review disposition are recorded
 concurrency:
   maximum_active_jules_sessions: 1
   active_sessions: 1
   durable_queued_control_issues: 3
-  rule: one broad implementation session remains active until its output is frozen and accepted_or_rejected and its control issue is closed
+  eligible_after_active_closes: 1
+  blocked_dependency_issues: 1
+  rule: one broad implementation session remains active until its output is frozen, accepted_or_terminally_rejected, and its control issue is closed
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: formal_architectural_correction_in_progress_or_under_review
+    state: formal_architectural_correction_in_progress
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -130,7 +134,7 @@ sessions:
 queued_tasks:
   - id: evidence-20-catalog-integration
     queue_position: 1
-    state: durable_queued
+    state: durable_queued_review_bound
     control_issue: 2
     queue_comment: 5174478527
     launch_after_control_issue_closed: 1
@@ -139,15 +143,18 @@ queued_tasks:
     expected_source_sha: 3991983c397a222871cba70c6232da1a8be5b265
     existing_pr: 23
     source_issue: 20
+    formal_review_id: 4850754712
+    review_prompt_refreshed: true
     automation_mode: NONE
     require_plan_approval: true
     manifest: docs/audits/jules-workbenches/evidence-20-catalog-integration.yaml
     task_body: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md
   - id: manager-70-verified-launch-identity
     queue_position: 2
-    state: durable_queued
+    state: blocked_base_review
     control_issue: 3
     queue_comment: 5174480243
+    blocking_label: blocked-base-review
     launch_after_control_issue_closed: 2
     source_repository: iteathen/uci-arena-manager
     source_branch: agent/bind-verified-uci-launch-identity
@@ -155,26 +162,97 @@ queued_tasks:
     base_branch: agent/bound-uci-probe-wire-framing
     base_pr: 80
     source_issue: 70
+    blocked_by_reviews:
+      - pr: 78
+        review_id: 4850726806
+      - pr: 79
+        review_id: 4850708644
+      - pr: 80
+        review_id: 4850674462
+    unblock_requirement: correct_pr78_pr79_pr80_and_refresh_exact_starting_branch
     automation_mode: AUTO_CREATE_PR
     require_plan_approval: true
     manifest: docs/audits/jules-workbenches/manager-70-verified-launch.yaml
     task_body: docs/audits/jules-workbenches/manager-70-verified-launch-task.md
   - id: book-forge-12-exact-credential
     queue_position: 3
-    state: durable_queued
+    state: durable_queued_on_blocked_base_for_isolated_child_fix
     control_issue: 4
     queue_comment: 5174481308
-    launch_after_control_issue_closed: 3
+    launch_after_control_issue_closed: 2
     source_repository: iteathen/uci-arena-book-forge
     source_branch: agent/exact-acquisition-credential-use
     expected_source_sha: f698d49b6f9b7bdf8105dde3c598b053502e08f0
     base_branch: agent/config-contract-after-system-sanity
     base_pr: 11
     source_issue: 12
+    base_review_id: 4848083104
+    acceptance_scope: credential_child_only_not_base_pr_acceptance
     automation_mode: AUTO_CREATE_PR
     require_plan_approval: true
     manifest: docs/audits/jules-workbenches/book-forge-12-exact-credential.yaml
     task_body: docs/audits/jules-workbenches/book-forge-12-exact-credential-task.md
+review_dispositions:
+  - repository: iteathen/uci-arena-manager
+    pr: 78
+    head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b
+    review_id: 4850726806
+    disposition: changes_required
+    audit_file: docs/audits/manager-pr78-uci-option-contract-hostile-review-2026-08-03.md
+  - repository: iteathen/uci-arena-manager
+    pr: 79
+    head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba
+    review_id: 4850708644
+    disposition: changes_required
+    audit_file: docs/audits/manager-pr79-uci-integration-hostile-review-2026-08-03.md
+  - repository: iteathen/uci-arena-manager
+    pr: 80
+    head: 683d7ae20a161d0b40d176d82173a87a961c77ea
+    review_id: 4850674462
+    disposition: changes_required
+    audit_file: docs/audits/manager-pr80-wire-framing-hostile-review-2026-08-03.md
+  - repository: iteathen/uci-arena-installer
+    pr: 3
+    head: 05776766064a014836650d46179eadffb73fed2a
+    review_id: 4850804908
+    disposition: changes_required_stale_ancestry
+    audit_file: docs/audits/installer-pr3-indexed-asset-hostile-review-2026-08-03.md
+  - repository: iteathen/uci-arena-installer
+    pr: 4
+    head: cd061f11afbc9997710eb2f33c090311c5e4a485
+    review_id: 4850781709
+    disposition: changes_required_stale_ancestry
+    audit_file: docs/audits/installer-pr4-native-process-hostile-review-2026-08-03.md
+  - repository: iteathen/uci-arena-installer
+    pr: 5
+    head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7
+    review_id: 4850792446
+    disposition: local_slice_acceptable_blocked_parent
+  - repository: iteathen/uci-arena-installer
+    pr: 11
+    head: c40edfcbe12a5e5187a4b1543aee610f40d47f02
+    review_id: 4850690366
+    disposition: changes_required
+    audit_file: docs/audits/installer-pr11-service-control-hostile-review-2026-08-03.md
+  - repository: iteathen/uci-arena-evidence-service
+    pr: 23
+    head: 3991983c397a222871cba70c6232da1a8be5b265
+    review_id: 4850754712
+    disposition: changes_required_queue_prompt_refreshed
+    audit_file: docs/audits/evidence-pr23-daemon-liveness-hostile-review-2026-08-03.md
+existing_blocked_reviews:
+  - repository: iteathen/uci-arena-manager
+    pr: 67
+    reviews: [4847815394, 4848995624]
+    disposition: reconstruction_required
+  - repository: iteathen/uci-arena-book-forge
+    pr: 10
+    review: 4848065237
+    disposition: changes_required
+  - repository: iteathen/uci-arena-book-forge
+    pr: 11
+    review: 4848083104
+    disposition: changes_required
 independent_work_policy:
   while_jules_active_or_budget_exhausted:
     - continue_direct_ownership_sized_fixes
