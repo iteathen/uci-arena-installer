@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v14
-  snapshot_at_utc: '2026-08-04T09:30:39Z'
+  schema: uci_arena_whole_system_sanity_handoff_v15
+  snapshot_at_utc: '2026-08-04T09:37:02.081446Z'
   status: in_progress
   sanity_complete: false
   soundness_conclusion: none
@@ -39,7 +39,7 @@ jules_track_record:
   rejected_non_delivery_or_unacceptable: 11
   sole_direct_merge_reviewed_before_merge: false
   sole_direct_merge_retrospective_result: failed
-  ledger_commit: e7a9685868ab1ba2439ce8fed27c97a4104033ff
+  ledger_commit: 3a99b9cda6bbe9666818a8ec656026a151f58ad9
   accepted_output_audit_commit: f1cad579fc0000a28191c9ebd365d0ac6b15431d
   direct_outputs:
     engine: [32, 49, 50, 51, 55, 60, 61, 63]
@@ -97,7 +97,7 @@ jules:
   control_repository: iteathen/Jules-control
   maximum_active_sessions: 1
   blocked_label_prefix: blocked-
-  active_or_pending:
+  active:
     id: engine-62-20260803
     session: sessions/13034909149691235140
     control_issue: 1
@@ -122,8 +122,13 @@ jules:
       status_comment: 5176920252
     empty_head_correction_comment: 5177133724
     continue_command: 5177135866
-    continue_acknowledgement: pending
-    next_rule: do_not_duplicate_pending_command_and_review_only_substantive_file_delta_beyond_ebf510670
+    continue_acknowledgement: 5177140796
+    post_replay_status:
+      state: IN_PROGRESS
+      updated_at: '2026-08-04T09:37:02.081446Z'
+      request_comment: 5177228162
+      response_comment: 5177229725
+    next_rule: leave_active_session_uninterrupted_and_review_only_substantive_file_delta_beyond_ebf510670
     blockers:
       - safe_unlink_close_before_path_unlink_replacement_race
       - request_heartbeat_mutable_path_truncate_and_identity_adoption
@@ -160,7 +165,7 @@ repositories:
       - {pr: 44, head: d37ab900486cad25b5dff5cd6fa11724c8fc3929, review: 4850859460, disposition: foundation_redesign_blocked_parent}
       - {pr: 47, head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef, review: 4850880052, disposition: governance_reconstruction_blocked_parent}
       - {pr: 52, head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff, review: 4850845427, disposition: changes_required_blocked_parent_jules_replay}
-      - {pr: 63, substantive_head: ebf510670da82a22ca55626c8e520fd1af494d6f, empty_terminal_head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182, review: 4852208692, disposition: rejected_changes_required_empty_false_claim_replayed}
+      - {pr: 63, substantive_head: ebf510670da82a22ca55626c8e520fd1af494d6f, empty_terminal_head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182, review: 4852208692, disposition: rejected_changes_required_empty_false_claim_active_replay}
       - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate}
       - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
 
@@ -213,13 +218,13 @@ repositories:
     ownership_order: [4, 5, 6, 7]
 
 next_actions:
-  - resolve_pending_state_aware_continue_without_duplicate_command
+  - leave_active_jules_session_uninterrupted
   - re_audit_engine_issue_64_and_manager_issue_81_first
   - correct_manager_pr73
   - reconstruct_engine_pr39_then_pr44_then_pr47_before_replay
   - correct_engine_pr52_and_manager_pr78_then_pr79_then_pr80
   - review_pr63_only_after_substantive_file_delta_beyond_ebf510670
-  - keep_queue_blocked_while_control_issue_1_open_active_or_unresolved
+  - keep_queue_blocked_while_control_issue_1_open_or_active
   - trace_every_future_replay_or_cherry_pick_to_source_lines
   - synchronize_all_canonical_ledgers_after_each_transition
 
