@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v15
-updated_at_utc: '2026-08-04T09:30:39Z'
+schema: uci_arena_jules_execution_registry_v16
+updated_at_utc: '2026-08-04T09:37:02.081446Z'
 
 control:
   repository: iteathen/Jules-control
@@ -22,7 +22,7 @@ control:
 
 track_record:
   ledger: docs/audits/jules-track-record-retrospective-2026-08-04.md
-  ledger_commit: e7a9685868ab1ba2439ce8fed27c97a4104033ff
+  ledger_commit: 3a99b9cda6bbe9666818a8ec656026a151f58ad9
   accepted_output_audit: docs/audits/jules-accepted-output-retrospective-hostile-review-2026-08-04.md
   accepted_output_audit_commit: f1cad579fc0000a28191c9ebd365d0ac6b15431d
   direct_auto_created_prs: 12
@@ -72,8 +72,9 @@ active_session:
     - {kind: state_aware_continue, command: 5176541573, acknowledgement: 5176544337, observed_state: COMPLETED, correction_replayed: true}
     - {kind: completed_empty_head, status_comment: 5176920252, updated_at: '2026-08-04T09:08:13.101881Z', head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182}
     - {kind: empty_head_correction_sent, comment: 5177133724}
-    - {kind: state_aware_continue_requested, command: 5177135866, acknowledgement: pending}
-  next_rule: do_not_duplicate_pending_command_and_review_only_substantive_file_delta_beyond_ebf510670
+    - {kind: state_aware_continue, command: 5177135866, acknowledgement: 5177140796, observed_state: COMPLETED, correction_replayed: true}
+    - {kind: resumed, status_request: 5177228162, status_response: 5177229725, state: IN_PROGRESS, updated_at: '2026-08-04T09:37:02.081446Z'}
+  next_rule: leave_active_session_uninterrupted_and_review_only_substantive_file_delta_beyond_ebf510670
   blocked_parents:
     - {pr: 39, review: 4850912840}
     - {pr: 44, review: 4850859460}
@@ -111,7 +112,7 @@ review_dispositions:
     - {pr: 44, review: 4850859460, disposition: foundation_redesign_blocked_parent}
     - {pr: 47, review: 4850880052, disposition: governance_reconstruction_blocked_parent}
     - {pr: 52, review: 4850845427, disposition: changes_required_blocked_parent_jules_replay}
-    - {pr: 63, substantive_head: ebf510670da82a22ca55626c8e520fd1af494d6f, empty_head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182, review: 4852208692, disposition: rejected_changes_required_empty_false_claim}
+    - {pr: 63, substantive_head: ebf510670da82a22ca55626c8e520fd1af494d6f, empty_head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182, review: 4852208692, disposition: rejected_changes_required_empty_false_claim_active_replay}
     - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate}
     - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
   manager:
