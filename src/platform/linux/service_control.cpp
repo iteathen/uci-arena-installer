@@ -34,6 +34,14 @@ struct SystemdProperties final {
     bool malformed{false};
 };
 
+CommandResult process_failure(const int code, const std::string_view diagnostic) {
+    CommandResult result;
+    result.exited = true;
+    result.exit_code = code;
+    result.output = std::string(diagnostic);
+    return result;
+}
+
 void append_bounded(std::string& output, const char* bytes, const std::size_t count) {
     if (output.size() >= maximum_captured_characters) {
         return;
@@ -62,17 +70,23 @@ void drain_pipe(const int descriptor, std::string& output) {
     }
 }
 
+void terminate_and_reap(const pid_t child) noexcept {
+    static_cast<void>(kill(child, SIGKILL));
+    while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+}
+
 CommandResult run_systemctl(const std::vector<std::string>& arguments) {
     int descriptors[2]{};
     if (pipe(descriptors) != 0) {
-        throw std::runtime_error("cannot create systemctl output pipe");
+        return process_failure(errno, "cannot create systemctl output pipe");
     }
 
     const pid_t child = fork();
     if (child < 0) {
+        const int code = errno;
         close(descriptors[0]);
         close(descriptors[1]);
-        throw std::runtime_error("cannot fork systemctl");
+        return process_failure(code, "cannot fork systemctl");
     }
     if (child == 0) {
         close(descriptors[0]);
@@ -110,18 +124,27 @@ CommandResult run_systemctl(const std::vector<std::string>& arguments) {
             break;
         }
         if (waited < 0 && errno != EINTR) {
+            const int code = errno;
+            terminate_and_reap(child);
+            drain_pipe(descriptors[0], result.output);
             close(descriptors[0]);
-            throw std::runtime_error("cannot wait for systemctl");
+            return process_failure(code, "cannot wait for systemctl");
         }
         if (std::chrono::steady_clock::now() >= deadline) {
             result.timed_out = true;
-            static_cast<void>(kill(child, SIGKILL));
-            while (waitpid(child, &wait_status, 0) < 0 && errno == EINTR) {}
+            terminate_and_reap(child);
             result.exited = true;
             break;
         }
         pollfd descriptor{descriptors[0], POLLIN | POLLHUP, 0};
-        static_cast<void>(poll(&descriptor, 1, 25));
+        const int polled = poll(&descriptor, 1, 25);
+        if (polled < 0 && errno != EINTR) {
+            const int code = errno;
+            terminate_and_reap(child);
+            drain_pipe(descriptors[0], result.output);
+            close(descriptors[0]);
+            return process_failure(code, "cannot poll systemctl output");
+        }
     }
     drain_pipe(descriptors[0], result.output);
     close(descriptors[0]);
