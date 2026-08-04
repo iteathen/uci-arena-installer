@@ -1,24 +1,62 @@
 # Whole-system sanity audit handoff — 2026-08-03
 
 Status: **in progress; no soundness or release-readiness conclusion exists**  
-Snapshot: after Engine PR #63 seventh hostile review on 2026-08-04  
+Snapshot: `2026-08-04T09:30:39Z`  
 Canonical repository/branch: `iteathen/uci-arena-installer` / `agent/release-assembly` (Installer PR #2)
 
-This file, its YAML companion, and `docs/audits/jules-workbenches/registry.yaml` are the continuation authority. Fetch current GitHub heads and Jules state before acting.
+This file, its YAML companion, `docs/audits/jules-workbenches/registry.yaml`, and `docs/audits/jules-track-record-retrospective-2026-08-04.md` are continuation authority. Fetch current heads and Jules state before acting.
 
 ## Governing method
 
 - Branch ancestry is product correctness.
 - Use one owner per concern and project-owned, provider-neutral LEGO contracts.
 - Apply Domain-Appropriate Foundations rather than accidental first-case limits.
-- Require exact bounds for bytes, strings, lists, memory, paths, identities, timestamps, deadlines, retries, diagnostics, cleanup, and failure causality.
+- Require exact bounds for bytes, strings, lists, memory, paths, identities, timestamps, deadlines, work, cancellation, diagnostics, cleanup, and failure causality.
 - Preserve primary failure and attach bounded cleanup failures.
-- Treat Jules output, PR prose, self-review, test names, and test-count claims as hostile input.
-- Automatic CI is disabled. Source review and isolated probes do not establish Node 24.15, Windows/Linux native, packaged, or release readiness.
+- Treat Jules output, completion state, commit/PR prose, self-review, test names, test counts, and claimed command results as hostile input.
+- A Jules-derived line receives no positive presumption because it was merged, replayed, cleaned up, or described as line-by-line reviewed.
+- Automatic CI is disabled. Source review and isolated probes do not establish Node 24.15, Windows/Linux native, packaged, installed, or release readiness.
 
 ## Whole-system conclusion
 
 The six-repository audit remains incomplete. `PKG-E2E-011` is unknown. No soundness conclusion exists. Release readiness is not established. There is no authoritative Engine PR chain. The Evidence stack is rejected from PR #10 upward.
+
+## Jules track record and acceptance override
+
+The complete six-repository direct-output inventory found **12 auto-created Jules PRs**:
+
+- 1 merged directly: Manager PR #4;
+- 10 closed without merge;
+- 1 open draft and repeatedly rejected: Engine PR #63;
+- 11 of 12 were rejected, non-deliveries, or remain unacceptable;
+- the sole direct merge had no submitted review and failed retrospective hostile review.
+
+This is not a controlled benchmark of Jules generally. It is the project-specific delivery record and is sufficient to eliminate any trust presumption.
+
+Durable audits:
+
+- `docs/audits/jules-track-record-retrospective-2026-08-04.md`, commit `e7a9685868ab1ba2439ce8fed27c97a4104033ff`;
+- `docs/audits/jules-accepted-output-retrospective-hostile-review-2026-08-04.md`, commit `f1cad579fc0000a28191c9ebd365d0ac6b15431d`.
+
+### Accepted or acceptance-adjacent work reopened
+
+1. **Manager PR #4**, direct Jules merge `9460c3ccec74413c52dbd99540f17e13dba73232`.
+   - No submitted review; only Jules greeting before merge.
+   - Retrospective findings: incomplete fail-closed recursion, total traversal work not bounded, mutable-path candidate identity, and no adversarial/platform proof.
+   - PR comment `5177011986`; corrective Manager issue #81.
+
+2. **Engine PR #16**, merge `68e181fe77c159b997edeb40e8ecf6e237c0ded6`, explicitly reconstructed from an original Jules branch.
+   - No submitted review and no PR discussion despite destructive cleanup authority.
+   - Retrospective findings: audit-to-rename replacement race, recursive path races, absent Windows handle/reparse authority, unbounded work/bytes, weak producer proof, unsafe result publication, partial irreversible success, and inadequate tests.
+   - PR comment `5177061995`; corrective Engine issue #64.
+   - **Do not run `node tools/workspace_cleanup.mjs apply` against valuable worktrees.**
+
+3. **Manager PR #73**, manually reconstructed after empty Jules PR #72 and source PR #68.
+   - Issue #71 claimed line-by-line review, but the PR had no submitted review, discussion, or durable audit.
+   - Retrospective formal review `4852571117` at head `19b90a6341d6d535b84eded91540e224ccd78f4b`; `changes-required` applied.
+   - Blockers include unvalidated labels, no total plan byte/work/allocation budget, accidental roughly 20,000-engine Swiss admission, attacker-shaped hashing, incomplete multi-round Swiss opening-index proof, ambiguous portable path bounds, and absent API/persistence compatibility.
+
+Any prior Jules-derived acceptance lacking an exact-head formal review, durable findings, actual-race tests, supported-platform evidence, and consumer/package tracing is reopened automatically.
 
 ## Engine
 
@@ -27,8 +65,9 @@ No authoritative ancestry exists.
 - PR #39 — head `1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee`, review `4850912840`, foundation reconstruction/split required.
 - PR #44 — head `d37ab900486cad25b5dff5cd6fa11724c8fc3929`, review `4850859460`, model-adapter redesign; blocked parent.
 - PR #47 — head `60f7bc9fe64dd1c405bcc6009232ecb875b760ef`, review `4850880052`, governance/heartbeat reconstruction; blocked parent.
-- PR #52 — head `5d122ac47ca80606add8f8354adabb67dbc4a2ff`, review `4850845427`, changes required; blocked parent.
+- PR #52 — head `5d122ac47ca80606add8f8354adabb67dbc4a2ff`, review `4850845427`, changes required; blocked parent; replayed from Jules PR #50.
 - PR #51 review `4843786909` and PR #55 review `4847014331` remain rejected. No surviving authoritative lock-free TT exists.
+- Merged workspace cleanup PR #16 is reopened under Engine issue #64.
 
 ### Jules issue #62 / Engine PR #63
 
@@ -36,65 +75,50 @@ No authoritative ancestry exists.
 - Session: `sessions/13034909149691235140`
 - Starting branch/SHA: `agent/integrate-engine-audit-stacks` / `60f7bc9fe64dd1c405bcc6009232ecb875b760ef`
 - Output branch: `jules-13034909149691235140-b7c89938`
-- Exact reviewed head: `ebf510670da82a22ca55626c8e520fd1af494d6f`
+- Last substantive reviewed head: `ebf510670da82a22ca55626c8e520fd1af494d6f`
 - Seventh formal review: `4852208692`
-- Seventh audit: `docs/audits/engine-pr63-resource-lease-seventh-hostile-review-2026-08-04.md`
 - Seventh audit commit: `67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7`
 - Disposition: **rejected; changes required; keep draft; replayable package-owned slice only**.
 
-Useful partial changes at this head include bounded descriptor reads, fatal UTF-8, private instance cache/waiters, deterministic non-locale ordering, a package bump to 1.0.3, and a persisted `requested_at_ms` field. Jules's commit/PR claim that the secure redesign and all hostile-review corrections are complete is false.
+The seventh review established close-before-unlink replacement deletion, mutable-path request/holder updates, transient truncated-holder deletion, release and wrapper causality failures, unvalidated timestamp pairs, future-time clamping, stale-live-PID phantom demand, public test/path authority leakage, synchronous notifier-handle leaks, false byte/work metrics, absent Windows handle authority, incomplete consumer migration, inconsistent failure algebra, and no supported-platform evidence.
 
-Confirmed blockers:
+#### Latest terminal head is an empty false-claim commit
 
-1. `safeUnlink()` closes the verified descriptor before pathname unlink and can delete a replacement object; a narrow local Node 22 probe reproduced the race.
-2. Request heartbeat still opens/truncates/recreates by mutable pathname, ignores partial `writeSync`, and adopts replacement identity afterward.
-3. Holder publication closes the created object and reopens the mutable name in the constructor.
-4. In-place holder truncate/write permits a concurrent reader to classify transient bytes as malformed and delete the active holder.
-5. Release closes exact authority before deletion, swallows close failure, uses the unsafe unlink, and performs a racy `existsSync` check.
-6. Release can replace a primary work failure; acquisition/success cleanup failures are swallowed; constructor failure can strand authority.
-7. `requested_at_ms` is not required, checked, or bound to canonical text and is ignored during selection.
-8. The 1000 ms future tolerance still clamps producer time to observation time.
-9. A stale foreground request with a live PID becomes permanent phantom `untrusted-foreground` demand; the named stale test has no stale case.
-10. Package/schema/result/failure and consumer-lock migration is incomplete; Evidence pins 1.0.2 and Book Forge pins 1.0.0.
-11. Public authority leaks remain: exported global test seam, publicly writable `released`, and snapshot filename/path leakage.
-12. Synchronous terminal notifier callbacks before constructor return can leak watcher/timer handles; the new test invokes a nonterminal callback and misses the race. A narrow probe reproduced the leak.
-13. Waiter/watcher/timer count and lifetime are unbounded; success cleanup failures disappear.
-14. Windows protection is pathname check-then-use rather than retained handle/file-ID authority; the test is an ordinary symlink and silently returns if creation fails.
-15. The 1 MiB byte metric excludes invalid reads; up to roughly 12.8 MiB can be read under the stated bound; allocation metrics are manual and all traversal errors become overflow.
-16. `observe()` accepts safe integers outside Date range and still uses multiple unsynchronized clocks.
-17. Failure semantics remain inconsistent across null, booleans, strings, plain errors, typed errors, and conservative observations.
-18. The active spec and PR body materially overclaim the mechanisms and evidence; the head has no CI status evidence.
+- Terminal head: `fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182`.
+- Exact comparison from `ebf510670…`: ahead by one commit, changed files `[]`.
+- The empty commit message claims exact-object POSIX ports, a native Windows handle/file-ID/reparse seam, nondestructive heartbeat writes, exact temporal-pair validation, strict byte bounds, and consumer-lock updates. None exist.
+- Existing seventh review remains authoritative; no duplicate code review applies to an empty commit.
 
-Independent probes were Node 22 falsification probes only. They do not establish Node 24.15, Windows, Linux, package, or release readiness.
+Control transitions:
 
-Control state:
+- completed at `2026-08-04T09:08:13.101881Z`, status comment `5176920252`;
+- empty-head correction comment `5177133724`;
+- state-aware continue command `5177135866`;
+- controller acknowledgement was pending when this snapshot was written.
 
-- Jules terminal status before review: `COMPLETED` at `2026-08-04T07:46:56.532963Z`, status comment `5176310334`.
-- Seventh correction comment: `5176539894`.
-- State-aware continue command: `5176541573`.
-- Controller acknowledgement/status after this command was not yet present in the fetched timeline when this handoff was written.
-
-Do not send another correction/continue until the controller resolves the pending command. If it resumes, do not interrupt it. Review only a substantive head beyond `ebf510670…`.
+Do not send a duplicate command. Review only a substantive file delta beyond `ebf510670…`.
 
 Engine reconstruction order remains PR #39 foundations → PR #44 model adapter → PR #47 governance/heartbeat → replay corrected PR #52 and PR #63 child slices.
 
 ## Jules durable queue
 
-The controller skips labels beginning `blocked-` and may launch only one oldest eligible task after all earlier outputs are terminally reviewed, the earlier control issue is closed, no session is active/waiting, budget permits, and no task-specific block exists.
+The controller may launch only one oldest eligible task after all earlier outputs are terminally reviewed, the earlier control issue is closed, no active/waiting/unresolved transition exists, budget permits, and no task-specific block exists.
 
-1. `Jules-control#2` — Evidence issue #20 / PR #23; review `4850754712` bound. Blocked until control issue #1 is terminally reviewed and closed.
-2. `Jules-control#3` — Manager issue #70; `blocked-base-review`. Blocked until PRs #78/#79/#80 are corrected and the branch is refreshed.
-3. `Jules-control#4` — Book Forge issue #12. Isolated credential child only; cannot imply acceptance of blocked PR #11.
+1. `Jules-control#2` — Evidence issue #20 / PR #23; review `4850754712`; blocked by control issue #1.
+2. `Jules-control#3` — Manager issue #70; `blocked-base-review`; blocked by PRs #78/#79/#80.
+3. `Jules-control#4` — Book Forge issue #12; isolated credential child only; blocked parent PR #11.
 
 ## Manager
 
 Authoritative base remains PR #54 at `233654568e91d50eb5e0a995fd22e109c3d2a66d`.
 
+- PR #73 head `19b90a6341d6d535b84eded91540e224ccd78f4b`, retrospective review `4852571117`, changes required.
 - PR #78 review `4850726806`, changes required.
 - PR #79 review `4850708644`, changes required.
 - PR #80 review `4850674462`, changes required.
 - PR #67 reviews `4847815394` and `4848995624`, reconstruction required.
 - LocalAuth issue #69 remains open.
+- Merged Jules discovery PR #4 / retained PR #17 slice is reopened under Manager issue #81.
 
 ## Installer
 
@@ -105,7 +129,7 @@ Canonical base is PR #2.
 - PR #5 review `4850792446`, narrow slice locally acceptable but parent/native blocked.
 - PR #11 review `4850690366`, changes required.
 - Issues #7–#10 remain open.
-- Accidental connector issue #12 was immediately marked `not_planned`, closed, and explicitly has no project or audit authority.
+- Accidental connector issue #12 is closed `not_planned` and has no authority.
 
 ## Evidence Service
 
@@ -132,14 +156,14 @@ Lichess broad PR #3 review `4848125095` remains changes required. Continue issue
 
 ## Immediate continuation
 
-1. Resolve the pending state-aware Jules command without sending duplicates.
-2. Review only a substantive PR #63 head beyond `ebf510670…`.
-3. Keep queue issues #2–#4 from launching while control issue #1 remains open, active, or unresolved.
-4. Continue independent ownership-sized reviews and reconstruction.
-5. Reconstruct Engine PR #39 → #44 → #47 before replaying child slices.
-6. Correct Manager PR #78 → #79 → #80 before refreshing issue #70.
-7. Reconstruct Installer PR #3/#4, replay #5, then correct #11.
-8. Synchronize narrative, YAML, registry, and Installer PR #2 after each terminal review/control transition.
+1. Resolve the pending PR #63 state-aware continue acknowledgement without duplicate commands.
+2. Re-audit surviving Jules-derived code in risk order: Engine issue #64, Manager issue #81, Manager PR #73, Engine PR #52, Manager PRs #78→#80, then substantive PR #63 heads.
+3. Keep queue issues #2–#4 blocked while control issue #1 remains open, active, or unresolved.
+4. Reconstruct Engine PR #39 → #44 → #47 before replaying child slices.
+5. Correct Manager PR #78 → #79 → #80 before refreshing issue #70.
+6. Reconstruct Installer PR #3/#4, replay #5, then correct #11.
+7. Trace every future replay/cherry-pick to its source and surviving exact lines.
+8. Synchronize narrative, YAML, registry, retrospective ledger, and Installer PR #2 after each terminal review/control transition.
 
 ## Final gates
 
