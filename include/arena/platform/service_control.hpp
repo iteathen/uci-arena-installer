@@ -10,6 +10,7 @@
 
 namespace arena::platform {
 
+inline constexpr std::size_t service_name_max_characters = 256;
 inline constexpr std::size_t service_diagnostic_max_characters = 256;
 
 enum class ServiceAction {
@@ -26,6 +27,7 @@ enum class ServiceOutcome {
 
 enum class ServiceState {
     unknown,
+    unavailable,
     inactive,
     activating,
     active,
@@ -76,6 +78,8 @@ struct ServiceActionResult final {
     switch (state) {
     case ServiceState::unknown:
         return "unknown";
+    case ServiceState::unavailable:
+        return "unavailable";
     case ServiceState::inactive:
         return "inactive";
     case ServiceState::activating:
@@ -112,6 +116,20 @@ struct ServiceActionResult final {
     return std::nullopt;
 }
 
+[[nodiscard]] constexpr bool valid_service_name(
+    const std::string_view service_name) noexcept {
+    if (service_name.empty()
+        || service_name.size() > service_name_max_characters) {
+        return false;
+    }
+    for (const unsigned char character : service_name) {
+        if (character < 0x20U || character > 0x7eU) {
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] inline std::string bounded_service_diagnostic(
     const std::string_view diagnostic) {
     std::string result;
@@ -121,15 +139,22 @@ struct ServiceActionResult final {
             break;
         }
         result.push_back(
-            character < 0x20U || character == 0x7fU
-                ? ' '
+            character < 0x20U || character > 0x7eU
+                ? '?'
                 : static_cast<char>(character));
     }
     return result;
 }
 
 [[nodiscard]] constexpr ServiceState service_state_from_systemd(
-    const std::string_view active_state) noexcept {
+    const std::string_view active_state,
+    const std::string_view load_state = "loaded") noexcept {
+    if (load_state == "not-found") {
+        return ServiceState::unavailable;
+    }
+    if (load_state == "error" || load_state == "bad-setting") {
+        return ServiceState::failed;
+    }
     if (active_state == "inactive") {
         return ServiceState::inactive;
     }
@@ -167,6 +192,13 @@ struct ServiceActionResult final {
     default:
         return ServiceState::unknown;
     }
+}
+
+[[nodiscard]] constexpr ServiceState service_state_from_windows_error(
+    const std::uint32_t error_code) noexcept {
+    return error_code == 1060U // ERROR_SERVICE_DOES_NOT_EXIST
+        ? ServiceState::unavailable
+        : ServiceState::unknown;
 }
 
 [[nodiscard]] ServiceActionResult perform_service_action(
