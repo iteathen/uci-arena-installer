@@ -1,5 +1,5 @@
 schema: uci_arena_jules_execution_registry_v3
-updated_at: '2026-08-03T18:23:00-07:00'
+updated_at: '2026-08-03T18:27:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
@@ -29,7 +29,7 @@ concurrency:
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: in_progress_after_continue_recovery
+    state: correction_requested_after_first_hostile_review
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -47,25 +47,41 @@ sessions:
       - awaiting_user_feedback_without_output
       - corrective_plan_message_sent
       - continue_command_sent_successfully
-    corrected_requirements:
-      - exact_descriptor_handle_packet_read
-      - byte_bound_before_json_decode
-      - reject_oversized_identity_never_clamp
-      - no_silent_request_truncation
-      - deterministic_earliest_request_or_typed_conservative_overflow
-      - one_canonical_wait_api_unless_proven_compatibility
-      - exact_original_requested_at_preserved
-      - conservative_malformed_ambiguous_future_timestamp_handling
-    plan_scope:
-      - packages/background-service-runtime/src/background-resource-lease.mjs
-      - packages/background-service-runtime/test/**
-      - governing specs and preflight only when required
-    forbidden_scope:
-      - Evidence-specific two-second policy
-      - inference, search, evaluation, model, UCI, provider release, or packaging
-    output_pr: null
-    output_head_sha: null
-    hostile_review: pending
+      - first_output_pr_created
+      - first_output_hostile_review_failed
+      - correction_message_and_continue_sent
+    output_pr: 63
+    output_branch: jules-13034909149691235140-b7c89938
+    first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
+    current_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
+    output_base_branch: agent/integrate-engine-audit-stacks
+    output_base_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+    output_draft: true
+    first_review_comment: 5173513437
+    hostile_review: changes_required
+    first_review_findings:
+      - incomplete_exact_file_admission_and_path_deletion_race
+      - optional_request_identity_fields
+      - noncanonical_timestamps
+      - malformed_or_future_foreground_demand_silently_lost
+      - untyped_request_overflow_and_stale_file_dos
+      - duplicated_request_selection_authority
+      - invalid_clock_poll_and_abort_race
+      - incomplete_waiter_watcher_timer_cleanup_tests
+      - no_real_heartbeat_preservation_or_allocation_measurement
+      - missing_governing_spec_and_preflight_update
+    correction_requirements:
+      - exact_descriptor_handle_complete_bounded_packet_read
+      - regular_object_and_replacement_safe_cleanup
+      - required_exact_request_identity_kind_schema_scope_and_timestamp_fields
+      - canonical_utc_round_trip_grammar
+      - conservative_typed_revocation_for_untrusted_foreground_time
+      - typed_overflow_or_complete_bounded_earliest_selection
+      - one_shared_request_classification_and_selection_owner
+      - exact_clock_and_poll_validation
+      - abort_race_and_complete_cleanup
+      - real_wakeup_fallback_heartbeat_leak_scan_and_allocation_tests
+      - governing_spec_and_preflight
     control_issue_closed_at: null
 prepared_tasks:
   - id: evidence-20-catalog-integration
