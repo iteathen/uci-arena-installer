@@ -227,13 +227,12 @@ ServiceActionResult failed_result(
     const DWORD code,
     const ServiceState state,
     const std::string_view diagnostic) {
-    return ServiceActionResult{
+    return service_result_from_observation(
         action,
-        ServiceOutcome::failed,
         state,
+        false,
         static_cast<std::uint32_t>(code),
-        bounded_service_diagnostic(diagnostic),
-    };
+        diagnostic);
 }
 
 } // namespace
@@ -291,32 +290,11 @@ ServiceActionResult perform_service_action(
         }
 
         const SERVICE_STATUS_PROCESS observed = query_service_status(service.get());
-        const ServiceState state = neutral_state(observed);
-        const DWORD platform_code = effective_exit_code(observed);
-        if (state == ServiceState::unknown) {
-            return failed_result(
-                action,
-                platform_code,
-                state,
-                "Windows SCM returned an unrecognized service state");
-        }
-        const ServiceState expected = action == ServiceAction::stop
-            ? ServiceState::inactive
-            : ServiceState::active;
-        if (action != ServiceAction::status && state != expected) {
-            return failed_result(
-                action,
-                platform_code,
-                state,
-                "Windows service did not reach the required final state");
-        }
-        return ServiceActionResult{
+        return service_result_from_observation(
             action,
-            ServiceOutcome::completed,
-            state,
-            platform_code,
-            {},
-        };
+            neutral_state(observed),
+            true,
+            effective_exit_code(observed));
     } catch (const ServiceControlFailure& failure) {
         return failed_result(
             action,
