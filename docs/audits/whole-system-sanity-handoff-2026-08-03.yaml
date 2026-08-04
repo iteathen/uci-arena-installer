@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v4
-  snapshot_at: '2026-08-03T16:55:00-07:00'
+  schema: uci_arena_whole_system_sanity_handoff_v5
+  snapshot_at: '2026-08-03T17:10:00-07:00'
   status: in_progress
   soundness_conclusion: none
   release_readiness: not_established
@@ -37,61 +37,75 @@ method:
 validation_environment:
   available:
     - linux_cpp20_strict_compiler
-    - node_22_16_for_isolated_pure_semantic_tests
+    - node_22_16_isolated_semantic_tests
     - github_private_repository_connector
   unavailable:
     - node_24_15
     - windows_sdk_and_scm_host
     - complete_systemd_host
     - complete_private_repo_checkout
-    - github_cli_authenticated_checkout
+    - authenticated_github_cli_checkout
     - real_onnx_linked_engine
     - installed_suite_lifecycle_environment
 
-accepted_or_reviewable_new_work:
-  - repository: iteathen/uci-arena-evidence-service
-    issue: 20
-    pr: 23
-    branch: agent/project-daemon-heartbeat-staleness
-    base_branch: agent/harden-resource-config-after-daemon-timing
-    base_pr: 22
-    head_sha: 3991983c397a222871cba70c6232da1a8be5b265
-    status: draft_mergeable_source_reviewable
-    files_changed: 6
-    validation:
-      - node_22_pure_tests_5_passed_0_failed
-      - zero_commits_behind_base
-    required:
-      - node_24_15_full_suite
-      - npm_run_check
-      - npm_run_acceptance_idle
-      - package_installed_windows_linux
-  - repository: iteathen/uci-arena-installer
+reviewable_new_work:
+  installer_service_control:
+    repository: iteathen/uci-arena-installer
     issue: 6
     pr: 11
     branch: agent/platform-neutral-service-control-result
-    base_branch: agent/type-service-control-actions
     base_pr: 5
     head_sha: 58da2deac5a8952ed844471fdc08ac85b53935a0
     status: draft_mergeable_source_reviewable
-    files_changed: 6
     validation:
-      - cpp20_wall_wextra_wpedantic_werror_passed
+      - cpp20_strict_linux_compile_passed
       - pure_mapping_probe_passed
-      - linux_missing_service_typed_failure_probe_passed
-      - zero_commits_behind_base
+      - missing_service_typed_failure_probe_passed
     required:
       - linux_full_build_ctest_and_real_systemd_matrix
       - windows_full_build_ctest_and_real_scm_matrix
+  manager_uci_contract:
+    repository: iteathen/uci-arena-manager
+    issue: 76
+    pr: 78
+    branch: agent/uci-option-contract-v1
+    base_pr: 54
+    base_sha: 233654568e91d50eb5e0a995fd22e109c3d2a66d
+    head_sha: a6420cf26a2b347e611610b46a6795d89b28c77f
+    status: draft_mergeable_source_reviewable
+    files_changed: 6
+    validation:
+      - cpp20_strict_production_parser_compile_passed
+      - valid_all_type_and_canonical_override_probe_passed
+      - adversarial_probe_passed
+      - full_256_option_parse_allocations_522_on_linux_libstdcxx
+    required:
+      - manager_linux_full_build_and_uci_option_ctest
+      - manager_windows_full_build_and_uci_option_ctest
+  evidence_heartbeat_projector:
+    repository: iteathen/uci-arena-evidence-service
+    issue: 20
+    pr: 23
+    branch: agent/project-daemon-heartbeat-staleness
+    base_pr: 22
+    head_sha: 3991983c397a222871cba70c6232da1a8be5b265
+    status: partial_projector_slice_issue_remains_open
+    validation:
+      - node_22_pure_tests_5_passed_0_failed
+    missing:
+      - catalog_status_must_own_projection
+      - one_captured_status_sample_clock
+      - remove_redundant_cli_api_wrappers
+      - direct_temporary_catalog_status_tests
+      - node_24_15_full_suite
 
 repositories:
   installer:
     authority: suite_composition_deployment
     base_pr: 2
-    base_branch: agent/release-assembly
     stack:
-      - {pr: 3, base_pr: 2, status: reviewable_native_validation_required}
-      - {pr: 4, base_pr: 2, status: reviewable_native_validation_required}
+      - {pr: 3, base_pr: 2, status: native_validation_required}
+      - {pr: 4, base_pr: 2, status: native_validation_required}
       - {pr: 5, base_pr: 4, status: reviewable}
       - {pr: 11, base_pr: 5, status: draft_mergeable_source_reviewable}
     blockers:
@@ -99,15 +113,13 @@ repositories:
       - {issue: 8, summary: bounded_acquisition_cache_archive_expansion, blocks_pkg_e2e: true}
       - {issue: 9, summary: transactional_apply_rollback_crash_recovery, blocks_pkg_e2e: true}
       - {issue: 10, summary: exact_identity_bound_uninstall_purge, blocks_pkg_e2e: true}
-
   engine:
     authority: chess_search_evaluation_model_inference_runtime_tools
     authoritative_stack:
       - {pr: 39, branch: agent/system-sanity}
       - {pr: 44, branch: agent/model-adapter-contract, base_pr: 39}
       - {pr: 47, branch: agent/integrate-engine-audit-stacks, base_pr: 44, sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef}
-    reviewable:
-      - {pr: 52, base_pr: 47, status: native_validation_required}
+    reviewable: [{pr: 52, base_pr: 47, status: native_validation_required}]
     inference_open: [57, 45, 46]
     inference_rejected_prs: [60, 61]
     tt_open: [43, 54]
@@ -116,32 +128,27 @@ repositories:
     shared_runtime:
       issue: 62
       branch: agent/timestamp-resource-lease-revocation
-      base_pr: 47
-      exact_source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+      source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
       status: registered_workbench_awaiting_repository_creation
       consumer: iteathen/uci-arena-evidence-service#21
-
   manager:
     authority: installed_suite_control_plane
     base_pr: 54
     base_branch: agent/release-assembly
     reviewable:
       - {pr: 73, base_pr: 54, status: native_validation_required}
+      - {pr: 78, issue: 76, base_pr: 54, status: draft_mergeable_source_reviewable}
     blocked:
       - {pr: 67, reason: exact_sqlite_lifecycle_reconstruction_required, review_comment: 4848995624}
       - {issue: 69, reason: localauth_reconstruction_required, rejected_pr: 77, review_comment: 5172704927}
-      - {issue: 76, reason: pure_uci_identity_option_override_contract_first}
-      - {issue: 70, reason: broad_uci_process_path_integration_after_76, rejected_pr: 74}
-
+      - {issue: 70, reason: integrate_accepted_pure_contract_with_bounded_process_and_exact_launch_identity, rejected_pr: 74}
   evidence_service:
     authority: evidence_scheduling_dataset_profile_publication
     authoritative_stack: [10, 13, 14, 15, 16, 17, 18, 19, 22]
-    reviewable:
-      - {pr: 23, issue: 20, base_pr: 22, status: draft_mergeable_source_reviewable}
+    partial:
+      - {pr: 23, issue: 20, base_pr: 22, status: catalog_owner_integration_missing}
     blocked:
       - issue: 21
-        branch: agent/end-to-end-foreground-revocation
-        base_pr: 22
         status: blocked_on_engine_issue_62
         required:
           - earliest_request_visibility_timestamp
@@ -149,7 +156,6 @@ repositories:
           - remaining_budget_tree_shutdown
           - verified_descendant_termination
           - immediate_lease_release_before_cleanup
-
   book_forge:
     authority: opening_book_production
     blocked_stack: [8, 11, 10]
@@ -158,7 +164,6 @@ repositories:
       - {issue: 13, summary: recoverable_single_pass_snapshot_transaction, canonical_comment: 5172750056}
       - {issue: 14, summary: exact_catalog_and_64_shard_sqlite_authority, canonical_comment: 5172758661}
     reopened_ledger_rows: [BOOK-TRUST-017, BOOK-AUTH-018, BOOK-SCALE-020]
-
   lichess_bot:
     authority: lichess_api_policy_scheduling_persistence_provider
     broad_pr: {pr: 3, status: acceptance_blocked}
@@ -202,8 +207,9 @@ jules:
     repository_deleted: false
 
 next_actions:
-  - review_and_native_validate_evidence_pr_23
   - review_and_native_validate_installer_pr_11
+  - review_and_native_validate_manager_pr_78
+  - complete_catalog_owned_evidence_issue_20_in_real_checkout
   - user_create_private_engine_62_workbench_and_authorize_jules
   - seed_workbench_main_from_exact_engine_sha
   - commit_manifest_task_and_record_baseline_sha
