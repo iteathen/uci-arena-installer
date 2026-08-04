@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v13
-  snapshot_at_utc: '2026-08-04T08:33:09Z'
+  schema: uci_arena_whole_system_sanity_handoff_v14
+  snapshot_at_utc: '2026-08-04T09:30:39Z'
   status: in_progress
   sanity_complete: false
   soundness_conclusion: none
@@ -11,25 +11,93 @@ meta:
   canonical_pr: 2
   narrative: docs/audits/whole-system-sanity-handoff-2026-08-03.md
   jules_registry: docs/audits/jules-workbenches/registry.yaml
+  jules_track_record: docs/audits/jules-track-record-retrospective-2026-08-04.md
+  accepted_jules_retrospective: docs/audits/jules-accepted-output-retrospective-hostile-review-2026-08-04.md
 
 method:
   automatic_ci_enabled: false
   branch_ancestry_is_product_correctness: true
   source_review_establishes_release_readiness: false
   jules_output_trusted_before_hostile_review: false
+  jules_derived_acceptance_presumption: none
+  reopen_prior_unanchored_jules_acceptance: true
   rules:
     - one_owner_per_concern
     - project_owned_provider_neutral_contracts
     - domain_appropriate_foundations
-    - exact_bounded_bytes_strings_lists_memory_paths_identities_timestamps_deadlines_retries_diagnostics_cleanup
+    - exact_bounded_bytes_strings_lists_memory_paths_identities_timestamps_deadlines_work_cancellation_diagnostics_cleanup
     - preserve_primary_failure_and_attach_bounded_cleanup_failures
-    - hostile_review_before_acceptance
+    - hostile_exact_head_review_before_acceptance
+    - trace_replays_and_cherry_picks_to_source_lines
+    - supported_platform_and_consumer_compatibility_evidence_required
+
+jules_track_record:
+  direct_auto_created_prs: 12
+  directly_merged: 1
+  closed_unmerged: 10
+  open_unacceptable: 1
+  rejected_non_delivery_or_unacceptable: 11
+  sole_direct_merge_reviewed_before_merge: false
+  sole_direct_merge_retrospective_result: failed
+  ledger_commit: e7a9685868ab1ba2439ce8fed27c97a4104033ff
+  accepted_output_audit_commit: f1cad579fc0000a28191c9ebd365d0ac6b15431d
+  direct_outputs:
+    engine: [32, 49, 50, 51, 55, 60, 61, 63]
+    manager: [4, 72, 74, 77]
+    evidence_service: []
+    book_forge: []
+    lichess_bot: []
+    installer: []
+  repeated_patterns:
+    - wrong_or_stale_base_and_mixed_snapshot
+    - implementation_claim_with_zero_or_irrelevant_delta
+    - passed_tests_claim_without_exact_output_or_with_noncompiling_source
+    - tests_duplicate_or_narrate_implementation_instead_of_attacking_production
+    - named_symptom_fixed_while_authority_race_remains
+    - review_items_claimed_resolved_while_code_contradicts_claim
+    - specification_overclaims_unimplemented_properties
+    - pathname_checks_substitute_for_exact_os_object_authority
+    - incomplete_bounds_cleanup_platform_migration_and_package_evidence
+
+accepted_jules_derived_exposure:
+  - repository: iteathen/uci-arena-manager
+    pr: 4
+    merge: 9460c3ccec74413c52dbd99540f17e13dba73232
+    source: direct_jules
+    prior_review: none
+    retrospective_comment: 5177011986
+    corrective_issue: 81
+    disposition: merged_unvalidated_reconstruct_bounded_fail_closed_discovery
+  - repository: iteathen/UCI_Arena
+    pr: 16
+    merge: 68e181fe77c159b997edeb40e8ecf6e237c0ded6
+    source: reconciled_original_jules_branch
+    prior_review: none
+    retrospective_comment: 5177061995
+    corrective_issue: 64
+    disposition: unsafe_destructive_cleanup_do_not_apply_on_valuable_worktrees
+  - repository: iteathen/uci-arena-manager
+    pr: 73
+    head: 19b90a6341d6d535b84eded91540e224ccd78f4b
+    source: reconstruction_after_empty_jules_pr_72
+    prior_review: undocumented_issue_self_attestation
+    retrospective_review: 4852571117
+    disposition: changes_required_keep_draft
+    blockers:
+      - unvalidated_unbounded_labels_copied
+      - no_total_plan_byte_work_allocation_or_serialization_budget
+      - accidental_roughly_20000_engine_swiss_admission
+      - attacker_shaped_unordered_hashing_without_identity_grammar
+      - incomplete_multi_round_swiss_opening_index_proof
+      - nonportable_native_path_unit_bound
+      - api_persistence_ui_and_stored_plan_compatibility_absent
+      - durable_supported_platform_evidence_absent
 
 jules:
   control_repository: iteathen/Jules-control
   maximum_active_sessions: 1
   blocked_label_prefix: blocked-
-  active:
+  active_or_pending:
     id: engine-62-20260803
     session: sessions/13034909149691235140
     control_issue: 1
@@ -38,19 +106,24 @@ jules:
     source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
-    reviewed_head: ebf510670da82a22ca55626c8e520fd1af494d6f
+    last_substantive_reviewed_head: ebf510670da82a22ca55626c8e520fd1af494d6f
     formal_review: 4852208692
     audit: docs/audits/engine-pr63-resource-lease-seventh-hostile-review-2026-08-04.md
     audit_commit: 67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7
     disposition: rejected_changes_required_blocked_parent_replayable_package_slice
-    terminal_before_review:
+    terminal_empty_head:
+      head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182
+      compared_from: ebf510670da82a22ca55626c8e520fd1af494d6f
+      ahead_by: 1
+      changed_files: 0
+      commit_claim: false_implementation_claim
       state: COMPLETED
-      updated_at: '2026-08-04T07:46:56.532963Z'
-      status_comment: 5176310334
-    correction_comment: 5176539894
-    continue_command: 5176541573
+      updated_at: '2026-08-04T09:08:13.101881Z'
+      status_comment: 5176920252
+    empty_head_correction_comment: 5177133724
+    continue_command: 5177135866
     continue_acknowledgement: pending
-    next_rule: do_not_duplicate_command_and_review_only_substantive_head_beyond_ebf510670
+    next_rule: do_not_duplicate_pending_command_and_review_only_substantive_file_delta_beyond_ebf510670
     blockers:
       - safe_unlink_close_before_path_unlink_replacement_race
       - request_heartbeat_mutable_path_truncate_and_identity_adoption
@@ -69,7 +142,7 @@ jules:
       - false_byte_work_allocation_metrics
       - date_range_and_multiple_clock_authority_incomplete
       - inconsistent_failure_semantics
-      - authoritative_spec_tests_and_pr_body_overclaim
+      - authoritative_spec_tests_pr_body_and_empty_commit_overclaim
       - decisive_node_24_15_windows_linux_evidence_absent
   queue:
     - {position: 1, control_issue: 2, task: evidence_20_catalog_heartbeat_projection, status: blocked_by_control_issue_1, review: 4850754712}
@@ -80,20 +153,25 @@ repositories:
   engine:
     authoritative_pr_chain: none_reconstruction_required
     reconstruction_order: [pr_39_foundations, pr_44_model_adapter, pr_47_governance_heartbeat, replay_pr_52_fen_slice, replay_pr_63_resource_lease_slice]
+    merged_reopened:
+      - {pr: 16, issue: 64, disposition: unsafe_destructive_workspace_cleanup}
     reviews:
       - {pr: 39, head: 1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee, review: 4850912840, disposition: foundation_reconstruction_split_required}
       - {pr: 44, head: d37ab900486cad25b5dff5cd6fa11724c8fc3929, review: 4850859460, disposition: foundation_redesign_blocked_parent}
       - {pr: 47, head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef, review: 4850880052, disposition: governance_reconstruction_blocked_parent}
-      - {pr: 52, head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff, review: 4850845427, disposition: changes_required_blocked_parent}
-      - {pr: 63, head: ebf510670da82a22ca55626c8e520fd1af494d6f, review: 4852208692, disposition: rejected_changes_required_blocked_parent_replayable, audit_commit: 67cbd8126fc3dfcbbf16d9595b3ff5179b349ad7}
+      - {pr: 52, head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff, review: 4850845427, disposition: changes_required_blocked_parent_jules_replay}
+      - {pr: 63, substantive_head: ebf510670da82a22ca55626c8e520fd1af494d6f, empty_terminal_head: fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182, review: 4852208692, disposition: rejected_changes_required_empty_false_claim_replayed}
       - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate}
       - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
 
   manager:
     base_pr: 54
     base_sha: 233654568e91d50eb5e0a995fd22e109c3d2a66d
+    merged_reopened:
+      - {pr: 4, retained_by_pr: 17, issue: 81, disposition: unvalidated_discovery_traversal}
     reviews:
       - {pr: 67, reviews: [4847815394, 4848995624], disposition: reconstruction_required}
+      - {pr: 73, head: 19b90a6341d6d535b84eded91540e224ccd78f4b, review: 4852571117, disposition: changes_required_jules_descendant}
       - {pr: 78, head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b, review: 4850726806, disposition: changes_required}
       - {pr: 79, head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba, review: 4850708644, disposition: changes_required}
       - {pr: 80, head: 683d7ae20a161d0b40d176d82173a87a961c77ea, review: 4850674462, disposition: changes_required}
@@ -136,13 +214,14 @@ repositories:
 
 next_actions:
   - resolve_pending_state_aware_continue_without_duplicate_command
-  - review_only_substantive_head_beyond_ebf510670
-  - keep_queue_blocked_while_control_issue_1_open_active_or_unresolved
-  - continue_independent_ownership_sized_reviews_and_repairs
+  - re_audit_engine_issue_64_and_manager_issue_81_first
+  - correct_manager_pr73
   - reconstruct_engine_pr39_then_pr44_then_pr47_before_replay
-  - correct_manager_pr78_then_pr79_then_pr80
-  - reconstruct_installer_pr3_pr4_replay_pr5_then_pr11
-  - synchronize_narrative_yaml_registry_and_pr2_comment_after_each_transition
+  - correct_engine_pr52_and_manager_pr78_then_pr79_then_pr80
+  - review_pr63_only_after_substantive_file_delta_beyond_ebf510670
+  - keep_queue_blocked_while_control_issue_1_open_active_or_unresolved
+  - trace_every_future_replay_or_cherry_pick_to_source_lines
+  - synchronize_all_canonical_ledgers_after_each_transition
 
 final_gates:
   - one_authoritative_ancestry_per_repository
