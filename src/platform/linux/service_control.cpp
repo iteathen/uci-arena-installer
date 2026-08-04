@@ -28,6 +28,12 @@ struct CommandResult final {
     std::string output;
 };
 
+struct SystemdProperties final {
+    std::string load_state;
+    std::string active_state;
+    bool malformed{false};
+};
+
 void append_bounded(std::string& output, const char* bytes, const std::size_t count) {
     if (output.size() >= maximum_captured_characters) {
         return;
@@ -130,18 +136,41 @@ CommandResult run_systemctl(const std::vector<std::string>& arguments) {
     return result;
 }
 
-std::string trim_ascii_whitespace(const std::string_view value) {
-    std::size_t first = 0;
-    while (first < value.size()
-           && static_cast<unsigned char>(value[first]) <= 0x20U) {
-        ++first;
+SystemdProperties parse_systemd_properties(const std::string_view output) {
+    SystemdProperties result;
+    std::size_t cursor = 0;
+    while (cursor <= output.size()) {
+        const std::size_t newline = output.find('\n', cursor);
+        const std::size_t end = newline == std::string_view::npos
+            ? output.size()
+            : newline;
+        std::string_view line = output.substr(cursor, end - cursor);
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        const auto assign = [&result](
+            std::string& field,
+            const std::string_view value) {
+            if (!field.empty() && field != value) {
+                result.malformed = true;
+                return;
+            }
+            field = value;
+        };
+        if (line.starts_with("LoadState=")) {
+            assign(result.load_state, line.substr(10));
+        } else if (line.starts_with("ActiveState=")) {
+            assign(result.active_state, line.substr(12));
+        }
+        if (newline == std::string_view::npos) {
+            break;
+        }
+        cursor = newline + 1;
     }
-    std::size_t last = value.size();
-    while (last > first
-           && static_cast<unsigned char>(value[last - 1]) <= 0x20U) {
-        --last;
+    if (result.load_state.empty() || result.active_state.empty()) {
+        result.malformed = true;
     }
-    return std::string(value.substr(first, last - first));
+    return result;
 }
 
 ServiceActionResult failed_result(
@@ -161,8 +190,9 @@ ServiceActionResult failed_result(
 ServiceActionResult query_service_state(const std::string& service_name) {
     const CommandResult query = run_systemctl({
         "show",
+        "--no-pager",
+        "--property=LoadState",
         "--property=ActiveState",
-        "--value",
         "--",
         service_name,
     });
@@ -173,26 +203,42 @@ ServiceActionResult query_service_state(const std::string& service_name) {
             static_cast<std::uint32_t>(ETIMEDOUT),
             "systemd service status query timed out");
     }
+
+    const SystemdProperties properties = parse_systemd_properties(query.output);
+    const ServiceState state = properties.malformed
+        ? ServiceState::unknown
+        : service_state_from_systemd(
+            properties.active_state,
+            properties.load_state);
+    if (state == ServiceState::unavailable) {
+        return failed_result(
+            ServiceAction::status,
+            state,
+            static_cast<std::uint32_t>(query.exit_code),
+            "systemd service is unavailable");
+    }
     if (query.exit_code != 0) {
         return failed_result(
             ServiceAction::status,
-            ServiceState::unknown,
+            state,
             static_cast<std::uint32_t>(query.exit_code),
             query.output.empty()
                 ? "systemd service status query failed"
                 : query.output);
     }
-
-    const std::string active_state = trim_ascii_whitespace(query.output);
-    const ServiceState state = service_state_from_systemd(active_state);
+    if (properties.malformed || state == ServiceState::unknown) {
+        return failed_result(
+            ServiceAction::status,
+            ServiceState::unknown,
+            0,
+            "systemd returned incomplete or unrecognized service state");
+    }
     return ServiceActionResult{
         ServiceAction::status,
         ServiceOutcome::completed,
         state,
         0,
-        state == ServiceState::unknown
-            ? bounded_service_diagnostic("systemd returned an unrecognized ActiveState")
-            : std::string{},
+        {},
     };
 }
 
@@ -203,6 +249,9 @@ ServiceActionResult perform_service_action(
     const ServiceAction action) {
     if (platform_name.empty()) {
         throw std::runtime_error("service name is required");
+    }
+    if (!valid_service_name(platform_name)) {
+        throw std::runtime_error("service name is invalid");
     }
     const std::string_view action_name = service_action_name(action);
     if (action_name.empty()) {
@@ -215,6 +264,8 @@ ServiceActionResult perform_service_action(
 
     const CommandResult command = run_systemctl({
         std::string(action_name),
+        "--no-ask-password",
+        "--no-pager",
         "--",
         platform_name,
     });
