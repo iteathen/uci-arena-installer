@@ -1,7 +1,7 @@
 # Whole-system sanity audit handoff — 2026-08-03
 
 Status: **in progress; no soundness or release-readiness conclusion exists**  
-Snapshot time: 2026-08-03 23:14 America/Los_Angeles  
+Snapshot time: 2026-08-03 23:19 America/Los_Angeles  
 Canonical repository: `iteathen/uci-arena-installer`  
 Canonical branch: `agent/release-assembly` / Installer PR #2
 
@@ -71,16 +71,18 @@ The previously recorded PR #39 → #44 → #47 ancestry is rejected at every fou
 - session `sessions/13034909149691235140`
 - starting branch `agent/integrate-engine-audit-stacks` at `60f7bc9fe64dd1c405bcc6009232ecb875b760ef`
 - output branch `jules-13034909149691235140-b7c89938`
-- latest formally reviewed head `2106482635969e1e9c6b28b76fb80aca35890af6`
+- latest substantively reviewed head `2106482635969e1e9c6b28b76fb80aca35890af6`
 - latest formal review `4850967412`
 - latest audit: `docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md`
 - correction comment `5175041945`; state-aware continue command `5175048852`; recovery acknowledgement `5175050145`
 - current PR head `c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab`
-- current session state: genuinely `IN_PROGRESS`, last confirmed at `2026-08-04T06:12:51.408323Z`
-- the new head is not yet an accepted or terminally reviewed head; do not send another correction/continue command while the session is active
+- comparison from `210648263…` to `c7ef021e…`: one commit ahead, **zero changed files**; this is not a substantive correction and does not require or support a duplicate review
+- current session state: genuinely `IN_PROGRESS`, last confirmed at `2026-08-04T06:18:53.275899Z`
+- do not send another correction or continue command while the session is active
+- if the session reaches terminal state with no substantive head beyond `210648263…`, replay the latest correction only through the existing state-aware control path
 - disposition remains **changes required; blocked parent; replayable package-owned slice only**
 
-The last reviewed implementation still lacked persisted safe-integer visibility authority, preserved malformed/future timing as observation time, had no real package/result versioning, destructive replacement races, no Windows/ancestor reparse identity, public mutable cache/metrics/test seams, false bounds, locale-sensitive ordering, inconsistent failure algebra, wait/cleanup races, debug output, incomplete clock/producer bounds, and decisive native adversarial tests.
+The last substantive implementation still lacked persisted safe-integer visibility authority, preserved malformed/future timing as observation time, had no real package/result versioning, destructive replacement races, no Windows/ancestor reparse identity, public mutable cache/metrics/test seams, false bounds, locale-sensitive ordering, inconsistent failure algebra, wait/cleanup races, debug output, incomplete clock/producer bounds, and decisive native adversarial tests.
 
 The Engine reconstruction order remains: split/correct PR #39 foundations → redesign PR #44 → reconcile PR #47 governance/heartbeat → replay corrected PR #52 and PR #63 slices.
 
@@ -218,7 +220,7 @@ Broad PR #3 review `4848125095` remains changes required; aggregate test count i
 ## Immediate continuation order
 
 1. Keep Jules session `13034909149691235140` uninterrupted while it remains `IN_PROGRESS`; recheck state and PR #63 head before any correction or continue command.
-2. When the session reaches a stable terminal state, hostile-review the newest substantive head beyond `210648263…`; do not treat `c7ef021e…` as accepted merely because it exists.
+2. If a new substantive PR #63 head appears, hostile-review only that delta. If the session becomes terminal with no substantive head beyond `210648263…`, replay the latest correction through the existing state-aware path.
 3. Continue independent provider/Installer/Manager review and ownership-sized direct repairs.
 4. Reconstruct Engine from split PR #39 foundations, then PR #44, then PR #47; child work remains replay evidence only.
 5. Reconstruct Installer PR #3/#4 on current PR #2, replay PR #5, then correct PR #11.
