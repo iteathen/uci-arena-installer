@@ -203,6 +203,34 @@ struct ServiceActionResult final {
         : ServiceState::unknown;
 }
 
+[[nodiscard]] inline ServiceActionResult service_result_from_observation(
+    const ServiceAction action,
+    const ServiceState state,
+    const bool platform_operation_succeeded,
+    const std::uint32_t platform_code = 0,
+    const std::string_view diagnostic = {}) {
+    if (!valid_service_action(action)) {
+        throw std::runtime_error("unsupported service action");
+    }
+    bool completed = platform_operation_succeeded
+        && state != ServiceState::unknown
+        && state != ServiceState::unavailable;
+    if (completed && action == ServiceAction::start) {
+        completed = state == ServiceState::active;
+    } else if (completed && action == ServiceAction::stop) {
+        completed = state == ServiceState::inactive;
+    } else if (completed && action == ServiceAction::restart) {
+        completed = state == ServiceState::active;
+    }
+    return ServiceActionResult{
+        action,
+        completed ? ServiceOutcome::completed : ServiceOutcome::failed,
+        state,
+        platform_code,
+        bounded_service_diagnostic(diagnostic),
+    };
+}
+
 [[nodiscard]] ServiceActionResult perform_service_action(
     const std::string& platform_name,
     ServiceAction action);
