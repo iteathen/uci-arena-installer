@@ -18,11 +18,14 @@ using arena::platform::perform_service_action;
 using arena::platform::service_action_from_name;
 using arena::platform::service_action_name;
 using arena::platform::service_diagnostic_max_characters;
+using arena::platform::service_name_max_characters;
 using arena::platform::service_outcome_name;
 using arena::platform::service_state_from_systemd;
+using arena::platform::service_state_from_windows_error;
 using arena::platform::service_state_from_windows_scm;
 using arena::platform::service_state_name;
 using arena::platform::valid_service_action;
+using arena::platform::valid_service_name;
 
 TEST_CASE("service control accepts only the fixed typed action set") {
     constexpr std::array expected{
@@ -52,6 +55,7 @@ TEST_CASE("service result names form one closed platform-neutral vocabulary") {
 
     constexpr std::array expected{
         std::pair{"unknown", ServiceState::unknown},
+        std::pair{"unavailable", ServiceState::unavailable},
         std::pair{"inactive", ServiceState::inactive},
         std::pair{"activating", ServiceState::activating},
         std::pair{"active", ServiceState::active},
@@ -66,7 +70,17 @@ TEST_CASE("service result names form one closed platform-neutral vocabulary") {
     REQUIRE(service_state_name(static_cast<ServiceState>(255)).empty());
 }
 
-TEST_CASE("systemd active states map without exposing systemctl process results") {
+TEST_CASE("service names are bounded printable ASCII before platform access") {
+    REQUIRE(valid_service_name("uci-arena-manager.service"));
+    REQUIRE(valid_service_name("UCI Arena Manager"));
+    REQUIRE(valid_service_name(std::string(service_name_max_characters, 'x')));
+    REQUIRE_FALSE(valid_service_name(""));
+    REQUIRE_FALSE(valid_service_name(std::string(service_name_max_characters + 1, 'x')));
+    REQUIRE_FALSE(valid_service_name("service\nname"));
+    REQUIRE_FALSE(valid_service_name(std::string("service\xc2\xa0name", 13)));
+}
+
+TEST_CASE("systemd load and active states map without exposing process results") {
     REQUIRE(service_state_from_systemd("inactive") == ServiceState::inactive);
     REQUIRE(service_state_from_systemd("activating") == ServiceState::activating);
     REQUIRE(service_state_from_systemd("active") == ServiceState::active);
@@ -74,11 +88,14 @@ TEST_CASE("systemd active states map without exposing systemctl process results"
     REQUIRE(service_state_from_systemd("deactivating") == ServiceState::deactivating);
     REQUIRE(service_state_from_systemd("failed") == ServiceState::failed);
     REQUIRE(service_state_from_systemd("maintenance") == ServiceState::failed);
+    REQUIRE(service_state_from_systemd("inactive", "not-found") == ServiceState::unavailable);
+    REQUIRE(service_state_from_systemd("inactive", "error") == ServiceState::failed);
+    REQUIRE(service_state_from_systemd("inactive", "bad-setting") == ServiceState::failed);
     REQUIRE(service_state_from_systemd("not-found") == ServiceState::unknown);
     REQUIRE(service_state_from_systemd("") == ServiceState::unknown);
 }
 
-TEST_CASE("Windows SCM states map without exposing raw SCM values") {
+TEST_CASE("Windows SCM states and errors map without exposing raw values") {
     REQUIRE(service_state_from_windows_scm(1, 0) == ServiceState::inactive);
     REQUIRE(service_state_from_windows_scm(1, 1066) == ServiceState::failed);
     REQUIRE(service_state_from_windows_scm(2) == ServiceState::activating);
@@ -87,18 +104,21 @@ TEST_CASE("Windows SCM states map without exposing raw SCM values") {
     REQUIRE(service_state_from_windows_scm(5) == ServiceState::unknown);
     REQUIRE(service_state_from_windows_scm(7) == ServiceState::unknown);
     REQUIRE(service_state_from_windows_scm(0xffff'ffffU) == ServiceState::unknown);
+    REQUIRE(service_state_from_windows_error(1060) == ServiceState::unavailable);
+    REQUIRE(service_state_from_windows_error(5) == ServiceState::unknown);
 }
 
-TEST_CASE("service diagnostics are bounded and contain no control characters") {
+TEST_CASE("service diagnostics are bounded printable ASCII") {
     const std::string source = std::string(300, 'x') + "\r\nsecret\tline";
     const std::string diagnostic = bounded_service_diagnostic(source);
     REQUIRE(diagnostic.size() == service_diagnostic_max_characters);
     for (const unsigned char character : diagnostic) {
         REQUIRE(character >= 0x20U);
-        REQUIRE(character != 0x7fU);
+        REQUIRE(character <= 0x7eU);
     }
 
-    REQUIRE(bounded_service_diagnostic("first\nsecond") == "first second");
+    REQUIRE(bounded_service_diagnostic("first\nsecond") == "first?second");
+    REQUIRE(bounded_service_diagnostic(std::string("x\xc2\xa0y", 4)) == "x??y");
 }
 
 TEST_CASE("service result completion is independent of platform codes") {
@@ -121,7 +141,7 @@ TEST_CASE("service result completion is independent of platform codes") {
     REQUIRE_FALSE(failed.completed());
 }
 
-TEST_CASE("invalid service actions fail before platform access") {
+TEST_CASE("invalid actions and service names fail before platform access") {
     const auto invalid = static_cast<ServiceAction>(255);
     REQUIRE(service_action_name(invalid).empty());
     REQUIRE_FALSE(valid_service_action(invalid));
@@ -134,6 +154,14 @@ TEST_CASE("invalid service actions fail before platform access") {
     REQUIRE_THROWS_WITH(
         perform_service_action("", ServiceAction::status),
         "service name is required");
+    REQUIRE_THROWS_WITH(
+        perform_service_action("bad\nservice", ServiceAction::status),
+        "service name is invalid");
+    REQUIRE_THROWS_WITH(
+        perform_service_action(
+            std::string(service_name_max_characters + 1, 'x'),
+            ServiceAction::status),
+        "service name is invalid");
 }
 
 } // namespace
