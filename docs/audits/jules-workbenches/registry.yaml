@@ -1,22 +1,29 @@
-schema: uci_arena_jules_execution_registry_v6
-updated_at: '2026-08-03T19:16:00-07:00'
+schema: uci_arena_jules_execution_registry_v7
+updated_at: '2026-08-03T20:14:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
   control_branch: main
   workflow: .github/workflows/jules-control.yml
   controller: scripts/jules_control.py
+  creation_entrypoint: scripts/jules_entrypoint.py
   continue_controller: scripts/jules_continue.py
   secret_location: github_environment_secret
   environment: jules
   secret_name: JULES_API_KEY
+  review_protocol_commits:
+    entrypoint: 69dce51d7dea95555ee3c4677da0c7b635e43d85
+    workflow: 54da22d057f7a4b2a4705519b4ef2da2f7aea3dc
+    documentation: 748e6a9fabe128e5aa6ec4600d3a72bfaf0a1bb0
   rules:
     - never expose the API key in chat, issues, logs, argv, files, or prompts
     - resolve exactly one Jules source and require an exact startingBranch
+    - append the standing hostile-self-review protocol to every new Jules session
     - require plan approval for broad or security-sensitive tasks
     - use /jules continue for recoverable stops, awaiting feedback, or apparent completion without valid output
-    - preserve exact branch, scope, approved plan, and all later corrective instructions
+    - preserve exact branch, scope, approved plan, existing output PR, and all later corrective instructions
     - review every output as hostile input in the source repository
+    - never trust Jules completion claims, test names, or self-review without direct code and evidence inspection
     - close a control issue only after output identity and review disposition are recorded
 concurrency:
   maximum_active_jules_sessions: 1
@@ -26,7 +33,7 @@ concurrency:
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: third_correction_requested_and_continued
+    state: formal_architectural_correction_requested_and_continue_sent
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -42,11 +49,14 @@ sessions:
     first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
     second_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
     third_output_head_sha: bc2c27f65d24b51c69c6ac953656fae78cb01b64
-    current_output_head_sha: bc2c27f65d24b51c69c6ac953656fae78cb01b64
+    fourth_output_head_sha: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
+    current_output_head_sha: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
     first_review_comment: 5173513437
     second_review_comment: 5173734334
     third_review_comment: 5173823846
-    hostile_review: changes_required_third_correction_requested
+    formal_review_id: 4850334357
+    formal_review_head_sha: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
+    hostile_review: returned_for_architectural_correction
     recovery_history:
       - apparent_completed_without_output
       - awaiting_user_feedback_without_output
@@ -60,18 +70,38 @@ sessions:
       - third_output_pushed
       - third_hostile_review_failed
       - third_correction_and_continue_sent
+      - fourth_output_pushed
+      - formal_full_system_hostile_review_failed
+      - session_reported_completed_without_addressing_formal_review
+      - state_aware_continue_replayed_formal_review
     remaining_blockers:
-      - windows_reparse_safe_exact_handle_or_fail_closed_windows
-      - exact_identity_bound_deletion
-      - fatal_utf8_and_high_resolution_pre_post_mutation_evidence
-      - live_malformed_heartbeat_as_typed_untrusted_demand
-      - exact_stale_retirement_for_malformed_junk
-      - null_untrusted_identity_no_fabricated_values
-      - active_request_bound_applied_to_every_classification
-      - shared_exact_producer_and_holder_grammar
-      - transactional_waiter_construction_and_cleanup
-      - immutable_exact_bounded_work_evidence
-      - truthful_one_clock_and_governing_spec_claims
+      - versioned_observation_and_acquisition_contract_missing
+      - package_version_and_consumer_lock_identity_not_advanced
+      - persisted_safe_integer_request_visibility_authority_missing
+      - malformed_or_future_timing_invents_observation_time_as_original_visibility
+      - windows_ancestor_reparse_and_handle_identity_unproved
+      - safe_unlink_can_overwrite_or_delete_replacement_objects
+      - holder_heartbeat_release_and_request_cleanup_have_check_use_races
+      - directory_entry_and_owned_temp_debris_can_self_dos_shared_runtime
+      - invalid_reads_not_charged_to_total_byte_or_allocation_bounds
+      - synchronous_high_frequency_full_directory_scan_and_max_buffer_allocation
+      - overflow_busy_timeout_abort_and_inherited_validation_failure_are_conflated
+      - compatibility_projection_fabricates_producer_shaped_markers
+      - mutable_global_instrumentation_leaks_shared_authority
+      - watcher_timer_and_filesystem_test_types_leak_through_public_api
+      - current_time_date_range_and_acquisition_timing_inputs_not_fully_bounded
+      - locale_dependent_tie_breaking
+      - watcher_fallback_and_cleanup_tests_do_not_falsify_real_failure_paths
+      - heartbeat_test_does_not_prove_changed_heartbeat_or_exact_identity
+      - windows_linux_node_24_15_evidence_missing
+      - spec_index_preflight_and_governing_contracts_disagree
+      - pr_body_and_completion_claims_are_stale_or_stronger_than_evidence
+    required_architectural_direction:
+      - platform_filesystem_store_adapter_owns_exact_object_identity_and_atomic_mutation
+      - pure_bounded_packet_classifier_owns_schema_timing_trust_stale_overflow_and_order
+      - notifier_index_owns_watcher_and_poll_fallback_without_repeated_maximum_buffer_scans
+      - public_lease_facade_exposes_only_versioned_provider_neutral_types
+      - private_dependency_injection_for_tests_no_public_runtime_private_hooks
     control_issue_closed_at: null
 prepared_tasks:
   - id: evidence-20-catalog-integration
