@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v12
-updated_at_utc: '2026-08-04T07:05:14Z'
+schema: uci_arena_jules_execution_registry_v13
+updated_at_utc: '2026-08-04T07:04:44.292177Z'
 
 control:
   repository: iteathen/Jules-control
@@ -17,7 +17,7 @@ control:
     - never_launch_while_any_session_active_or_waiting
     - capacity_never_stops_independent_audit_work
 
-active_or_resuming_session:
+active_session:
   id: engine-62-20260803
   session: sessions/13034909149691235140
   control_issue: 1
@@ -43,8 +43,8 @@ active_or_resuming_session:
     - {kind: completed, status_comment: 5175618975, updated_at: '2026-08-04T06:53:25.552460Z'}
     - {kind: correction_sent, comment: 5175680936, review: 4851511234}
     - {kind: state_aware_continue, command: 5175682230, acknowledgement: 5175685564, observed_state: COMPLETED, correction_replayed: true}
-    - {kind: post_replay_status_requested, comment: 5175705079}
-  next_rule: check_post_replay_status_then_do_not_interrupt_if_active
+    - {kind: resumed, status_request: 5175705079, status_response: 5175706829, state: IN_PROGRESS, updated_at: '2026-08-04T07:04:44.292177Z'}
+  next_rule: do_not_interrupt_and_review_only_substantive_head_beyond_e7eb5edf
   blocked_parents:
     - {pr: 39, review: 4850912840}
     - {pr: 44, review: 4850859460}
@@ -68,24 +68,9 @@ active_or_resuming_session:
     - stale_pr_body
 
 queue:
-  - position: 1
-    id: evidence-20-catalog-integration
-    control_issue: 2
-    status: blocked_by_control_issue_1
-    review: 4850754712
-    existing_pr: 23
-    expected_head: 3991983c397a222871cba70c6232da1a8be5b265
-  - position: 2
-    id: manager-70-verified-launch-identity
-    control_issue: 3
-    status: blocked_base_review
-    blocking_label: blocked-base-review
-    blocked_by_prs: [78, 79, 80]
-  - position: 3
-    id: book-forge-12-exact-credential
-    control_issue: 4
-    status: queued_isolated_child_only
-    blocked_base_pr: 11
+  - {position: 1, id: evidence-20-catalog-integration, control_issue: 2, status: blocked_by_control_issue_1, review: 4850754712, existing_pr: 23, expected_head: 3991983c397a222871cba70c6232da1a8be5b265}
+  - {position: 2, id: manager-70-verified-launch-identity, control_issue: 3, status: blocked_base_review, blocking_label: blocked-base-review, blocked_by_prs: [78, 79, 80]}
+  - {position: 3, id: book-forge-12-exact-credential, control_issue: 4, status: queued_isolated_child_only, blocked_base_pr: 11}
 
 review_dispositions:
   engine:
