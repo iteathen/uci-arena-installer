@@ -55,6 +55,7 @@ Before mutation/launch:
 - timeout is a positive safe bounded duration;
 - override cardinality/name/value byte shape is rejected before launch where advertisement-independent;
 - no shell strings or command-line reinterpretation;
+- the child inherits only the exact stdin/stdout/stderr and launch-handshake handles/descriptors declared by this owner; unrelated Manager handles, descriptors, sockets, database files, secrets, and service handles must not cross the process boundary;
 - all handles/descriptors and child processes are cleaned on every failure path.
 
 ## Linux exact launch
@@ -67,6 +68,7 @@ A path recheck is not sufficient.
 - Hash through the admitted executable descriptor, compare pre/post descriptor identity/size/timestamps, and launch the same descriptor using `fexecve()` or exact `execveat(..., AT_EMPTY_PATH)` semantics.
 - Keep the mutation-prevention authority for at least the launch handshake, preferably the process lifetime if required for exact model provenance.
 - Use an explicit parent/child error pipe so pre-exec `fchdir`, argument, or `fexecve` failure is reported and never mistaken for a running engine.
+- Mark every parent descriptor close-on-exec by default and use `close_range(..., CLOSE_RANGE_CLOEXEC)`, `/proc/self/fd`, or an equivalent bounded mechanism so the child retains only fd 0, fd 1, fd 2, the exact executable/working-directory authority required for exec, and the launch-error pipe. Fail closed when descriptor closure cannot be proven.
 
 ## Windows exact launch
 
@@ -75,6 +77,7 @@ A path recheck is not sufficient.
 - Hash through that exact handle and recheck identity/size/time after hashing.
 - Open and retain the working-directory handle with reparse-safe directory semantics and deny replacement.
 - Launch using the path resolved from the verified handle, while the deny-write/delete handle remains open.
+- Use `STARTUPINFOEXW` plus `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` so `bInheritHandles=TRUE` cannot leak unrelated inheritable Manager handles. The explicit list contains only the exact child stdio and launch-handshake handles.
 - After `CreateProcessW`, query the process image and verify it resolves to the same file identity before resuming useful work. Failure terminates the Job Object and returns a typed failure.
 - Keep the verified handle(s) for the required launch/process lifetime and close them on every path.
 
@@ -98,7 +101,8 @@ Use production code and cover:
 - same-size mutation and hard-link mutation attempt;
 - unsupported Linux lease/filesystem fails closed;
 - pre-exec `fchdir`/`fexecve` failure and exact child error handshake;
-- Windows CreateProcess, image-identity mismatch, Job Object cleanup, share-denied mutation/replacement;
+- Linux child descriptor inventory proves no unrelated Manager descriptor is inherited;
+- Windows CreateProcess, image-identity mismatch, Job Object cleanup, share-denied mutation/replacement, and exact inherited-handle-list behavior;
 - argument count/per-value/cumulative bounds, NUL, invalid UTF-8 where applicable, and timeout bounds before launch;
 - receipt digest match/mismatch;
 - proof that `UciProbeResult.fingerprint` is the launched-object digest;
