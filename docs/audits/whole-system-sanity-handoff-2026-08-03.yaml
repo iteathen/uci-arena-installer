@@ -1,7 +1,8 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v8
-  snapshot_at: '2026-08-03T22:10:00-07:00'
+  schema: uci_arena_whole_system_sanity_handoff_v9
+  snapshot_at: '2026-08-03T22:30:00-07:00'
   status: in_progress
+  sanity_complete: false
   soundness_conclusion: none
   release_readiness: not_established
   package_e2e_finding: PKG-E2E-011_unknown
@@ -19,16 +20,16 @@ method:
   rules:
     - one_owner_per_concern
     - project_owned_neutral_contracts
+    - domain_appropriate_foundations
     - exact_bounded_bytes_types_identities_paths_lifetimes_deadlines_and_cleanup
     - preserve_primary_failure_and_bounded_cleanup_diagnostics
     - no_peer_source_imports_or_hidden_discovery
-    - ownership_sized_repairs
+    - hostile_review_before_acceptance
     - exact_evidence_before_claim
 
 jules:
   transport: official_rest_api
   control_repository: iteathen/Jules-control
-  workflow: .github/workflows/jules-control.yml
   free_daily_limit: 15
   last_usage: {rolling_24h: 10, active: 1, estimated_remaining: 5}
   active:
@@ -40,14 +41,19 @@ jules:
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
     current_head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-    state: architectural_correction_in_progress
+    state: in_progress
     formal_review: 4850334357
-    disposition: changes_required
+    local_disposition: changes_required
+    ancestry_disposition: blocked_parent_replayable_package_slice_only
+    blocked_parents:
+      - {pr: 39, review: 4850912840}
+      - {pr: 44, review: 4850859460}
+      - {pr: 47, review: 4850880052}
+    ancestry_instruction_comment: 5174933429
   queue:
     - id: evidence-20-catalog-integration
       control_issue: 2
       status: queued_review_bound
-      existing_pr: 23
       review: 4850754712
       launch_after_control_issue_closed: 1
     - id: manager-70-verified-launch-identity
@@ -55,142 +61,127 @@ jules:
       status: blocked_base_review
       blocking_label: blocked-base-review
       blocked_by_prs: [78, 79, 80]
-      unblock: correct_stack_and_refresh_exact_branch
     - id: book-forge-12-exact-credential
       control_issue: 4
       status: queued_isolated_child_only
       blocked_base_pr: 11
-      base_review: 4848083104
 
 repositories:
-  installer:
-    base_pr: 2
-    review_stack:
-      - pr: 3
-        head: 05776766064a014836650d46179eadffb73fed2a
-        review: 4850804908
-        disposition: changes_required_stale_ancestry
-        blockers:
-          - nondeterministic_cap_before_order
-          - duplicate_budget_underfill
-          - false_truncation
-          - undocumented_kind_starvation
-          - unenforceable_windows_timeout
-          - partial_candidates_on_failure
-      - pr: 4
-        head: cd061f11afbc9997710eb2f33c090311c5e4a485
-        review: 4850781709
-        disposition: changes_required_stale_ancestry
-        blockers:
-          - natural_exit_restart_terminates
-          - reader_thread_creation_not_transactional
-          - unbounded_reap_after_failed_termination
-          - nonexact_descriptor_handle_inheritance
-          - unverified_windows_start_cleanup
-          - unbounded_reader_join
-          - partial_windows_writes
-          - byte_unbounded_lossy_io
-      - pr: 5
-        head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7
-        review: 4850792446
-        disposition: local_slice_acceptable_blocked_parent
-      - pr: 11
-        head: c40edfcbe12a5e5187a4b1543aee610f40d47f02
-        review: 4850690366
-        disposition: changes_required
-        blockers:
-          - platform_vocabulary_in_neutral_header
-          - reset_windows_deadlines
-          - failed_start_retry
-          - observed_state_loss
-          - control_infrastructure_target_state_conflation
-          - ignored_linux_nonblocking_failure
-          - divergent_timeout_state
-    open_issues:
-      - {issue: 7, summary: exact_stable_byte_admission, blocks_pkg_e2e: true}
-      - {issue: 8, summary: bounded_acquisition_archive_expansion, blocks_pkg_e2e: true}
-      - {issue: 9, summary: recoverable_apply_rollback, blocks_pkg_e2e: true}
-      - {issue: 10, summary: exact_uninstall_purge_authority, blocks_pkg_e2e: true}
-
   engine:
-    authoritative_stack:
-      - {pr: 39, branch: agent/system-sanity}
-      - {pr: 44, branch: agent/model-adapter-contract, base_pr: 39}
-      - {pr: 47, branch: agent/integrate-engine-audit-stacks, base_pr: 44, head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef}
-    reviewable: [{pr: 52, base_pr: 47}]
-    issue_62:
-      output_pr: 63
-      current_head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-      review: 4850334357
-      state: correction_in_progress
-      blockers:
-        - versioned_contract
-        - trustworthy_visibility_ms
-        - cross_platform_exact_object_identity
-        - race_free_mutation_deletion
-        - bounded_notifier_index
-        - typed_failure_semantics
-        - private_test_seams
-        - truthful_specs
-        - windows_linux_node_24_15_evidence
-    open_issues:
+    authoritative_pr_chain: none_reconstruction_required
+    reconstruction_order:
+      - split_and_correct_pr_39_foundations
+      - redesign_pr_44_model_adapter
+      - reconcile_pr_47_governance_and_heartbeat
+      - replay_corrected_pr_52_fen_slice
+      - replay_corrected_pr_63_resource_lease_slice
+    reviews:
+      - pr: 39
+        head: 1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee
+        review: 4850912840
+        disposition: changes_required_foundation_reconstruction_split_required
+        reusable_slices: [remove_concrete_onnx_include_from_search, reject_os_owned_windows_runtime_files]
+        blockers:
+          - ordering_score_reset_fixed_array_overflow
+          - cache_capacity_can_exceed_declared_budget
+          - unsafe_raw_async_lifetimes
+          - callbacks_under_cache_mutex
+          - caller_held_global_cache_mutex
+          - accidental_public_runtime_capacities
+          - weak_toolchain_source_build_identity
+          - mixed_ownership_36_file_pr
+        audit: docs/audits/engine-pr39-evaluation-release-hostile-review-2026-08-03.md
+      - pr: 44
+        head: d37ab900486cad25b5dff5cd6fa11724c8fc3929
+        review: 4850859460
+        disposition: changes_required_foundation_redesign_blocked_parent
+        blockers:
+          - fixed_two_preparation_slots
+          - rank_metadata_view_mismatch
+          - narrow_dtype_foundation
+          - mutable_void_pointer_without_lifetime_rules
+          - semantics_and_runtime_buffer_policy_conflated
+          - raw_filesystem_paths_as_semantic_artifacts
+          - weak_policy_and_value_types
+          - unbounded_batch_and_size_inputs
+        audit: docs/audits/engine-pr44-model-adapter-hostile-review-2026-08-03.md
+      - pr: 47
+        head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+        review: 4850880052
+        disposition: changes_required_governance_reconstruction_blocked_parent
+        blockers:
+          - registry_deauthorizes_preflight_required_specs
+          - removed_specs_lack_complete_migration_register
+          - heartbeat_loss_does_not_cancel_protected_work
+          - heartbeat_failure_is_unversioned_string
+          - public_api_changed_without_package_version
+          - failed_monitor_timer_not_self_cleaning
+          - weak_timer_and_stale_interval_bounds
+          - cleanup_failure_causality_incomplete
+        audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md
+      - pr: 52
+        head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff
+        review: 4850845427
+        disposition: changes_required_blocked_parent
+        blockers:
+          - adjacent_empty_run_digits_accepted
+          - validator_not_private_or_globally_single_owner
+          - no_fen_byte_bound
+          - canonical_counter_text_unresolved
+          - canonical_castling_order_unresolved
+        audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md
+      - pr: 63
+        head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
+        review: 4850334357
+        disposition: changes_required_blocked_parent_replayable
+        state: jules_correction_in_progress
+    open_issue_families:
       inference: [57, 45, 46]
       transposition_table: [43, 54]
       performance: [56, 58, 59]
 
+  installer:
+    base_pr: 2
+    reviews:
+      - {pr: 3, head: 05776766064a014836650d46179eadffb73fed2a, review: 4850804908, disposition: changes_required_stale_ancestry}
+      - {pr: 4, head: cd061f11afbc9997710eb2f33c090311c5e4a485, review: 4850781709, disposition: changes_required_stale_ancestry}
+      - {pr: 5, head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
+      - {pr: 11, head: c40edfcbe12a5e5187a4b1543aee610f40d47f02, review: 4850690366, disposition: changes_required}
+    open_issues:
+      - {issue: 7, summary: exact_stable_byte_admission}
+      - {issue: 8, summary: bounded_acquisition_archive_expansion}
+      - {issue: 9, summary: recoverable_apply_rollback}
+      - {issue: 10, summary: exact_uninstall_purge_authority}
+
   manager:
     base_pr: 54
     base_sha: 233654568e91d50eb5e0a995fd22e109c3d2a66d
-    review_stack:
-      - pr: 78
-        head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b
-        review: 4850726806
-        disposition: changes_required
-        blockers: [option_name_value_delimiter, string_override_edge_spaces, untracked_allocation_evidence, incomplete_exact_bounds]
-      - pr: 79
-        head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba
-        review: 4850708644
-        disposition: changes_required
-        blockers: [ambiguous_completion_tokens, stale_preoption_identity, conflicting_identity_overwrite, locale_sensitive_provider, exception_prose_matching, missing_integration_spec]
-      - pr: 80
-        head: 683d7ae20a161d0b40d176d82173a87a961c77ea
-        review: 4850674462
-        disposition: changes_required
-        blockers: [linux_sigpipe_termination, natural_exit_restart_termination, pressure_dependent_malformed_info, duplicated_wire_authority, uci_policy_in_generic_port, windows_stop_hang, incomplete_timeout_bounds]
-    blocked:
-      - pr: 67
-        reviews: [4847815394, 4848995624]
-        summary: sqlite_storage_reconstruction_required
-      - issue: 69
-        summary: localauth_reconstruction_required
+    reviews:
+      - {pr: 67, reviews: [4847815394, 4848995624], disposition: reconstruction_required}
+      - {pr: 78, head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b, review: 4850726806, disposition: changes_required}
+      - {pr: 79, head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba, review: 4850708644, disposition: changes_required}
+      - {pr: 80, head: 683d7ae20a161d0b40d176d82173a87a961c77ea, review: 4850674462, disposition: changes_required}
+    open_issue: {issue: 69, summary: localauth_reconstruction}
     issue_70_task: blocked_until_78_79_80_corrected_and_branch_refreshed
 
   evidence_service:
-    authoritative_stack: [10, 13, 14, 15, 16, 17, 18, 19, 22]
+    accepted_stack_ends_at_pr: 22
     pr_23:
       head: 3991983c397a222871cba70c6232da1a8be5b265
       review: 4850754712
       disposition: changes_required_partial_only
-      blockers:
-        - false_catalog_owner_spec
-        - unsafe_clock_domain
-        - permissive_timestamp_parse
-        - public_threshold_override
-        - duplicate_wrapper_clocks
-        - malformed_daemon_shape_hidden
-        - incomplete_preflight_and_node_24_15_tests
     issue_20_task: queued_control_issue_2_review_bound
     issue_21:
-      blocked_on: iteathen/UCI_Arena#62
+      blocked_on: corrected_replayed_engine_resource_lease_contract
       requirement: one_absolute_2000ms_end_to_end_deadline
 
   book_forge:
-    blocked:
-      - {pr: 11, review: 4848083104, summary: path_config_credential_authority}
-      - {pr: 10, review: 4848065237, summary: transactional_lock_and_failure_causality}
-      - {pr: 8, summary: broad_provider_acceptance_blocked}
-    issue_12: queued_control_issue_4_isolated_credential_child
-    other_issues:
+    reviews:
+      - {pr: 10, review: 4848065237, disposition: changes_required}
+      - {pr: 11, review: 4848083104, disposition: changes_required}
+    broad_pr_8: blocked
+    issue_12: queued_control_issue_4_isolated_child
+    open_issues:
       - {issue: 13, summary: recoverable_snapshot_publication}
       - {issue: 14, summary: exact_catalog_and_64_shard_sqlite_authority}
 
@@ -203,18 +194,19 @@ repositories:
       - {issue: 7, summary: exact_sqlite_foundation}
 
 next_actions:
-  - poll_engine_pr_63_and_review_only_after_head_moves_beyond_cc2ead92
-  - continue_only_if_jules_stops_without_substantive_output
-  - keep_registry_and_handoffs_synchronized
-  - reconstruct_installer_pr2_to_pr3_pr4_then_replay_pr5_then_pr11
-  - reconstruct_manager_pr78_then_pr79_then_pr80_then_refresh_issue70_task
+  - review_engine_pr_63_only_after_head_moves_beyond_cc2ead92
+  - do_not_continue_jules_while_session_is_in_progress
+  - continue_independent_hostile_review_and_ownership_sized_repairs
+  - reconstruct_engine_pr39_then_pr44_then_pr47_then_replay_children
+  - reconstruct_installer_pr3_pr4_then_replay_pr5_then_correct_pr11
+  - correct_manager_pr78_then_pr79_then_pr80_then_refresh_issue70_task
   - launch_evidence_control_issue_2_only_after_engine_control_issue_1_closes
   - continue_evidence_21_manager_67_69_lichess_4_to_7_book_forge_12_to_14_installer_7_to_10
-  - update_installer_pr_2_discoverability_comment
+  - keep_narrative_yaml_registry_and_pr2_comment_synchronized
 
 final_gates:
-  - complete_specs_preflight_boundary_and_substitution_checks
   - one_authoritative_ancestry_per_repository
+  - complete_specs_preflight_boundary_and_substitution_checks
   - complete_windows_linux_native_builds_and_ctest
   - node_24_15_provider_and_installed_package_suites
   - real_onnx_tt_storage_process_race_recovery_and_performance_evidence
