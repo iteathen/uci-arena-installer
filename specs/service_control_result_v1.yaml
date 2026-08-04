@@ -27,28 +27,35 @@ ownership:
 contract:
   actions: [status, start, stop, restart]
   outcomes: [completed, failed]
-  states: [unknown, inactive, activating, active, deactivating, failed]
+  states: [unknown, unavailable, inactive, activating, active, deactivating, failed]
+  service_name:
+    maximum_characters: 256
+    representation: printable_ascii
   result_fields:
     action: ServiceAction
     outcome: ServiceOutcome
     state: ServiceState
-    platform_code: bounded_signed_integer_for_operator_diagnostics_only
-    diagnostic: bounded_sanitized_text
+    platform_code: bounded_uint32_for_operator_diagnostics_only
+    diagnostic: bounded_printable_ascii
   diagnostic_maximum_characters: 256
   rules:
     - Raw platform codes may be retained only for bounded operator remediation and never determine caller control flow outside the adapter.
-    - Invalid action values and empty service names fail before platform access.
-    - Status distinguishes a successfully observed inactive service from a query failure.
+    - Invalid action values and empty, oversized, control-bearing, or non-ASCII service names fail before platform access.
+    - Status distinguishes inactive, unavailable, failed, and unclassifiable/query-failure states.
+    - An unrecognized platform state returns failed plus unknown rather than a completed result.
     - Start and restart complete only after the service is observed active.
     - Stop completes only after the service is observed inactive.
     - A transition timeout returns a failed result rather than claiming completion.
-    - Missing service, permission failure, process failure, and query failure return failed results with neutral state and bounded diagnostics.
-    - Windows SERVICE_STOPPED with a nonzero service exit code maps to failed rather than inactive.
+    - Missing service maps to unavailable; permission, process, and query failures remain failed with bounded diagnostics.
+    - Windows SERVICE_STOPPED with a nonzero effective service exit code maps to failed rather than inactive.
+    - Windows service-specific exit codes replace ERROR_SERVICE_SPECIFIC_ERROR in platform_code.
     - Unknown platform states map to unknown and never leak as domain enum values.
 
 linux:
-  status_source: systemctl_show_active_state
+  status_source: systemctl_show_load_state_and_active_state
   mapping:
+    load_not_found: unavailable
+    load_error_or_bad_setting: failed
     inactive: inactive
     activating: activating
     active: active
@@ -59,13 +66,16 @@ linux:
     other: unknown
   requirements:
     - Invoke systemctl with typed argument arrays and the `--` separator.
+    - Use no-ask-password for mutating actions and never permit an interactive authorization prompt.
     - Bound process duration and captured output.
+    - Parse exact LoadState and ActiveState properties; missing, duplicate-conflicting, or unrecognized output fails closed.
     - A successful mutating command is followed by an exact state query.
 
 windows:
   status_source: QueryServiceStatusEx
   mapping:
-    SERVICE_STOPPED: inactive_when_service_exit_code_zero_else_failed
+    ERROR_SERVICE_DOES_NOT_EXIST: unavailable
+    SERVICE_STOPPED: inactive_when_effective_exit_code_zero_else_failed
     SERVICE_START_PENDING: activating
     SERVICE_STOP_PENDING: deactivating
     SERVICE_RUNNING: active
@@ -73,15 +83,16 @@ windows:
   requirements:
     - Wait within one bounded transition deadline.
     - Close SCM and service handles on every path.
-    - Preserve exact Win32 error code only in platform_code and bounded diagnostic.
+    - Preserve exact Win32 or service-specific exit code only in platform_code and bounded diagnostic.
 
 validation:
   pure:
-    - complete action, outcome, and state names
+    - complete action, outcome, and state names including unavailable
+    - service_name_exact_boundary_and_invalid_forms
     - invalid enum and compatibility-string rejection before platform access
-    - systemd state mapping including unknown values
-    - SCM state mapping including stopped with nonzero service exit code
-    - diagnostic sanitization and 256-character bound
+    - systemd load and active state mapping including not-found and unknown values
+    - SCM state and error mapping including stopped with nonzero service exit code
+    - diagnostic printable-ASCII sanitization and 256-character bound
     - result completed helper
   integration:
     - missing service
