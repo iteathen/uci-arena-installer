@@ -125,7 +125,9 @@ CommandResult run_systemctl(const std::vector<std::string>& arguments) {
         }
         if (waited < 0 && errno != EINTR) {
             const int code = errno;
-            terminate_and_reap(child);
+            if (code != ECHILD) {
+                terminate_and_reap(child);
+            }
             drain_pipe(descriptors[0], result.output);
             close(descriptors[0]);
             return process_failure(code, "cannot wait for systemctl");
@@ -201,13 +203,12 @@ ServiceActionResult failed_result(
     const ServiceState state,
     const std::uint32_t platform_code,
     const std::string_view diagnostic) {
-    return ServiceActionResult{
+    return service_result_from_observation(
         action,
-        ServiceOutcome::failed,
         state,
+        false,
         platform_code,
-        bounded_service_diagnostic(diagnostic),
-    };
+        diagnostic);
 }
 
 ServiceActionResult query_service_state(const std::string& service_name) {
@@ -256,13 +257,10 @@ ServiceActionResult query_service_state(const std::string& service_name) {
             0,
             "systemd returned incomplete or unrecognized service state");
     }
-    return ServiceActionResult{
+    return service_result_from_observation(
         ServiceAction::status,
-        ServiceOutcome::completed,
         state,
-        0,
-        {},
-    };
+        true);
 }
 
 } // namespace
@@ -300,30 +298,29 @@ ServiceActionResult perform_service_action(
             "systemd service action timed out");
     }
 
-    ServiceActionResult observed = query_service_state(platform_name);
-    observed.action = action;
+    const ServiceActionResult observed = query_service_state(platform_name);
     if (command.exit_code != 0) {
-        observed.outcome = ServiceOutcome::failed;
-        observed.platform_code = static_cast<std::uint32_t>(command.exit_code);
-        observed.diagnostic = bounded_service_diagnostic(
+        return failed_result(
+            action,
+            observed.state,
+            static_cast<std::uint32_t>(command.exit_code),
             command.output.empty()
                 ? "systemd service action failed"
                 : command.output);
-        return observed;
     }
     if (!observed.completed()) {
-        return observed;
+        return failed_result(
+            action,
+            observed.state,
+            observed.platform_code,
+            observed.diagnostic);
     }
-
-    const ServiceState expected = action == ServiceAction::stop
-        ? ServiceState::inactive
-        : ServiceState::active;
-    if (observed.state != expected) {
-        observed.outcome = ServiceOutcome::failed;
-        observed.diagnostic = bounded_service_diagnostic(
-            "systemd service did not reach the required final state");
-    }
-    return observed;
+    return service_result_from_observation(
+        action,
+        observed.state,
+        true,
+        observed.platform_code,
+        observed.diagnostic);
 }
 
 } // namespace arena::platform
