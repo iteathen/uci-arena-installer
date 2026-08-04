@@ -1,28 +1,71 @@
-schema: uci_arena_jules_workbench_registry_v1
-updated_at: '2026-08-03T16:45:00-07:00'
+schema: uci_arena_jules_execution_registry_v2
+updated_at: '2026-08-03T18:09:00-07:00'
+preferred_transport:
+  kind: jules_rest_api
+  control_repository: iteathen/Jules-control
+  control_branch: main
+  workflow: .github/workflows/jules-control.yml
+  controller: scripts/jules_control.py
+  secret_location: github_environment_secret
+  environment: jules
+  secret_name: JULES_API_KEY
+  rules:
+    - never place the API key in chat, issues, logs, argv, repository files, or task prompts
+    - resolve the Jules source through the API and require an exact startingBranch
+    - require plan approval for broad or security-sensitive tasks
+    - review every Jules PR as hostile input in the source repository
+    - close the control issue only after the output PR, session id, review disposition, and cleanup state are recorded
+    - do not create a temporary clone when the API accepts the authoritative starting branch
 concurrency:
-  maximum_active_workbenches: 1
-  active_workbenches: 0
+  maximum_active_jules_sessions: 1
+  active_sessions: 1
   rule: >-
-    Do not create a second workbench until the active workbench is transferred,
-    equivalence-verified, represented by a draft PR in the source repository,
-    and deleted.
-workbenches:
+    Keep one broad Jules implementation session active until its output is frozen and
+    reviewed. Small direct fixes may continue independently, but do not create another
+    broad Jules task that overlaps its ownership or ancestry.
+sessions:
   - id: engine-62-20260803
-    repository: iteathen/jules-wb-engine-62-20260803
-    state: awaiting_repository_creation
+    transport: jules_rest_api
+    state: plan_approved_in_progress
+    session_resource: sessions/13034909149691235140
+    control_repository: iteathen/Jules-control
+    control_issue: 1
     source_repository: iteathen/UCI_Arena
     source_branch: agent/integrate-engine-audit-stacks
     source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
-    destination_branch: agent/timestamp-resource-lease-revocation
-    destination_base: agent/integrate-engine-audit-stacks
     source_issue: 62
-    task_manifest: docs/audits/jules-workbenches/engine-62-20260803.yaml
-    task_body: docs/audits/jules-workbenches/engine-62-20260803-task.md
-    created_at: null
-    jules_task_id: null
-    workbench_result_sha: null
-    transferred_sha: null
-    destination_pr: null
-    equivalence_verified: false
-    deleted_at: null
+    destination_base: agent/integrate-engine-audit-stacks
+    intended_destination_branch: agent/timestamp-resource-lease-revocation
+    automation_mode: AUTO_CREATE_PR
+    plan_approval_required: true
+    plan_approved: true
+    plan_scope:
+      - packages/background-service-runtime/src/background-resource-lease.mjs
+      - packages/background-service-runtime/test/**
+      - governing specs and preflight only when required
+    forbidden_scope:
+      - Evidence-specific two-second policy
+      - inference, search, evaluation, model, UCI, provider release, or packaging changes
+    output_pr: null
+    output_head_sha: null
+    hostile_review: pending
+    control_issue_closed_at: null
+legacy_workbench_fallback:
+  enabled: true
+  use_only_when:
+    - Jules API cannot expose or accept the authoritative starting branch
+    - the source repository cannot be granted directly to Jules
+  rules:
+    - private disposable repository under the user account
+    - one task only and never reuse
+    - exact baseline manifest and patch-equivalence verification
+    - delete immediately after source-repository PR is established and recorded
+superseded_uncreated_workbenches:
+  - id: engine-62-20260803-workbench-plan
+    intended_repository: iteathen/jules-wb-engine-62-20260803
+    state: superseded_before_creation
+    created: false
+    deleted: not_applicable
+    reason: >-
+      The Jules REST API successfully created a session against the exact authoritative
+      starting branch, so no temporary repository or clone was needed.
