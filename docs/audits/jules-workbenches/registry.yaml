@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v5
-updated_at: '2026-08-03T19:05:00-07:00'
+schema: uci_arena_jules_execution_registry_v6
+updated_at: '2026-08-03T19:16:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
@@ -26,7 +26,7 @@ concurrency:
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: second_correction_in_progress
+    state: third_correction_requested_and_continued
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -41,10 +41,12 @@ sessions:
     output_draft: true
     first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
     second_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
-    current_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
+    third_output_head_sha: bc2c27f65d24b51c69c6ac953656fae78cb01b64
+    current_output_head_sha: bc2c27f65d24b51c69c6ac953656fae78cb01b64
     first_review_comment: 5173513437
     second_review_comment: 5173734334
-    hostile_review: changes_required_second_correction_in_progress
+    third_review_comment: 5173823846
+    hostile_review: changes_required_third_correction_requested
     recovery_history:
       - apparent_completed_without_output
       - awaiting_user_feedback_without_output
@@ -55,18 +57,21 @@ sessions:
       - second_output_pushed
       - second_hostile_review_failed
       - second_correction_and_continue_sent
+      - third_output_pushed
+      - third_hostile_review_failed
+      - third_correction_and_continue_sent
     remaining_blockers:
-      - no_follow_and_reparse_safe_exact_object_admission
-      - replacement_safe_deletion
-      - bounded_directory_enumeration_and_total_allocation
-      - exact_canonical_utc_round_trip
-      - exact_filename_packet_uuid_and_byte_identity
-      - conservative_typed_untrusted_foreground_demand
-      - distinct_overflow_reason_with_null_identity
-      - acquisition_snapshot_and_demand_fail_closed_on_overflow
-      - one_observation_clock
-      - injected_watcher_timer_abort_cleanup_evidence
-      - exact_scan_and_allocation_instrumentation
+      - windows_reparse_safe_exact_handle_or_fail_closed_windows
+      - exact_identity_bound_deletion
+      - fatal_utf8_and_high_resolution_pre_post_mutation_evidence
+      - live_malformed_heartbeat_as_typed_untrusted_demand
+      - exact_stale_retirement_for_malformed_junk
+      - null_untrusted_identity_no_fabricated_values
+      - active_request_bound_applied_to_every_classification
+      - shared_exact_producer_and_holder_grammar
+      - transactional_waiter_construction_and_cleanup
+      - immutable_exact_bounded_work_evidence
+      - truthful_one_clock_and_governing_spec_claims
     control_issue_closed_at: null
 prepared_tasks:
   - id: evidence-20-catalog-integration
