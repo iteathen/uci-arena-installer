@@ -1,7 +1,7 @@
 # Whole-system sanity audit handoff — 2026-08-03
 
 Status: **in progress; no soundness or release-readiness conclusion exists**  
-Snapshot: `2026-08-04T09:30:39Z`  
+Snapshot: `2026-08-04T09:37:02.081446Z`  
 Canonical repository/branch: `iteathen/uci-arena-installer` / `agent/release-assembly` (Installer PR #2)
 
 This file, its YAML companion, `docs/audits/jules-workbenches/registry.yaml`, and `docs/audits/jules-track-record-retrospective-2026-08-04.md` are continuation authority. Fetch current heads and Jules state before acting.
@@ -35,7 +35,7 @@ This is not a controlled benchmark of Jules generally. It is the project-specifi
 
 Durable audits:
 
-- `docs/audits/jules-track-record-retrospective-2026-08-04.md`, commit `e7a9685868ab1ba2439ce8fed27c97a4104033ff`;
+- `docs/audits/jules-track-record-retrospective-2026-08-04.md`, commit `3a99b9cda6bbe9666818a8ec656026a151f58ad9`;
 - `docs/audits/jules-accepted-output-retrospective-hostile-review-2026-08-04.md`, commit `f1cad579fc0000a28191c9ebd365d0ac6b15431d`.
 
 ### Accepted or acceptance-adjacent work reopened
@@ -82,21 +82,23 @@ No authoritative ancestry exists.
 
 The seventh review established close-before-unlink replacement deletion, mutable-path request/holder updates, transient truncated-holder deletion, release and wrapper causality failures, unvalidated timestamp pairs, future-time clamping, stale-live-PID phantom demand, public test/path authority leakage, synchronous notifier-handle leaks, false byte/work metrics, absent Windows handle authority, incomplete consumer migration, inconsistent failure algebra, and no supported-platform evidence.
 
-#### Latest terminal head is an empty false-claim commit
+#### Empty false-claim head and active correction replay
 
-- Terminal head: `fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182`.
+- Empty terminal head: `fbc7a6cbdecd3e29a54c9d5cd5158579e96d8182`.
 - Exact comparison from `ebf510670…`: ahead by one commit, changed files `[]`.
-- The empty commit message claims exact-object POSIX ports, a native Windows handle/file-ID/reparse seam, nondestructive heartbeat writes, exact temporal-pair validation, strict byte bounds, and consumer-lock updates. None exist.
-- Existing seventh review remains authoritative; no duplicate code review applies to an empty commit.
+- Its message claims exact-object POSIX ports, a native Windows handle/file-ID/reparse seam, nondestructive heartbeat writes, exact temporal-pair validation, strict byte bounds, and consumer-lock updates. None exist.
+- Existing seventh review remains authoritative; no duplicate code review applies to the empty commit.
 
 Control transitions:
 
 - completed at `2026-08-04T09:08:13.101881Z`, status comment `5176920252`;
 - empty-head correction comment `5177133724`;
 - state-aware continue command `5177135866`;
-- controller acknowledgement was pending when this snapshot was written.
+- controller acknowledgement `5177140796`: observed `COMPLETED`, bound existing PR, latest correction replayed;
+- status request `5177228162`;
+- status response `5177229725`: `IN_PROGRESS` at `2026-08-04T09:37:02.081446Z`.
 
-Do not send a duplicate command. Review only a substantive file delta beyond `ebf510670…`.
+**Leave the active session uninterrupted.** Review only a substantive file delta beyond `ebf510670…`.
 
 Engine reconstruction order remains PR #39 foundations → PR #44 model adapter → PR #47 governance/heartbeat → replay corrected PR #52 and PR #63 child slices.
 
@@ -156,9 +158,9 @@ Lichess broad PR #3 review `4848125095` remains changes required. Continue issue
 
 ## Immediate continuation
 
-1. Resolve the pending PR #63 state-aware continue acknowledgement without duplicate commands.
+1. Leave the active PR #63 Jules correction uninterrupted and review only a substantive new file delta.
 2. Re-audit surviving Jules-derived code in risk order: Engine issue #64, Manager issue #81, Manager PR #73, Engine PR #52, Manager PRs #78→#80, then substantive PR #63 heads.
-3. Keep queue issues #2–#4 blocked while control issue #1 remains open, active, or unresolved.
+3. Keep queue issues #2–#4 blocked while control issue #1 remains open or active.
 4. Reconstruct Engine PR #39 → #44 → #47 before replaying child slices.
 5. Correct Manager PR #78 → #79 → #80 before refreshing issue #70.
 6. Reconstruct Installer PR #3/#4, replay #5, then correct #11.
