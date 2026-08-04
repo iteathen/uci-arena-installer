@@ -99,18 +99,28 @@ SERVICE_STATUS_PROCESS query_service_status(const SC_HANDLE service) {
             reinterpret_cast<LPBYTE>(&status),
             sizeof(status),
             &required)) {
+        const DWORD code = GetLastError();
         throw ServiceControlFailure(
             "Windows service status query failed",
-            GetLastError());
+            code,
+            service_state_from_windows_error(code));
     }
     return status;
+}
+
+[[nodiscard]] DWORD effective_exit_code(
+    const SERVICE_STATUS_PROCESS& status) noexcept {
+    return status.dwWin32ExitCode == ERROR_SERVICE_SPECIFIC_ERROR
+        && status.dwServiceSpecificExitCode != 0
+        ? status.dwServiceSpecificExitCode
+        : status.dwWin32ExitCode;
 }
 
 [[nodiscard]] ServiceState neutral_state(
     const SERVICE_STATUS_PROCESS& status) noexcept {
     return service_state_from_windows_scm(
         status.dwCurrentState,
-        status.dwWin32ExitCode);
+        effective_exit_code(status));
 }
 
 void wait_for_service_state(
@@ -122,10 +132,10 @@ void wait_for_service_state(
     while (status.dwCurrentState != expected_state) {
         if (expected_state == SERVICE_RUNNING
             && status.dwCurrentState == SERVICE_STOPPED
-            && status.dwWin32ExitCode != ERROR_SUCCESS) {
+            && effective_exit_code(status) != ERROR_SUCCESS) {
             throw ServiceControlFailure(
                 "Windows service failed while starting",
-                status.dwWin32ExitCode,
+                effective_exit_code(status),
                 ServiceState::failed);
         }
         if (GetTickCount64() >= deadline) {
@@ -184,7 +194,7 @@ void start_service(const SC_HANDLE service) {
             throw ServiceControlFailure(
                 "Windows service start failed",
                 code,
-                neutral_state(status));
+                service_state_from_windows_error(code));
         }
     }
     wait_for_service_state(service, SERVICE_RUNNING, "start");
@@ -206,7 +216,7 @@ void stop_service(const SC_HANDLE service) {
             throw ServiceControlFailure(
                 "Windows service stop failed",
                 code,
-                neutral_state(status));
+                service_state_from_windows_error(code));
         }
     }
     wait_for_service_state(service, SERVICE_STOPPED, "stop");
@@ -234,6 +244,9 @@ ServiceActionResult perform_service_action(
     if (platform_name.empty()) {
         throw std::runtime_error("service name is required");
     }
+    if (!valid_service_name(platform_name)) {
+        throw std::runtime_error("service name is invalid");
+    }
     if (!valid_service_action(action)) {
         throw std::runtime_error("unsupported service action");
     }
@@ -241,10 +254,11 @@ ServiceActionResult perform_service_action(
     try {
         const ScHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
         if (!manager) {
+            const DWORD code = GetLastError();
             return failed_result(
                 action,
-                GetLastError(),
-                ServiceState::unknown,
+                code,
+                service_state_from_windows_error(code),
                 "cannot open Windows Service Control Manager");
         }
 
@@ -259,10 +273,11 @@ ServiceActionResult perform_service_action(
         const std::wstring service_name = wide(platform_name);
         const ScHandle service(OpenServiceW(manager.get(), service_name.c_str(), access));
         if (!service) {
+            const DWORD code = GetLastError();
             return failed_result(
                 action,
-                GetLastError(),
-                ServiceState::unknown,
+                code,
+                service_state_from_windows_error(code),
                 "Windows service cannot be opened");
         }
 
@@ -277,13 +292,21 @@ ServiceActionResult perform_service_action(
 
         const SERVICE_STATUS_PROCESS observed = query_service_status(service.get());
         const ServiceState state = neutral_state(observed);
+        const DWORD platform_code = effective_exit_code(observed);
+        if (state == ServiceState::unknown) {
+            return failed_result(
+                action,
+                platform_code,
+                state,
+                "Windows SCM returned an unrecognized service state");
+        }
         const ServiceState expected = action == ServiceAction::stop
             ? ServiceState::inactive
             : ServiceState::active;
         if (action != ServiceAction::status && state != expected) {
             return failed_result(
                 action,
-                observed.dwWin32ExitCode,
+                platform_code,
                 state,
                 "Windows service did not reach the required final state");
         }
@@ -291,10 +314,8 @@ ServiceActionResult perform_service_action(
             action,
             ServiceOutcome::completed,
             state,
-            observed.dwWin32ExitCode,
-            state == ServiceState::unknown
-                ? bounded_service_diagnostic("Windows SCM returned an unrecognized service state")
-                : std::string{},
+            platform_code,
+            {},
         };
     } catch (const ServiceControlFailure& failure) {
         return failed_result(
