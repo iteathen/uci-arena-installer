@@ -1,6 +1,6 @@
 meta:
   schema: uci_arena_whole_system_sanity_handoff_v10
-  snapshot_at: '2026-08-03T23:14:00-07:00'
+  snapshot_at: '2026-08-03T23:19:00-07:00'
   status: in_progress
   sanity_complete: false
   soundness_conclusion: none
@@ -43,9 +43,10 @@ jules:
     latest_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
     latest_formal_review: 4850967412
     current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab
-    current_head_reviewed: false
+    current_head_substantive: false
+    current_head_compare: {ahead_by: 1, changed_files: 0}
     state: in_progress
-    last_confirmed_at: '2026-08-04T06:12:51.408323Z'
+    last_confirmed_at: '2026-08-04T06:18:53.275899Z'
     correction_message: 5175041945
     state_aware_continue_command: 5175048852
     recovery_acknowledgement: 5175050145
@@ -57,6 +58,7 @@ jules:
       - {pr: 47, review: 4850880052}
     latest_audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md
     instruction: do_not_send_correction_or_continue_while_active
+    terminal_without_substantive_head_action: replay_latest_correction_via_existing_state_aware_path
   queue:
     - id: evidence-20-catalog-integration
       control_issue: 2
@@ -125,6 +127,7 @@ repositories:
       - pr: 63
         latest_reviewed_head: 2106482635969e1e9c6b28b76fb80aca35890af6
         current_head: c7ef021e74d853ff6a5500d4d4396ef5e5d6b5ab
+        current_head_substantive: false
         review: 4850967412
         disposition: changes_required_blocked_parent_replayable
         state: jules_correction_in_progress
@@ -210,7 +213,8 @@ repositories:
 next_actions:
   - do_not_interrupt_active_jules_session
   - recheck_jules_state_and_engine_pr63_head_before_any_control_command
-  - hostile_review_newest_substantive_pr63_head_after_stable_terminal_state
+  - hostile_review_only_a_new_substantive_pr63_delta
+  - replay_latest_correction_state_aware_if_terminal_without_substantive_head
   - continue_independent_hostile_review_and_ownership_sized_repairs
   - reconstruct_engine_pr39_then_pr44_then_pr47_then_replay_children
   - reconstruct_installer_pr3_pr4_then_replay_pr5_then_correct_pr11
