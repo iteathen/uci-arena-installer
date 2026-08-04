@@ -1,28 +1,23 @@
-schema: uci_arena_jules_execution_registry_v10
-updated_at: '2026-08-03T22:28:00-07:00'
+schema: uci_arena_jules_execution_registry_v11
+updated_at: '2026-08-03T22:38:00-07:00'
 control:
   repository: iteathen/Jules-control
   branch: main
   workflow: .github/workflows/jules-control.yml
   transport: official_jules_rest_api
-  secret: {environment: jules, name: JULES_API_KEY}
   free_account_limit: {sessions: 15, window: rolling_24_hours}
-  last_usage: {observed_rolling_24h: 10, active_or_waiting: 1, estimated_remaining: 5}
+  last_usage: {observed_rolling_24h: 10, active_or_waiting_before_recovery: 1, estimated_remaining: 5}
   maximum_active_sessions: 1
   queue_order: oldest_eligible_control_issue_first
   blocked_label_prefix: blocked-
   watcher: {kind: chatgpt_condition_watch, cadence: hourly, command: /jules launch}
   rules:
-    - never expose the API key
-    - require exact repository source and startingBranch
-    - append hostile-self-review protocol to every session
+    - treat every Jules line and completion claim as hostile input
+    - require exact source and startingBranch
     - require plan approval for broad or security-sensitive work
-    - treat all Jules output and claims as hostile until source-repository review
-    - preserve exact branch, output PR, corrections, and review evidence
-    - queue rather than fail when budget, concurrency, review, or dependency gates block
-    - never launch an issue carrying a blocked-* label
-    - launch one task only after every prior output is terminally reviewed and its control issue closed
-    - capacity limits never stop independent direct audit and repair work
+    - queue rather than fail on dependency, review, concurrency, or budget gates
+    - never launch blocked-* issues
+    - capacity limits never stop independent audit and direct repair
 
 active_session:
   id: engine-62-20260803
@@ -34,91 +29,72 @@ active_session:
   source_issue: 62
   output_pr: 63
   output_branch: jules-13034909149691235140-b7c89938
-  current_head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-  output_review: 4850334357
-  local_disposition: changes_required_architectural_correction
-  session_state: in_progress_last_observed
-  parent_ancestry_disposition: blocked_replayable_slice_only
+  reviewed_heads:
+    - {head: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7, disposition: rejected}
+    - {head: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be, disposition: rejected}
+    - {head: bc2c27f65d24b51c69c6ac953656fae78cb01b64, disposition: rejected}
+    - {head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b, review: 4850334357, disposition: rejected}
+    - {head: 2106482635969e1e9c6b28b76fb80aca35890af6, review: 4850967412, disposition: rejected}
+  current_head: 2106482635969e1e9c6b28b76fb80aca35890af6
+  local_disposition: changes_required_blocked_parent_replayable
+  session_transition:
+    - correction_message: 5175041945
+    - session_reported_completed_without_new_head: 5175044883
+    - state_aware_continue_command: 5175048852
+    - recovery_status: processing
   blocked_parents:
-    - {pr: 39, review: 4850912840, disposition: foundation_reconstruction_split_required}
-    - {pr: 44, review: 4850859460, disposition: model_adapter_foundation_redesign}
-    - {pr: 47, review: 4850880052, disposition: governance_and_heartbeat_reconstruction}
-  instruction_sent: >
-    Continue only the PR #63 package-owned correction; do not broaden into parent
-    repairs or claim merge-ready ancestry. Produce a replayable reviewed slice.
-  parent_update_comment: 5174933429
+    - {pr: 39, review: 4850912840}
+    - {pr: 44, review: 4850859460}
+    - {pr: 47, review: 4850880052}
+  latest_audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md
+  remaining_blockers:
+    - persisted_safe_integer_visibility_authority_missing
+    - invalid_timing_invents_observation_time
+    - unversioned_result_and_unchanged_package_version
+    - replacement_destructive_delete_update
+    - windows_and_ancestor_reparse_identity_absent
+    - exported_mutable_cache_metrics_test_seams_and_waiters
+    - weak_cache_identity_and_cross_root_interference
+    - false_directory_byte_and_allocation_bounds
+    - locale_dependent_ordering
+    - inconsistent_public_failure_algebra
+    - wait_registration_and_cleanup_races
+    - debug_output_in_shared_runtime
+    - incomplete_clock_timing_and_producer_bounds
+    - adversarial_windows_linux_node_24_15_evidence_missing
   control_issue_closed_at: null
 
 queue:
-  - position: 1
-    id: evidence-20-catalog-integration
-    control_issue: 2
-    status: queued_review_bound
-    source_repository: iteathen/uci-arena-evidence-service
-    source_branch: agent/project-daemon-heartbeat-staleness
-    expected_head: 3991983c397a222871cba70c6232da1a8be5b265
-    existing_pr: 23
-    review: 4850754712
-    launch_after_control_issue_closed: 1
-    automation_mode: NONE
-    require_plan_approval: true
-  - position: 2
-    id: manager-70-verified-launch-identity
-    control_issue: 3
-    status: blocked_base_review
-    blocking_label: blocked-base-review
-    source_repository: iteathen/uci-arena-manager
-    source_branch: agent/bind-verified-uci-launch-identity
-    stale_expected_head: 683d7ae20a161d0b40d176d82173a87a961c77ea
-    blocked_by:
-      - {pr: 78, review: 4850726806}
-      - {pr: 79, review: 4850708644}
-      - {pr: 80, review: 4850674462}
-    unblock: correct_stack_and_refresh_exact_starting_branch
-  - position: 3
-    id: book-forge-12-exact-credential
-    control_issue: 4
-    status: queued_isolated_child_only
-    source_repository: iteathen/uci-arena-book-forge
-    source_branch: agent/exact-acquisition-credential-use
-    expected_head: f698d49b6f9b7bdf8105dde3c598b053502e08f0
-    base_pr: 11
-    base_review: 4848083104
-    acceptance_scope: credential_child_does_not_accept_base
+  - {position: 1, id: evidence-20-catalog-integration, control_issue: 2, status: queued_review_bound, review: 4850754712, launch_after_control_issue_closed: 1}
+  - {position: 2, id: manager-70-verified-launch-identity, control_issue: 3, status: blocked_base_review, blocking_label: blocked-base-review, blocked_by_prs: [78, 79, 80]}
+  - {position: 3, id: book-forge-12-exact-credential, control_issue: 4, status: queued_isolated_child_only, blocked_base_pr: 11}
 
 review_dispositions:
   engine:
-    - {pr: 39, head: 1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee, review: 4850912840, disposition: changes_required_foundation_reconstruction_split, audit: docs/audits/engine-pr39-evaluation-release-hostile-review-2026-08-03.md}
-    - {pr: 44, head: d37ab900486cad25b5dff5cd6fa11724c8fc3929, review: 4850859460, disposition: changes_required_foundation_redesign_blocked_parent, audit: docs/audits/engine-pr44-model-adapter-hostile-review-2026-08-03.md}
-    - {pr: 47, head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef, review: 4850880052, disposition: changes_required_governance_reconstruction_blocked_parent, audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md}
-    - {pr: 52, head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff, review: 4850845427, disposition: changes_required_blocked_parent, audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md}
-    - {pr: 63, head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b, review: 4850334357, disposition: changes_required_blocked_parent_replayable}
+    - {pr: 39, review: 4850912840, disposition: foundation_reconstruction_split_required, audit: docs/audits/engine-pr39-evaluation-release-hostile-review-2026-08-03.md}
+    - {pr: 44, review: 4850859460, disposition: foundation_redesign_blocked_parent, audit: docs/audits/engine-pr44-model-adapter-hostile-review-2026-08-03.md}
+    - {pr: 47, review: 4850880052, disposition: governance_reconstruction_blocked_parent, audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md}
+    - {pr: 52, review: 4850845427, disposition: changes_required_blocked_parent, audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md}
+    - {pr: 63, review: 4850967412, disposition: changes_required_blocked_parent_replayable, audit: docs/audits/engine-pr63-resource-lease-fifth-hostile-review-2026-08-03.md}
+    - {pr: 51, review: 4843786909, disposition: rejected_stale_noncompiling_duplicate_probe}
+    - {pr: 55, review: 4847014331, disposition: rejected_planning_not_implementation}
   manager:
     - {pr: 67, reviews: [4847815394, 4848995624], disposition: reconstruction_required}
-    - {pr: 78, head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b, review: 4850726806, disposition: changes_required, audit: docs/audits/manager-pr78-uci-option-contract-hostile-review-2026-08-03.md}
-    - {pr: 79, head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba, review: 4850708644, disposition: changes_required, audit: docs/audits/manager-pr79-uci-integration-hostile-review-2026-08-03.md}
-    - {pr: 80, head: 683d7ae20a161d0b40d176d82173a87a961c77ea, review: 4850674462, disposition: changes_required, audit: docs/audits/manager-pr80-wire-framing-hostile-review-2026-08-03.md}
+    - {pr: 78, review: 4850726806, disposition: changes_required}
+    - {pr: 79, review: 4850708644, disposition: changes_required}
+    - {pr: 80, review: 4850674462, disposition: changes_required}
   installer:
-    - {pr: 3, head: 05776766064a014836650d46179eadffb73fed2a, review: 4850804908, disposition: changes_required_stale_ancestry, audit: docs/audits/installer-pr3-indexed-asset-hostile-review-2026-08-03.md}
-    - {pr: 4, head: cd061f11afbc9997710eb2f33c090311c5e4a485, review: 4850781709, disposition: changes_required_stale_ancestry, audit: docs/audits/installer-pr4-native-process-hostile-review-2026-08-03.md}
-    - {pr: 5, head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
-    - {pr: 11, head: c40edfcbe12a5e5187a4b1543aee610f40d47f02, review: 4850690366, disposition: changes_required, audit: docs/audits/installer-pr11-service-control-hostile-review-2026-08-03.md}
+    - {pr: 3, review: 4850804908, disposition: changes_required_stale_ancestry}
+    - {pr: 4, review: 4850781709, disposition: changes_required_stale_ancestry}
+    - {pr: 5, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
+    - {pr: 11, review: 4850690366, disposition: changes_required}
   evidence:
-    - {pr: 23, head: 3991983c397a222871cba70c6232da1a8be5b265, review: 4850754712, disposition: changes_required_queue_prompt_refreshed, audit: docs/audits/evidence-pr23-daemon-liveness-hostile-review-2026-08-03.md}
+    - {pr: 23, review: 4850754712, disposition: changes_required_queue_prompt_refreshed}
   book_forge:
     - {pr: 10, review: 4848065237, disposition: changes_required}
     - {pr: 11, review: 4848083104, disposition: changes_required}
   lichess:
     - {pr: 3, review: 4848125095, disposition: changes_required}
-
-independent_work_policy:
-  while_jules_active_or_budget_exhausted:
-    - continue_hostile_pr_review
-    - continue_ownership_sized_direct_repair
-    - continue_spec_and_cross_repository_audit
-    - continue_local_or_connector_supported_validation
-    - prepare_but_do_not_launch_blocked_tasks
-    - synchronize_handoffs_and_registry
 
 final_state:
   sanity_complete: false
