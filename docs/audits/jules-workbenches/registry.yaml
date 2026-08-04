@@ -1,278 +1,127 @@
-schema: uci_arena_jules_execution_registry_v9
-updated_at: '2026-08-03T22:06:00-07:00'
-preferred_transport:
-  kind: jules_rest_api
-  control_repository: iteathen/Jules-control
-  control_branch: main
+schema: uci_arena_jules_execution_registry_v10
+updated_at: '2026-08-03T22:28:00-07:00'
+control:
+  repository: iteathen/Jules-control
+  branch: main
   workflow: .github/workflows/jules-control.yml
-  controller: scripts/jules_control.py
-  creation_and_queue_entrypoint: scripts/jules_entrypoint.py
-  usage_controller: scripts/jules_usage.py
-  continue_controller: scripts/jules_continue.py
-  secret_location: github_environment_secret
-  environment: jules
-  secret_name: JULES_API_KEY
-  free_account_daily_task_limit: 15
-  limit_window_used_for_local_guard: rolling_24_hours
-  last_api_usage_observation:
-    observed_at: '2026-08-03T20:54:00-07:00'
-    sessions_created_rolling_24h: 10
-    active_or_waiting: 1
-    estimated_remaining: 5
-    total_sessions_returned: 14
-    explicit_server_quota_metadata_returned: false
-  control_commits:
-    mandatory_review_entrypoint: 69dce51d7dea95555ee3c4677da0c7b635e43d85
-    usage_collector: 2df6b093000a602f0f5c3a5fff74365f0f5ffe1a
-    limit_default_15: bfff9d133ca0feeef6146c4bf096f64ce0b2a6ff
-    durable_queue_entrypoint: 2da368878f9d2d2ccc6a52bdfcff5467a9e4b4e6
-    prior_output_review_gate: b05602510ffcf5fa747aa05110905c55ba0c5c68
-    blocked_dependency_label_gate: fd2651bae8ea57d82e2a7b94cdb8dba3f1b1080a
-    queue_help: 9f6f2411921f8cc688c42aa588c8e6b18d8f54bf
-  queue_watcher:
-    kind: chatgpt_condition_watch
-    cadence: hourly
-    notification_policy: notify_only_on_launch_or_concrete_control_failure
-    launch_command: /jules launch
-    blocked_label_prefix: blocked-
+  transport: official_jules_rest_api
+  secret: {environment: jules, name: JULES_API_KEY}
+  free_account_limit: {sessions: 15, window: rolling_24_hours}
+  last_usage: {observed_rolling_24h: 10, active_or_waiting: 1, estimated_remaining: 5}
+  maximum_active_sessions: 1
+  queue_order: oldest_eligible_control_issue_first
+  blocked_label_prefix: blocked-
+  watcher: {kind: chatgpt_condition_watch, cadence: hourly, command: /jules launch}
   rules:
-    - never expose the API key in chat, issues, logs, argv, files, or prompts
-    - resolve exactly one Jules source and require an exact startingBranch
-    - append the standing hostile-self-review protocol to every new Jules session
-    - require plan approval for broad or security-sensitive tasks
-    - use /jules continue only for recoverable stops, awaiting feedback, or apparent completion without valid output
-    - preserve exact branch, scope, approved plan, existing output PR, and all later corrective instructions
-    - review every output as hostile input in the source repository
-    - never trust Jules completion claims, test names, or self-review without direct code and evidence inspection
-    - new tasks become durable control issues and queue instead of failing when a session is active or the daily limit is exhausted
-    - skip any queue issue carrying a label whose name starts with blocked-
-    - launch exactly one oldest eligible task only after every prior output review is terminally disposed and its control issue is closed
-    - revalidate dependency labels, prior-review closure, one-active-session, and rolling-24-hour budget on every /jules launch
-    - Jules capacity limits never stop independent direct audit, implementation, testing, or review work
-    - close a control issue only after output identity and review disposition are recorded
-concurrency:
-  maximum_active_jules_sessions: 1
-  active_sessions: 1
-  durable_queued_control_issues: 3
-  eligible_after_active_closes: 1
-  blocked_dependency_issues: 1
-  rule: one broad implementation session remains active until its output is frozen, accepted_or_terminally_rejected, and its control issue is closed
-sessions:
-  - id: engine-62-20260803
-    transport: jules_rest_api
-    state: formal_architectural_correction_in_progress
-    session_resource: sessions/13034909149691235140
-    control_repository: iteathen/Jules-control
-    control_issue: 1
-    source_repository: iteathen/UCI_Arena
-    source_branch: agent/integrate-engine-audit-stacks
-    source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
-    source_issue: 62
-    output_pr: 63
-    output_branch: jules-13034909149691235140-b7c89938
-    output_base_branch: agent/integrate-engine-audit-stacks
-    output_base_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
-    output_draft: true
-    output_mergeable: true
-    first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
-    second_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
-    third_output_head_sha: bc2c27f65d24b51c69c6ac953656fae78cb01b64
-    fourth_output_head_sha: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-    current_output_head_sha: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-    first_review_comment: 5173513437
-    second_review_comment: 5173734334
-    third_review_comment: 5173823846
-    formal_review_id: 4850334357
-    formal_review_head_sha: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
-    hostile_review: returned_for_architectural_correction
-    recovery_history:
-      - apparent_completed_without_output
-      - awaiting_user_feedback_without_output
-      - first_continue_recovery
-      - first_output_pr_created
-      - first_hostile_review_failed
-      - first_correction_plan_approved
-      - second_output_pushed
-      - second_hostile_review_failed
-      - second_correction_and_continue_sent
-      - third_output_pushed
-      - third_hostile_review_failed
-      - third_correction_and_continue_sent
-      - fourth_output_pushed
-      - formal_full_system_hostile_review_failed
-      - session_reported_completed_without_addressing_formal_review
-      - state_aware_continue_replayed_formal_review
-    remaining_blockers:
-      - versioned_observation_and_acquisition_contract_missing
-      - package_version_and_consumer_lock_identity_not_advanced
-      - persisted_safe_integer_request_visibility_authority_missing
-      - malformed_or_future_timing_invents_observation_time_as_original_visibility
-      - windows_ancestor_reparse_and_handle_identity_unproved
-      - safe_unlink_can_overwrite_or_delete_replacement_objects
-      - holder_heartbeat_release_and_request_cleanup_have_check_use_races
-      - directory_entry_and_owned_temp_debris_can_self_dos_shared_runtime
-      - invalid_reads_not_charged_to_total_byte_or_allocation_bounds
-      - synchronous_high_frequency_full_directory_scan_and_max_buffer_allocation
-      - overflow_busy_timeout_abort_and_inherited_validation_failure_are_conflated
-      - compatibility_projection_fabricates_producer_shaped_markers
-      - mutable_global_instrumentation_leaks_shared_authority
-      - watcher_timer_and_filesystem_test_types_leak_through_public_api
-      - current_time_date_range_and_acquisition_timing_inputs_not_fully_bounded
-      - locale_dependent_tie_breaking
-      - watcher_fallback_and_cleanup_tests_do_not_falsify_real_failure_paths
-      - heartbeat_test_does_not_prove_changed_heartbeat_or_exact_identity
-      - windows_linux_node_24_15_evidence_missing
-      - spec_index_preflight_and_governing_contracts_disagree
-      - pr_body_and_completion_claims_are_stale_or_stronger_than_evidence
-    required_architectural_direction:
-      - platform_filesystem_store_adapter_owns_exact_object_identity_and_atomic_mutation
-      - pure_bounded_packet_classifier_owns_schema_timing_trust_stale_overflow_and_order
-      - notifier_index_owns_watcher_and_poll_fallback_without_repeated_maximum_buffer_scans
-      - public_lease_facade_exposes_only_versioned_provider_neutral_types
-      - private_dependency_injection_for_tests_no_public_runtime_private_hooks
-    control_issue_closed_at: null
-queued_tasks:
-  - id: evidence-20-catalog-integration
-    queue_position: 1
-    state: durable_queued_review_bound
+    - never expose the API key
+    - require exact repository source and startingBranch
+    - append hostile-self-review protocol to every session
+    - require plan approval for broad or security-sensitive work
+    - treat all Jules output and claims as hostile until source-repository review
+    - preserve exact branch, output PR, corrections, and review evidence
+    - queue rather than fail when budget, concurrency, review, or dependency gates block
+    - never launch an issue carrying a blocked-* label
+    - launch one task only after every prior output is terminally reviewed and its control issue closed
+    - capacity limits never stop independent direct audit and repair work
+
+active_session:
+  id: engine-62-20260803
+  session: sessions/13034909149691235140
+  control_issue: 1
+  source_repository: iteathen/UCI_Arena
+  source_branch: agent/integrate-engine-audit-stacks
+  source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+  source_issue: 62
+  output_pr: 63
+  output_branch: jules-13034909149691235140-b7c89938
+  current_head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b
+  output_review: 4850334357
+  local_disposition: changes_required_architectural_correction
+  session_state: in_progress_last_observed
+  parent_ancestry_disposition: blocked_replayable_slice_only
+  blocked_parents:
+    - {pr: 39, review: 4850912840, disposition: foundation_reconstruction_split_required}
+    - {pr: 44, review: 4850859460, disposition: model_adapter_foundation_redesign}
+    - {pr: 47, review: 4850880052, disposition: governance_and_heartbeat_reconstruction}
+  instruction_sent: >
+    Continue only the PR #63 package-owned correction; do not broaden into parent
+    repairs or claim merge-ready ancestry. Produce a replayable reviewed slice.
+  parent_update_comment: 5174933429
+  control_issue_closed_at: null
+
+queue:
+  - position: 1
+    id: evidence-20-catalog-integration
     control_issue: 2
-    queue_comment: 5174478527
-    launch_after_control_issue_closed: 1
+    status: queued_review_bound
     source_repository: iteathen/uci-arena-evidence-service
     source_branch: agent/project-daemon-heartbeat-staleness
-    expected_source_sha: 3991983c397a222871cba70c6232da1a8be5b265
+    expected_head: 3991983c397a222871cba70c6232da1a8be5b265
     existing_pr: 23
-    source_issue: 20
-    formal_review_id: 4850754712
-    review_prompt_refreshed: true
+    review: 4850754712
+    launch_after_control_issue_closed: 1
     automation_mode: NONE
     require_plan_approval: true
-    manifest: docs/audits/jules-workbenches/evidence-20-catalog-integration.yaml
-    task_body: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md
-  - id: manager-70-verified-launch-identity
-    queue_position: 2
-    state: blocked_base_review
+  - position: 2
+    id: manager-70-verified-launch-identity
     control_issue: 3
-    queue_comment: 5174480243
+    status: blocked_base_review
     blocking_label: blocked-base-review
-    launch_after_control_issue_closed: 2
     source_repository: iteathen/uci-arena-manager
     source_branch: agent/bind-verified-uci-launch-identity
-    expected_source_sha: 683d7ae20a161d0b40d176d82173a87a961c77ea
-    base_branch: agent/bound-uci-probe-wire-framing
-    base_pr: 80
-    source_issue: 70
-    blocked_by_reviews:
-      - pr: 78
-        review_id: 4850726806
-      - pr: 79
-        review_id: 4850708644
-      - pr: 80
-        review_id: 4850674462
-    unblock_requirement: correct_pr78_pr79_pr80_and_refresh_exact_starting_branch
-    automation_mode: AUTO_CREATE_PR
-    require_plan_approval: true
-    manifest: docs/audits/jules-workbenches/manager-70-verified-launch.yaml
-    task_body: docs/audits/jules-workbenches/manager-70-verified-launch-task.md
-  - id: book-forge-12-exact-credential
-    queue_position: 3
-    state: durable_queued_on_blocked_base_for_isolated_child_fix
+    stale_expected_head: 683d7ae20a161d0b40d176d82173a87a961c77ea
+    blocked_by:
+      - {pr: 78, review: 4850726806}
+      - {pr: 79, review: 4850708644}
+      - {pr: 80, review: 4850674462}
+    unblock: correct_stack_and_refresh_exact_starting_branch
+  - position: 3
+    id: book-forge-12-exact-credential
     control_issue: 4
-    queue_comment: 5174481308
-    launch_after_control_issue_closed: 2
+    status: queued_isolated_child_only
     source_repository: iteathen/uci-arena-book-forge
     source_branch: agent/exact-acquisition-credential-use
-    expected_source_sha: f698d49b6f9b7bdf8105dde3c598b053502e08f0
-    base_branch: agent/config-contract-after-system-sanity
+    expected_head: f698d49b6f9b7bdf8105dde3c598b053502e08f0
     base_pr: 11
-    source_issue: 12
-    base_review_id: 4848083104
-    acceptance_scope: credential_child_only_not_base_pr_acceptance
-    automation_mode: AUTO_CREATE_PR
-    require_plan_approval: true
-    manifest: docs/audits/jules-workbenches/book-forge-12-exact-credential.yaml
-    task_body: docs/audits/jules-workbenches/book-forge-12-exact-credential-task.md
+    base_review: 4848083104
+    acceptance_scope: credential_child_does_not_accept_base
+
 review_dispositions:
-  - repository: iteathen/uci-arena-manager
-    pr: 78
-    head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b
-    review_id: 4850726806
-    disposition: changes_required
-    audit_file: docs/audits/manager-pr78-uci-option-contract-hostile-review-2026-08-03.md
-  - repository: iteathen/uci-arena-manager
-    pr: 79
-    head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba
-    review_id: 4850708644
-    disposition: changes_required
-    audit_file: docs/audits/manager-pr79-uci-integration-hostile-review-2026-08-03.md
-  - repository: iteathen/uci-arena-manager
-    pr: 80
-    head: 683d7ae20a161d0b40d176d82173a87a961c77ea
-    review_id: 4850674462
-    disposition: changes_required
-    audit_file: docs/audits/manager-pr80-wire-framing-hostile-review-2026-08-03.md
-  - repository: iteathen/uci-arena-installer
-    pr: 3
-    head: 05776766064a014836650d46179eadffb73fed2a
-    review_id: 4850804908
-    disposition: changes_required_stale_ancestry
-    audit_file: docs/audits/installer-pr3-indexed-asset-hostile-review-2026-08-03.md
-  - repository: iteathen/uci-arena-installer
-    pr: 4
-    head: cd061f11afbc9997710eb2f33c090311c5e4a485
-    review_id: 4850781709
-    disposition: changes_required_stale_ancestry
-    audit_file: docs/audits/installer-pr4-native-process-hostile-review-2026-08-03.md
-  - repository: iteathen/uci-arena-installer
-    pr: 5
-    head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7
-    review_id: 4850792446
-    disposition: local_slice_acceptable_blocked_parent
-  - repository: iteathen/uci-arena-installer
-    pr: 11
-    head: c40edfcbe12a5e5187a4b1543aee610f40d47f02
-    review_id: 4850690366
-    disposition: changes_required
-    audit_file: docs/audits/installer-pr11-service-control-hostile-review-2026-08-03.md
-  - repository: iteathen/uci-arena-evidence-service
-    pr: 23
-    head: 3991983c397a222871cba70c6232da1a8be5b265
-    review_id: 4850754712
-    disposition: changes_required_queue_prompt_refreshed
-    audit_file: docs/audits/evidence-pr23-daemon-liveness-hostile-review-2026-08-03.md
-existing_blocked_reviews:
-  - repository: iteathen/uci-arena-manager
-    pr: 67
-    reviews: [4847815394, 4848995624]
-    disposition: reconstruction_required
-  - repository: iteathen/uci-arena-book-forge
-    pr: 10
-    review: 4848065237
-    disposition: changes_required
-  - repository: iteathen/uci-arena-book-forge
-    pr: 11
-    review: 4848083104
-    disposition: changes_required
+  engine:
+    - {pr: 39, head: 1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee, review: 4850912840, disposition: changes_required_foundation_reconstruction_split, audit: docs/audits/engine-pr39-evaluation-release-hostile-review-2026-08-03.md}
+    - {pr: 44, head: d37ab900486cad25b5dff5cd6fa11724c8fc3929, review: 4850859460, disposition: changes_required_foundation_redesign_blocked_parent, audit: docs/audits/engine-pr44-model-adapter-hostile-review-2026-08-03.md}
+    - {pr: 47, head: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef, review: 4850880052, disposition: changes_required_governance_reconstruction_blocked_parent, audit: docs/audits/engine-pr47-governance-heartbeat-hostile-review-2026-08-03.md}
+    - {pr: 52, head: 5d122ac47ca80606add8f8354adabb67dbc4a2ff, review: 4850845427, disposition: changes_required_blocked_parent, audit: docs/audits/engine-pr52-canonical-fen-hostile-review-2026-08-03.md}
+    - {pr: 63, head: cc2ead92a8abdb5d80a52072e5f0116aea34a33b, review: 4850334357, disposition: changes_required_blocked_parent_replayable}
+  manager:
+    - {pr: 67, reviews: [4847815394, 4848995624], disposition: reconstruction_required}
+    - {pr: 78, head: 9e18b058b4870b02f65b08fadb8d6f14df85d97b, review: 4850726806, disposition: changes_required, audit: docs/audits/manager-pr78-uci-option-contract-hostile-review-2026-08-03.md}
+    - {pr: 79, head: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba, review: 4850708644, disposition: changes_required, audit: docs/audits/manager-pr79-uci-integration-hostile-review-2026-08-03.md}
+    - {pr: 80, head: 683d7ae20a161d0b40d176d82173a87a961c77ea, review: 4850674462, disposition: changes_required, audit: docs/audits/manager-pr80-wire-framing-hostile-review-2026-08-03.md}
+  installer:
+    - {pr: 3, head: 05776766064a014836650d46179eadffb73fed2a, review: 4850804908, disposition: changes_required_stale_ancestry, audit: docs/audits/installer-pr3-indexed-asset-hostile-review-2026-08-03.md}
+    - {pr: 4, head: cd061f11afbc9997710eb2f33c090311c5e4a485, review: 4850781709, disposition: changes_required_stale_ancestry, audit: docs/audits/installer-pr4-native-process-hostile-review-2026-08-03.md}
+    - {pr: 5, head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
+    - {pr: 11, head: c40edfcbe12a5e5187a4b1543aee610f40d47f02, review: 4850690366, disposition: changes_required, audit: docs/audits/installer-pr11-service-control-hostile-review-2026-08-03.md}
+  evidence:
+    - {pr: 23, head: 3991983c397a222871cba70c6232da1a8be5b265, review: 4850754712, disposition: changes_required_queue_prompt_refreshed, audit: docs/audits/evidence-pr23-daemon-liveness-hostile-review-2026-08-03.md}
+  book_forge:
+    - {pr: 10, review: 4848065237, disposition: changes_required}
+    - {pr: 11, review: 4848083104, disposition: changes_required}
+  lichess:
+    - {pr: 3, review: 4848125095, disposition: changes_required}
+
 independent_work_policy:
   while_jules_active_or_budget_exhausted:
-    - continue_direct_ownership_sized_fixes
     - continue_hostile_pr_review
+    - continue_ownership_sized_direct_repair
     - continue_spec_and_cross_repository_audit
     - continue_local_or_connector_supported_validation
-    - prepare_but_do_not_launch_future_jules_tasks
-    - update_handoffs_and_registry
-legacy_workbench_fallback:
-  enabled: true
-  use_only_when:
-    - Jules API cannot expose or accept the authoritative starting branch
-    - source repository access cannot be granted directly
-  rules:
-    - private one-task disposable repository
-    - exact baseline and patch-equivalence verification
-    - delete immediately after source-repository PR is established and recorded
-superseded_uncreated_workbenches:
-  - id: engine-62-20260803-workbench-plan
-    intended_repository: iteathen/jules-wb-engine-62-20260803
-    state: superseded_before_creation
-    created: false
-    deleted: not_applicable
+    - prepare_but_do_not_launch_blocked_tasks
+    - synchronize_handoffs_and_registry
+
+final_state:
+  sanity_complete: false
+  soundness_conclusion: none
+  release_readiness: not_established
+  pkg_e2e_011: unknown
