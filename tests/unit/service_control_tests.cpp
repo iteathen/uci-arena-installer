@@ -20,6 +20,7 @@ using arena::platform::service_action_name;
 using arena::platform::service_diagnostic_max_characters;
 using arena::platform::service_name_max_characters;
 using arena::platform::service_outcome_name;
+using arena::platform::service_result_from_observation;
 using arena::platform::service_state_from_systemd;
 using arena::platform::service_state_from_windows_error;
 using arena::platform::service_state_from_windows_scm;
@@ -105,7 +106,62 @@ TEST_CASE("Windows SCM states and errors map without exposing raw values") {
     REQUIRE(service_state_from_windows_scm(7) == ServiceState::unknown);
     REQUIRE(service_state_from_windows_scm(0xffff'ffffU) == ServiceState::unknown);
     REQUIRE(service_state_from_windows_error(1060) == ServiceState::unavailable);
+    REQUIRE(service_state_from_windows_error(1072) == ServiceState::unavailable);
+    REQUIRE(service_state_from_windows_error(1722) == ServiceState::unavailable);
     REQUIRE(service_state_from_windows_error(5) == ServiceState::unknown);
+}
+
+TEST_CASE("service observation outcome semantics are identical across platforms") {
+    constexpr std::array classified_states{
+        ServiceState::inactive,
+        ServiceState::activating,
+        ServiceState::active,
+        ServiceState::deactivating,
+        ServiceState::failed,
+    };
+    for (const ServiceState state : classified_states) {
+        REQUIRE(service_result_from_observation(
+            ServiceAction::status,
+            state,
+            true).completed());
+    }
+    REQUIRE_FALSE(service_result_from_observation(
+        ServiceAction::status,
+        ServiceState::unknown,
+        true).completed());
+    REQUIRE_FALSE(service_result_from_observation(
+        ServiceAction::status,
+        ServiceState::unavailable,
+        true).completed());
+
+    for (const ServiceState state : classified_states) {
+        REQUIRE(service_result_from_observation(
+            ServiceAction::start,
+            state,
+            true).completed() == (state == ServiceState::active));
+        REQUIRE(service_result_from_observation(
+            ServiceAction::stop,
+            state,
+            true).completed() == (state == ServiceState::inactive));
+        REQUIRE(service_result_from_observation(
+            ServiceAction::restart,
+            state,
+            true).completed() == (state == ServiceState::active));
+    }
+
+    for (const ServiceAction action : {
+        ServiceAction::status,
+        ServiceAction::start,
+        ServiceAction::stop,
+        ServiceAction::restart,
+    }) {
+        REQUIRE_FALSE(service_result_from_observation(
+            action,
+            ServiceState::active,
+            false,
+            5,
+            "platform failure").completed());
+    }
 }
 
 TEST_CASE("service diagnostics are bounded printable ASCII") {
@@ -121,30 +177,34 @@ TEST_CASE("service diagnostics are bounded printable ASCII") {
     REQUIRE(bounded_service_diagnostic(std::string("x\xc2\xa0y", 4)) == "x??y");
 }
 
-TEST_CASE("service result completion is independent of platform codes") {
-    const ServiceActionResult completed{
+TEST_CASE("service result retains bounded operator codes and diagnostics") {
+    const ServiceActionResult completed = service_result_from_observation(
         ServiceAction::status,
-        ServiceOutcome::completed,
-        ServiceState::inactive,
+        ServiceState::failed,
+        true,
         7,
-        "operator-only code",
-    };
+        "operator-only code");
     REQUIRE(completed.completed());
+    REQUIRE(completed.platform_code == 7);
+    REQUIRE(completed.diagnostic == "operator-only code");
 
-    const ServiceActionResult failed{
+    const ServiceActionResult failed = service_result_from_observation(
         ServiceAction::start,
-        ServiceOutcome::failed,
         ServiceState::unknown,
-        0,
-        "failed",
-    };
+        false,
+        5,
+        "failed");
     REQUIRE_FALSE(failed.completed());
+    REQUIRE(failed.platform_code == 5);
 }
 
 TEST_CASE("invalid actions and service names fail before platform access") {
     const auto invalid = static_cast<ServiceAction>(255);
     REQUIRE(service_action_name(invalid).empty());
     REQUIRE_FALSE(valid_service_action(invalid));
+    REQUIRE_THROWS_WITH(
+        service_result_from_observation(invalid, ServiceState::unknown, false),
+        "unsupported service action");
     REQUIRE_THROWS_WITH(
         perform_service_action("unused-service", invalid),
         "unsupported service action");
