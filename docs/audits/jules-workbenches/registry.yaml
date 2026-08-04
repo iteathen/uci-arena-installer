@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v3
-updated_at: '2026-08-03T18:27:00-07:00'
+schema: uci_arena_jules_execution_registry_v4
+updated_at: '2026-08-03T18:31:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
@@ -22,14 +22,14 @@ preferred_transport:
 concurrency:
   maximum_active_jules_sessions: 1
   active_sessions: 1
-  prepared_not_launched: 1
+  prepared_not_launched: 2
   rule: >-
     Keep one broad implementation session active until its output is frozen and reviewed.
     Prepared tasks may be documented, but must not be launched concurrently.
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: correction_requested_after_first_hostile_review
+    state: correction_plan_approved_in_progress
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -50,6 +50,8 @@ sessions:
       - first_output_pr_created
       - first_output_hostile_review_failed
       - correction_message_and_continue_sent
+      - corrected_plan_generated_from_pr_review
+      - corrected_plan_approved
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
     first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
@@ -58,7 +60,7 @@ sessions:
     output_base_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     output_draft: true
     first_review_comment: 5173513437
-    hostile_review: changes_required
+    hostile_review: changes_required_correction_in_progress
     first_review_findings:
       - incomplete_exact_file_admission_and_path_deletion_race
       - optional_request_identity_fields
@@ -85,8 +87,9 @@ sessions:
     control_issue_closed_at: null
 prepared_tasks:
   - id: evidence-20-catalog-integration
+    queue_position: 1
     state: prepared_not_launched
-    launch_after: engine-62-20260803_terminal_and_reviewed
+    launch_after: engine-62-20260803-terminal-and-reviewed
     source_repository: iteathen/uci-arena-evidence-service
     source_branch: agent/project-daemon-heartbeat-staleness
     expected_source_sha: 3991983c397a222871cba70c6232da1a8be5b265
@@ -96,6 +99,26 @@ prepared_tasks:
     require_plan_approval: true
     manifest: docs/audits/jules-workbenches/evidence-20-catalog-integration.yaml
     task_body: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md
+  - id: book-forge-12-exact-credential
+    queue_position: 2
+    state: prepared_not_launched
+    launch_after: evidence-20-catalog-integration-terminal-and-reviewed
+    source_repository: iteathen/uci-arena-book-forge
+    source_branch: agent/exact-acquisition-credential-use
+    expected_source_sha: f698d49b6f9b7bdf8105dde3c598b053502e08f0
+    base_branch: agent/config-contract-after-system-sanity
+    base_pr: 11
+    source_issue: 12
+    automation_mode: AUTO_CREATE_PR
+    require_plan_approval: true
+    architecture:
+      - callback_scoped_credential_owner
+      - posix_no_follow_descriptor_identity
+      - windows_handle_holding_private_ipc_protocol
+      - exact_ascii_byte_grammar_no_normalization
+      - verified_identity_through_request_callback
+    manifest: docs/audits/jules-workbenches/book-forge-12-exact-credential.yaml
+    task_body: docs/audits/jules-workbenches/book-forge-12-exact-credential-task.md
 legacy_workbench_fallback:
   enabled: true
   use_only_when:
