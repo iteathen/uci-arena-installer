@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v11
-  snapshot_at_utc: '2026-08-04T07:05:14Z'
+  schema: uci_arena_whole_system_sanity_handoff_v12
+  snapshot_at_utc: '2026-08-04T07:04:44.292177Z'
   status: in_progress
   sanity_complete: false
   soundness_conclusion: none
@@ -29,7 +29,7 @@ jules:
   control_repository: iteathen/Jules-control
   maximum_active_sessions: 1
   blocked_label_prefix: blocked-
-  active_or_resuming:
+  active:
     id: engine-62-20260803
     session: sessions/13034909149691235140
     control_issue: 1
@@ -39,12 +39,11 @@ jules:
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
     reviewed_head: e7eb5edfbb584aff55e2414b36d769e0b4405fc0
-    previous_substantive_head: 2106482635969e1e9c6b28b76fb80aca35890af6
     formal_review: 4851511234
     audit: docs/audits/engine-pr63-resource-lease-sixth-hostile-review-2026-08-03.md
     audit_commit: 7dcdf4acef6b4f6258fcb14dfdaf08736ebd077b
     disposition: changes_required_blocked_parent_replayable_package_slice
-    terminal_observation:
+    previous_terminal:
       state: COMPLETED
       updated_at: '2026-08-04T06:53:25.552460Z'
       status_comment: 5175618975
@@ -52,54 +51,38 @@ jules:
     continue_command: 5175682230
     continue_acknowledgement: 5175685564
     correction_replayed: true
-    post_replay_status_command: 5175705079
-    next_rule: do_not_send_another_command_if_resumed_active
+    post_replay_status:
+      state: IN_PROGRESS
+      updated_at: '2026-08-04T07:04:44.292177Z'
+      request_comment: 5175705079
+      response_comment: 5175706829
+    next_rule: do_not_interrupt_while_active_and_review_only_substantive_head_beyond_e7eb5edf
     blockers:
       - persisted_safe_integer_visibility_authority_absent
       - invalid_or_future_timing_rewritten_to_filesystem_time
       - future_heartbeat_negative_elapsed_tolerance
       - package_result_failure_version_migration_absent
       - reason_algebra_exceeds_required_set
-      - path_based_holder_and_request_replacement_races
-      - close_then_path_unlink_race
+      - path_based_update_and_close_then_unlink_races
       - windows_and_ancestor_reparse_identity_absent
       - cleanup_failures_swallowed
       - release_can_report_success_while_holder_remains
       - synchronous_notifier_callback_handle_leak
-      - incomplete_path_time_work_cancellation_free_space_bounds
-      - false_manual_metrics
+      - incomplete_bounds_and_false_metrics
       - locale_sensitive_ordering
       - private_path_exposure
-      - inconsistent_public_failure_semantics
-      - decisive_node_24_15_windows_linux_tests_absent
-      - stale_overclaiming_pr_body
+      - inconsistent_failure_semantics
+      - decisive_node_24_15_windows_linux_evidence_absent
+      - stale_pr_body
   queue:
-    - position: 1
-      control_issue: 2
-      task: evidence_20_catalog_heartbeat_projection
-      status: blocked_by_control_issue_1
-      review: 4850754712
-    - position: 2
-      control_issue: 3
-      task: manager_70_verified_launch_identity
-      status: blocked_base_review
-      blocking_label: blocked-base-review
-      blocked_by_prs: [78, 79, 80]
-    - position: 3
-      control_issue: 4
-      task: book_forge_12_exact_credential
-      status: queued_isolated_child_only
-      blocked_base_pr: 11
+    - {position: 1, control_issue: 2, task: evidence_20_catalog_heartbeat_projection, status: blocked_by_control_issue_1, review: 4850754712}
+    - {position: 2, control_issue: 3, task: manager_70_verified_launch_identity, status: blocked_base_review, blocking_label: blocked-base-review, blocked_by_prs: [78, 79, 80]}
+    - {position: 3, control_issue: 4, task: book_forge_12_exact_credential, status: queued_isolated_child_only, blocked_base_pr: 11}
 
 repositories:
   engine:
     authoritative_pr_chain: none_reconstruction_required
-    reconstruction_order:
-      - pr_39_foundations
-      - pr_44_model_adapter
-      - pr_47_governance_heartbeat
-      - replay_pr_52_fen_slice
-      - replay_pr_63_resource_lease_slice
+    reconstruction_order: [pr_39_foundations, pr_44_model_adapter, pr_47_governance_heartbeat, replay_pr_52_fen_slice, replay_pr_63_resource_lease_slice]
     reviews:
       - {pr: 39, head: 1ea05b1e6481e6eba168138d6fac2d73bf0ce4ee, review: 4850912840, disposition: foundation_reconstruction_split_required}
       - {pr: 44, head: d37ab900486cad25b5dff5cd6fa11724c8fc3929, review: 4850859460, disposition: foundation_redesign_blocked_parent}
@@ -122,25 +105,25 @@ repositories:
   installer:
     base_pr: 2
     reviews:
-      - {pr: 3, head: 05776766064a014836650d46179eadffb73fed2a, review: 4850804908, disposition: changes_required_stale_ancestry}
-      - {pr: 4, head: cd061f11afbc9997710eb2f33c090311c5e4a485, review: 4850781709, disposition: changes_required_stale_ancestry}
-      - {pr: 5, head: 16fe257ce6d55714a4d87efcea4ffe1314f4a2b7, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
-      - {pr: 11, head: c40edfcbe12a5e5187a4b1543aee610f40d47f02, review: 4850690366, disposition: changes_required}
+      - {pr: 3, review: 4850804908, disposition: changes_required_stale_ancestry}
+      - {pr: 4, review: 4850781709, disposition: changes_required_stale_ancestry}
+      - {pr: 5, review: 4850792446, disposition: local_slice_acceptable_blocked_parent}
+      - {pr: 11, review: 4850690366, disposition: changes_required}
     open_issues: [7, 8, 9, 10]
 
   evidence_service:
     authoritative_stack: none
     reviews:
-      - {pr: 23, head: 3991983c397a222871cba70c6232da1a8be5b265, review: 4850754712, disposition: changes_required_queued_correction}
-      - {pr: 22, head: 3e9d9609382a3706aa82db66bca51096ea0dc0b1, review: 4850984541, disposition: narrow_slice_acceptable_blocked_parent}
-      - {pr: 19, head: 6b4988066751b40b7231597b2b19a2177d4d2284, review: 4850992135, disposition: changes_required}
-      - {pr: 18, head: 117cf64976fe179989bddee8dbfc534966370ec6, review: 4851001435, disposition: changes_required}
-      - {pr: 17, head: 640545739abe8db15d147c0202dabc684281b16f, review: 4851009132, disposition: changes_required}
-      - {pr: 16, head: 7dfc4388f5ce57105e8de515fdcb0526e9298df0, review: 4851046968, disposition: changes_required}
-      - {pr: 15, head: a66fece5f8096622a53784479fe2c8da97fbc4f9, review: 4851061354, disposition: changes_required}
-      - {pr: 14, head: fbb1a9aa8d0ae1a2ad14be6a00d3bb229285a173, review: 4851124960, disposition: reconstruction_required, audit_commit: 2b4ad1aa44ef49082e3d4e11e133f542f29099cf}
-      - {pr: 13, head: 7b5e7f90476e17e5157f4a782a27122aa210a90b, review: 4851148254, disposition: reconstruction_required, audit_commit: 7173555e3562f31ddf58bbcb57c48092e992665b}
-      - {pr: 10, head: b09abb9aecf6aba6ca04358c8789eef86ecb763b, review: 4851184668, disposition: split_reconstruct_by_owner, audit_commit: a39c5d31eeda3cd824ba16f6158657467f9e8681}
+      - {pr: 23, review: 4850754712, disposition: changes_required_queued_correction}
+      - {pr: 22, review: 4850984541, disposition: narrow_slice_acceptable_blocked_parent}
+      - {pr: 19, review: 4850992135, disposition: changes_required}
+      - {pr: 18, review: 4851001435, disposition: changes_required}
+      - {pr: 17, review: 4851009132, disposition: changes_required}
+      - {pr: 16, review: 4851046968, disposition: changes_required}
+      - {pr: 15, review: 4851061354, disposition: changes_required}
+      - {pr: 14, review: 4851124960, disposition: reconstruction_required, audit_commit: 2b4ad1aa44ef49082e3d4e11e133f542f29099cf}
+      - {pr: 13, review: 4851148254, disposition: reconstruction_required, audit_commit: 7173555e3562f31ddf58bbcb57c48092e992665b}
+      - {pr: 10, review: 4851184668, disposition: split_reconstruct_by_owner, audit_commit: a39c5d31eeda3cd824ba16f6158657467f9e8681}
     issue_21: blocked_on_corrected_engine_resource_lease
 
   book_forge:
@@ -154,8 +137,7 @@ repositories:
     ownership_order: [4, 5, 6, 7]
 
 next_actions:
-  - check_response_to_status_comment_5175705079
-  - do_not_interrupt_resumed_active_jules_session
+  - do_not_interrupt_active_jules_session
   - review_only_substantive_head_beyond_e7eb5edf
   - keep_queue_blocked_while_control_issue_1_open_or_active
   - continue_independent_ownership_sized_reviews_and_repairs
