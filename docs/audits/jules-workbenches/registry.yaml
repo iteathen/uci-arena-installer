@@ -1,5 +1,5 @@
-schema: uci_arena_jules_execution_registry_v4
-updated_at: '2026-08-03T18:31:00-07:00'
+schema: uci_arena_jules_execution_registry_v5
+updated_at: '2026-08-03T19:05:00-07:00'
 preferred_transport:
   kind: jules_rest_api
   control_repository: iteathen/Jules-control
@@ -11,25 +11,22 @@ preferred_transport:
   environment: jules
   secret_name: JULES_API_KEY
   rules:
-    - never place the API key in chat, issues, logs, argv, repository files, or prompts
+    - never expose the API key in chat, issues, logs, argv, files, or prompts
     - resolve exactly one Jules source and require an exact startingBranch
     - require plan approval for broad or security-sensitive tasks
-    - use /jules continue for recoverable stops or apparent completion without a valid output
-    - preserve exact branch, scope, approved plan, and later corrective instructions
+    - use /jules continue for recoverable stops, awaiting feedback, or apparent completion without valid output
+    - preserve exact branch, scope, approved plan, and all later corrective instructions
     - review every output as hostile input in the source repository
     - close a control issue only after output identity and review disposition are recorded
-    - do not create a temporary clone when the API accepts the authoritative branch
 concurrency:
   maximum_active_jules_sessions: 1
   active_sessions: 1
-  prepared_not_launched: 2
-  rule: >-
-    Keep one broad implementation session active until its output is frozen and reviewed.
-    Prepared tasks may be documented, but must not be launched concurrently.
+  prepared_not_launched: 3
+  rule: one broad implementation session remains active until its output is frozen and accepted_or_rejected
 sessions:
   - id: engine-62-20260803
     transport: jules_rest_api
-    state: correction_plan_approved_in_progress
+    state: second_correction_in_progress
     session_resource: sessions/13034909149691235140
     control_repository: iteathen/Jules-control
     control_issue: 1
@@ -37,53 +34,39 @@ sessions:
     source_branch: agent/integrate-engine-audit-stacks
     source_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     source_issue: 62
-    destination_base: agent/integrate-engine-audit-stacks
-    intended_destination_branch: agent/timestamp-resource-lease-revocation
-    automation_mode: AUTO_CREATE_PR
-    plan_approval_required: true
-    plan_approved: true
-    recovery_history:
-      - apparent_completed_without_output
-      - awaiting_user_feedback_without_output
-      - corrective_plan_message_sent
-      - continue_command_sent_successfully
-      - first_output_pr_created
-      - first_output_hostile_review_failed
-      - correction_message_and_continue_sent
-      - corrected_plan_generated_from_pr_review
-      - corrected_plan_approved
     output_pr: 63
     output_branch: jules-13034909149691235140-b7c89938
-    first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
-    current_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
     output_base_branch: agent/integrate-engine-audit-stacks
     output_base_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
     output_draft: true
+    first_output_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
+    second_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
+    current_output_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
     first_review_comment: 5173513437
-    hostile_review: changes_required_correction_in_progress
-    first_review_findings:
-      - incomplete_exact_file_admission_and_path_deletion_race
-      - optional_request_identity_fields
-      - noncanonical_timestamps
-      - malformed_or_future_foreground_demand_silently_lost
-      - untyped_request_overflow_and_stale_file_dos
-      - duplicated_request_selection_authority
-      - invalid_clock_poll_and_abort_race
-      - incomplete_waiter_watcher_timer_cleanup_tests
-      - no_real_heartbeat_preservation_or_allocation_measurement
-      - missing_governing_spec_and_preflight_update
-    correction_requirements:
-      - exact_descriptor_handle_complete_bounded_packet_read
-      - regular_object_and_replacement_safe_cleanup
-      - required_exact_request_identity_kind_schema_scope_and_timestamp_fields
-      - canonical_utc_round_trip_grammar
-      - conservative_typed_revocation_for_untrusted_foreground_time
-      - typed_overflow_or_complete_bounded_earliest_selection
-      - one_shared_request_classification_and_selection_owner
-      - exact_clock_and_poll_validation
-      - abort_race_and_complete_cleanup
-      - real_wakeup_fallback_heartbeat_leak_scan_and_allocation_tests
-      - governing_spec_and_preflight
+    second_review_comment: 5173734334
+    hostile_review: changes_required_second_correction_in_progress
+    recovery_history:
+      - apparent_completed_without_output
+      - awaiting_user_feedback_without_output
+      - first_continue_recovery
+      - first_output_pr_created
+      - first_hostile_review_failed
+      - first_correction_plan_approved
+      - second_output_pushed
+      - second_hostile_review_failed
+      - second_correction_and_continue_sent
+    remaining_blockers:
+      - no_follow_and_reparse_safe_exact_object_admission
+      - replacement_safe_deletion
+      - bounded_directory_enumeration_and_total_allocation
+      - exact_canonical_utc_round_trip
+      - exact_filename_packet_uuid_and_byte_identity
+      - conservative_typed_untrusted_foreground_demand
+      - distinct_overflow_reason_with_null_identity
+      - acquisition_snapshot_and_demand_fail_closed_on_overflow
+      - one_observation_clock
+      - injected_watcher_timer_abort_cleanup_evidence
+      - exact_scan_and_allocation_instrumentation
     control_issue_closed_at: null
 prepared_tasks:
   - id: evidence-20-catalog-integration
@@ -99,10 +82,24 @@ prepared_tasks:
     require_plan_approval: true
     manifest: docs/audits/jules-workbenches/evidence-20-catalog-integration.yaml
     task_body: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md
-  - id: book-forge-12-exact-credential
+  - id: manager-70-verified-launch-identity
     queue_position: 2
     state: prepared_not_launched
     launch_after: evidence-20-catalog-integration-terminal-and-reviewed
+    source_repository: iteathen/uci-arena-manager
+    source_branch: agent/bind-verified-uci-launch-identity
+    expected_source_sha: 683d7ae20a161d0b40d176d82173a87a961c77ea
+    base_branch: agent/bound-uci-probe-wire-framing
+    base_pr: 80
+    source_issue: 70
+    automation_mode: AUTO_CREATE_PR
+    require_plan_approval: true
+    manifest: docs/audits/jules-workbenches/manager-70-verified-launch.yaml
+    task_body: docs/audits/jules-workbenches/manager-70-verified-launch-task.md
+  - id: book-forge-12-exact-credential
+    queue_position: 3
+    state: prepared_not_launched
+    launch_after: manager-70-verified-launch-identity-terminal-and-reviewed
     source_repository: iteathen/uci-arena-book-forge
     source_branch: agent/exact-acquisition-credential-use
     expected_source_sha: f698d49b6f9b7bdf8105dde3c598b053502e08f0
@@ -111,23 +108,16 @@ prepared_tasks:
     source_issue: 12
     automation_mode: AUTO_CREATE_PR
     require_plan_approval: true
-    architecture:
-      - callback_scoped_credential_owner
-      - posix_no_follow_descriptor_identity
-      - windows_handle_holding_private_ipc_protocol
-      - exact_ascii_byte_grammar_no_normalization
-      - verified_identity_through_request_callback
     manifest: docs/audits/jules-workbenches/book-forge-12-exact-credential.yaml
     task_body: docs/audits/jules-workbenches/book-forge-12-exact-credential-task.md
 legacy_workbench_fallback:
   enabled: true
   use_only_when:
     - Jules API cannot expose or accept the authoritative starting branch
-    - the source repository cannot be granted directly to Jules
+    - source repository access cannot be granted directly
   rules:
-    - private disposable repository under the user account
-    - one task only and never reuse
-    - exact baseline manifest and patch-equivalence verification
+    - private one-task disposable repository
+    - exact baseline and patch-equivalence verification
     - delete immediately after source-repository PR is established and recorded
 superseded_uncreated_workbenches:
   - id: engine-62-20260803-workbench-plan
