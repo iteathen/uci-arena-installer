@@ -1,6 +1,6 @@
 meta:
-  schema: uci_arena_whole_system_sanity_handoff_v6
-  snapshot_at: '2026-08-03T18:18:00-07:00'
+  schema: uci_arena_whole_system_sanity_handoff_v7
+  snapshot_at: '2026-08-03T19:08:00-07:00'
   status: in_progress
   soundness_conclusion: none
   release_readiness: not_established
@@ -19,159 +19,132 @@ method:
   rules:
     - one_owner_per_concern
     - project_owned_neutral_contracts
-    - exact_bounded_bytes_types_identities_paths_and_schemas
+    - exact_bounded_bytes_types_identities_paths_and_lifetimes
     - no_peer_source_imports_or_hidden_discovery
     - ownership_sized_repairs
     - exact_evidence_before_claim
 
-validation_environment:
-  available:
-    - private_github_connector
-    - linux_cpp20_strict_compiler
-    - node_22_16_isolated_tests
-    - official_jules_rest_api_via_private_control_repo
-  unavailable:
-    - complete_private_checkouts
-    - required_node_24_15_provider_environments
-    - windows_sdk_and_scm
-    - booted_linux_systemd
-    - complete_onnx_linked_engine
-    - complete_installer_lifecycle_environment
-
 repositories:
   installer:
-    authority: suite_composition_and_deployment
     base_pr: 2
     review_stack:
-      - {pr: 3, base_pr: 2, status: native_validation_required}
-      - {pr: 4, base_pr: 2, status: native_validation_required}
-      - {pr: 5, base_pr: 4, status: reviewable}
-      - pr: 11
-        base_pr: 5
-        branch: agent/platform-neutral-service-control-result
-        head_sha: c40edfcbe12a5e5187a4b1543aee610f40d47f02
-        status: draft_mergeable_native_validation_required
-        hostile_review_corrections:
-          - neutral_unavailable_state
-          - bounded_printable_service_identity
-          - printable_bounded_diagnostics
-          - typed_linux_process_failures
-          - exact_systemd_load_and_active_state
-          - exact_windows_missing_rpc_and_service_exit_mapping
-          - shared_pure_outcome_authority
+      - {pr: 3, status: native_validation_required}
+      - {pr: 4, status: native_validation_required}
+      - {pr: 5, status: reviewable}
+      - {pr: 11, base_pr: 5, head_sha: c40edfcbe12a5e5187a4b1543aee610f40d47f02, status: draft_mergeable_native_validation_required}
     blockers:
-      - {issue: 7, summary: exact_stable_byte_admission, blocks_pkg_e2e: true}
-      - {issue: 8, summary: bounded_acquisition_cache_archive_expansion, blocks_pkg_e2e: true}
-      - {issue: 9, summary: recoverable_apply_rollback_transaction, blocks_pkg_e2e: true}
-      - {issue: 10, summary: exact_uninstall_and_purge_authority, blocks_pkg_e2e: true}
+      - {issue: 7, blocks_pkg_e2e: true, summary: exact_stable_byte_admission}
+      - {issue: 8, blocks_pkg_e2e: true, summary: bounded_acquisition_archive_expansion}
+      - {issue: 9, blocks_pkg_e2e: true, summary: recoverable_apply_rollback}
+      - {issue: 10, blocks_pkg_e2e: true, summary: exact_uninstall_purge_authority}
 
   engine:
-    authority: chess_search_evaluation_model_inference_runtime
     authoritative_stack:
       - {pr: 39, branch: agent/system-sanity}
       - {pr: 44, branch: agent/model-adapter-contract, base_pr: 39}
       - {pr: 47, branch: agent/integrate-engine-audit-stacks, base_pr: 44, head_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef}
-    reviewable: [{pr: 52, base_pr: 47, status: native_validation_required}]
-    inference_open: [57, 45, 46]
-    rejected_jules_prs: [60, 61]
-    tt_open: [43, 54]
-    performance_open: [56, 58, 59]
+    reviewable: [{pr: 52, base_pr: 47}]
+    open_issues:
+      inference: [57, 45, 46]
+      transposition_table: [43, 54]
+      performance: [56, 58, 59]
     issue_62:
-      consumer: iteathen/uci-arena-evidence-service#21
-      prepared_branch: agent/timestamp-resource-lease-revocation
-      prepared_branch_status: identical_to_pr_47
       jules_session: sessions/13034909149691235140
       control_issue: iteathen/Jules-control#1
       api_starting_branch: agent/integrate-engine-audit-stacks
       starting_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
-      automation_mode: AUTO_CREATE_PR
-      current_state: IN_PROGRESS
-      output_pr: null
-      output_sha: null
-      corrective_requirements:
-        - exact_descriptor_handle_packet_read
-        - byte_bound_before_json_decode
-        - reject_oversized_identity_never_clamp
-        - no_silent_request_truncation
-        - deterministic_earliest_request_or_typed_conservative_overflow
-        - one_canonical_wait_api_unless_proven_compatibility
-        - preserve_exact_original_requested_at
-        - conservative_malformed_ambiguous_future_timestamp_handling
+      output_pr: 63
+      output_branch: jules-13034909149691235140-b7c89938
+      output_base: agent/integrate-engine-audit-stacks
+      first_head_sha: a5f773cb188dafd1e2fcbee0f638cad9a1aed8e7
+      second_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
+      current_known_head_sha: 7d3f8c1f0fec3b0628b0ef3bf07f6476ddb826be
+      state: second_correction_in_progress
+      first_review_comment: 5173513437
+      second_review_comment: 5173734334
+      remaining_blockers:
+        - no_follow_and_reparse_safe_exact_object_admission
+        - replacement_safe_deletion
+        - bounded_directory_enumeration_and_allocation
+        - exact_canonical_utc_round_trip
+        - exact_filename_packet_uuid_and_byte_identity
+        - conservative_typed_untrusted_foreground_demand
+        - distinct_overflow_reason_with_null_identity
+        - fail_closed_overflow_in_acquisition_snapshot_and_demand
+        - one_observation_clock
+        - injected_watcher_timer_abort_cleanup_evidence
+        - exact_scan_and_allocation_instrumentation
 
   manager:
-    authority: installed_suite_control_plane
     base_pr: 54
     base_sha: 233654568e91d50eb5e0a995fd22e109c3d2a66d
-    reviewable:
+    review_stack:
       - {pr: 73, base_pr: 54, status: native_validation_required}
       - pr: 78
-        issue: 76
-        branch: agent/uci-option-contract-v1
         base_pr: 54
+        branch: agent/uci-option-contract-v1
         head_sha: 9e18b058b4870b02f65b08fadb8d6f14df85d97b
         status: draft_mergeable_native_validation_required
-        files_changed: 6
-        validation:
-          - strict_cpp20_compile_passed
-          - adversarial_parser_probes_passed
-          - representative_256_option_allocations_522
-        hostile_review_correction: cumulative_bound_for_externally_supplied_option_records
+        local_validation: [strict_compile, adversarial_probes, allocation_count_522_at_256_options]
       - pr: 79
-        issue: 70_partial
-        branch: agent/integrate-uci-option-contract
         base_pr: 78
+        branch: agent/integrate-uci-option-contract
         head_sha: 0cee8727caab3c9d6c44ce8dd4a4012f677131ba
         status: draft_mergeable_native_validation_required
-        files_changed: 4
+      - pr: 80
+        base_pr: 79
+        branch: agent/bound-uci-probe-wire-framing
+        head_sha: 683d7ae20a161d0b40d176d82173a87a961c77ea
+        status: draft_mergeable_native_validation_required
         scope:
-          - production_contract_adoption
-          - acquisition_edge_metadata_bounds
-          - canonical_advertised_override_spelling
-          - process_level_regressions
-        remaining_issue_70:
-          - raw_byte_framing
-          - exact_executable_path_hash_launch_identity
+          - bounded_native_process_raw_byte_framing
+          - droppable_info_only
+          - fatal_control_overflow_and_queue_pressure
+          - exact_uci_wire_text_admission
+          - exact_uciok_and_readyok
+        local_validation:
+          - strict_linux_port_compile
+          - strict_uci_process_compile
+          - pure_wire_probe_passed
+          - real_child_framing_probe_passed
+    final_issue_70_boundary:
+      branch: agent/bind-verified-uci-launch-identity
+      expected_sha: 683d7ae20a161d0b40d176d82173a87a961c77ea
+      state: prepared_not_launched
+      manifest: docs/audits/jules-workbenches/manager-70-verified-launch.yaml
+      task: docs/audits/jules-workbenches/manager-70-verified-launch-task.md
     blocked:
-      - {pr: 67, summary: exact_sqlite_lifecycle_reconstruction_required, review_comment: 4848995624}
-      - {issue: 69, summary: localauth_reconstruction_required, rejected_pr: 77, review_comment: 5172704927}
+      - {pr: 67, summary: sqlite_lifecycle_reconstruction_required}
+      - {issue: 69, summary: localauth_reconstruction_required}
 
   evidence_service:
-    authority: evidence_scheduling_and_publication
     authoritative_stack: [10, 13, 14, 15, 16, 17, 18, 19, 22]
-    partial:
-      - pr: 23
-        issue: 20
-        branch: agent/project-daemon-heartbeat-staleness
-        head_sha: 3991983c397a222871cba70c6232da1a8be5b265
-        status: projector_slice_catalog_owner_missing
-        validation: node_22_pure_tests_5_passed
-        remaining:
-          - catalog_status_owns_projection
-          - one_captured_status_clock
-          - remove_redundant_wrappers
-          - direct_temporary_catalog_test
-          - node_24_15_full_suite
-    blocked:
-      - issue: 21
-        blocked_on: iteathen/UCI_Arena#62
-        required:
-          - earliest_request_visibility
-          - one_absolute_2000ms_deadline
-          - remaining_budget_tree_shutdown
-          - verified_descendant_termination
-          - immediate_lease_release_before_cleanup
+    partial_pr:
+      pr: 23
+      branch: agent/project-daemon-heartbeat-staleness
+      head_sha: 3991983c397a222871cba70c6232da1a8be5b265
+      status: catalog_owner_missing
+    issue_20_task:
+      state: prepared_not_launched
+      manifest: docs/audits/jules-workbenches/evidence-20-catalog-integration.yaml
+      task: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md
+    issue_21:
+      blocked_on: iteathen/UCI_Arena#62
+      requirement: one_absolute_2000ms_end_to_end_deadline
 
   book_forge:
-    authority: opening_book_production
     blocked_stack: [8, 11, 10]
-    blockers:
-      - {issue: 12, summary: exact_use_time_credential_bytes}
-      - {issue: 13, summary: recoverable_snapshot_build_publication_operation}
+    issue_12:
+      branch: agent/exact-acquisition-credential-use
+      expected_sha: f698d49b6f9b7bdf8105dde3c598b053502e08f0
+      state: prepared_not_launched
+      manifest: docs/audits/jules-workbenches/book-forge-12-exact-credential.yaml
+      task: docs/audits/jules-workbenches/book-forge-12-exact-credential-task.md
+    other_blockers:
+      - {issue: 13, summary: recoverable_snapshot_publication}
       - {issue: 14, summary: exact_catalog_and_64_shard_sqlite_authority}
-    reopened_ledger_rows: [BOOK-TRUST-017, BOOK-AUTH-018, BOOK-SCALE-020]
 
   lichess_bot:
-    authority: lichess_provider
     broad_pr: {pr: 3, status: acceptance_blocked}
     ownership_order:
       - {issue: 4, summary: exact_file_publication_launch_identity}
@@ -180,43 +153,28 @@ repositories:
       - {issue: 7, summary: exact_sqlite_foundation}
 
 jules:
-  preferred_transport: official_rest_api
+  transport: official_rest_api
   control_repository: iteathen/Jules-control
   control_branch: main
   workflow: .github/workflows/jules-control.yml
   controller: scripts/jules_control.py
   continue_controller: scripts/jules_continue.py
-  secret_environment: jules
-  secret_name: JULES_API_KEY
-  owner_commands:
-    - /jules_status
-    - /jules_activities
-    - /jules_approve
-    - /jules_continue
-    - /jules_send
-  recovery_rule: >-
-    Use /jules continue for recoverable or non-substantive failure, awaiting user
-    feedback, or apparent completion without a valid output. Preserve exact branch,
-    scope, approved plan, and later corrections; require evidence for a true blocker.
-  issue_label_launch_on_source_repository_allowed: false
+  commands: [status, activities, approve, continue, send]
+  active_session: engine-62-20260803
+  queue:
+    - evidence-20-catalog-integration
+    - manager-70-verified-launch-identity
+    - book-forge-12-exact-credential
   temporary_workbench_fallback_only: true
-  superseded_uncreated_workbench:
-    intended_repository: iteathen/jules-wb-engine-62-20260803
-    state: superseded_before_creation
-    cleanup_required: false
 
 next_actions:
-  - monitor_engine_62_jules_session_and_continue_if_it_stops_without_valid_pr
-  - freeze_and_hostile_review_engine_62_output_when_visible
-  - update_jules_registry_with_output_pr_sha_and_disposition
-  - native_validate_installer_pr_11
-  - native_validate_manager_prs_78_and_79
-  - complete_evidence_catalog_owned_issue_20
-  - implement_evidence_issue_21_after_accepted_engine_62
-  - continue_manager_69_and_remaining_70_then_storage_67
-  - continue_lichess_4_through_7
-  - continue_book_forge_12_through_14
-  - resolve_installer_7_through_10_before_package_conclusion
+  - poll_engine_pr_63_and_review_only_after_head_moves_beyond_7d3f8c1f
+  - issue_jules_continue_if_session_stops_unchanged
+  - update_registry_for_every_new_head_and_review
+  - native_validate_installer_pr_11_and_manager_prs_78_79_80
+  - launch_evidence_20_only_after_engine_62_terminal_and_reviewed
+  - then_launch_manager_verified_identity_and_book_forge_credential_in_queue_order
+  - continue_evidence_21_manager_69_storage_lichess_4_to_7_book_forge_13_14_installer_7_to_10
   - update_handoffs_registry_and_installer_pr_2_comment_before_stopping
 
 final_gates:
