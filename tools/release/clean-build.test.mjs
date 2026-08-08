@@ -106,7 +106,21 @@ test("clean build executes each assembled Windows launcher before publication", 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].filename, String.raw`C:\candidate\setup.exe`);
   assert.deepEqual(calls[0].args, ["--dry-run", "--scope", "all-users"]);
-  assert.equal(calls[0].options.timeout, 30_000);
+  assert.equal(calls[0].options.timeout, 120_000);
+  validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+    timeoutMilliseconds: 45_000,
+    execute: (filename, args, options) => {
+      calls.push({ filename, args, options });
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(calls[1].options.timeout, 45_000);
+  assert.throws(
+    () => validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+      timeoutMilliseconds: 0,
+    }),
+    /timeout policy is invalid/u,
+  );
   assert.throws(
     () => validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
       execute: () => ({ status: -1073741571, stdout: "", stderr: "" }),

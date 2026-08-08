@@ -88,18 +88,25 @@ function runChecked(executable, args, { cwd = repositoryRoot, environment = proc
   return String(result.stdout ?? "").trim();
 }
 
+export const windowsLauncherDryRunTimeoutMilliseconds = 120_000;
+
 export function validateWindowsLauncherExecutable(filename, {
   scope = "personal",
   execute = spawnSync,
+  timeoutMilliseconds = windowsLauncherDryRunTimeoutMilliseconds,
 } = {}) {
   if (!["personal", "all-users"].includes(scope)) {
     throw new Error("Windows launcher dry-run scope is invalid");
+  }
+  if (!Number.isSafeInteger(timeoutMilliseconds)
+      || timeoutMilliseconds < 1_000 || timeoutMilliseconds > 300_000) {
+    throw new Error("Windows launcher dry-run timeout policy is invalid");
   }
   const result = execute(filename, ["--dry-run", "--scope", scope], {
     cwd: path.dirname(filename),
     encoding: "utf8",
     windowsHide: true,
-    timeout: 30_000,
+    timeout: timeoutMilliseconds,
   });
   if (result.error || result.status !== 0) {
     const diagnostic = [result.error?.message, result.stderr, result.stdout]
