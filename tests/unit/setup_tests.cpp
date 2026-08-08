@@ -1150,7 +1150,7 @@ TEST_CASE("selected asset roots discover books and Syzygy one level only") {
     fs::create_directories(syzygy);
     fs::create_directories(too_deep);
     std::ofstream(first_books / "first.bin") << "book-one";
-    std::ofstream(second_books / "second.book") << "book-two";
+    std::ofstream(second_books / "second.book") << "book-two-with-more-coverage";
     std::ofstream(syzygy / "KQvK.rtbw") << "tablebase";
     std::ofstream(too_deep / "hidden.rtbz") << "not-discovered";
 
@@ -1158,13 +1158,13 @@ TEST_CASE("selected asset roots discover books and Syzygy one level only") {
     const auto& discovery = inventory.at("discovery");
     REQUIRE(discovery.at("opening_book").at("selection").at("source") == "discovered");
     REQUIRE(discovery.at("opening_book").at("selection").at("path") ==
-            fs::absolute(first_books).lexically_normal().string());
+            fs::absolute(second_books).lexically_normal().string());
     REQUIRE(discovery.at("syzygy").at("selection").at("path") ==
             fs::absolute(syzygy).lexically_normal().string());
     REQUIRE(inventory.at("knowledge").at("opening_book").at("state") ==
             "detected_unmanaged");
     REQUIRE(inventory.at("knowledge").at("opening_book").at("path") ==
-            fs::absolute(first_books).lexically_normal().string());
+            fs::absolute(second_books).lexically_normal().string());
     REQUIRE(inventory.at("knowledge").at("syzygy").at("state") ==
             "detected_unmanaged");
     REQUIRE(inventory.at("knowledge").at("syzygy").at("path") ==
@@ -1182,7 +1182,7 @@ TEST_CASE("selected asset roots discover books and Syzygy one level only") {
     fs::remove_all(root);
 }
 
-TEST_CASE("indexed discovery finds external books tablebases and legacy timing evidence") {
+TEST_CASE("indexed discovery finds reusable knowledge and Lichess evidence") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const fs::path external = root / "external-assets";
@@ -1192,12 +1192,28 @@ TEST_CASE("indexed discovery finds external books tablebases and legacy timing e
     const fs::path binary_decoy = external / "not-a-polyglot.bin";
     const fs::path table = syzygy / "KQvK.rtbw";
     const fs::path timing = external / "old-timing-profile.json";
+    const fs::path single = write_lichess_single_profile(external);
+    const fs::path capacity =
+        external / "uci_arena_lichess_capacity_profile_v1.json";
+    const fs::path transport = external / "transport_profile_v2.json";
     std::ofstream(book, std::ios::binary) << "book";
     std::ofstream(binary_decoy, std::ios::binary) << "not a book";
     std::ofstream(table, std::ios::binary) << "tablebase";
     std::ofstream(timing) << json{{"schema", "uci_time_profile_v2"},
                                   {"qualified", true}}
                                  .dump();
+    std::ofstream(capacity)
+        << json{{"schema", "uci_arena_lichess_capacity_profile_v1"},
+                {"qualified", true},
+                {"maximum_concurrency", 2},
+                {"evidence", {{"single_game", true}}}}
+               .dump();
+    std::ofstream(transport)
+        << json{{"schema", "uci_arena_lichess_transport_profile_v2"},
+                {"qualified", true},
+                {"sample_count", 635},
+                {"game_count", 24}}
+               .dump();
 
     arena::ports::IndexedAssetSearchResult result;
     result.adapter = "fake_system_index";
@@ -1210,6 +1226,9 @@ TEST_CASE("indexed discovery finds external books tablebases and legacy timing e
         {arena::ports::IndexedAssetKind::opening_book, binary_decoy},
         {arena::ports::IndexedAssetKind::syzygy, table},
         {arena::ports::IndexedAssetKind::timing_profile, timing},
+        {arena::ports::IndexedAssetKind::lichess_single_game_profile, single},
+        {arena::ports::IndexedAssetKind::lichess_capacity_profile, capacity},
+        {arena::ports::IndexedAssetKind::lichess_transport_profile, transport},
         {arena::ports::IndexedAssetKind::syzygy, external / "missing.rtbz"},
     };
     FakeAssetSearchIndex index(std::move(result));
@@ -1218,6 +1237,11 @@ TEST_CASE("indexed discovery finds external books tablebases and legacy timing e
     const json& discovery = inventory.at("discovery");
     REQUIRE(index.last_query.maximum_results == 256);
     REQUIRE(index.last_query.timeout == std::chrono::milliseconds(2000));
+    REQUIRE(index.last_query.rules.size() == 6);
+    REQUIRE(arena::ports::valid_indexed_asset_query(index.last_query));
+    auto underfunded_query = index.last_query;
+    underfunded_query.maximum_results = underfunded_query.rules.size() - 1;
+    REQUIRE_FALSE(arena::ports::valid_indexed_asset_query(underfunded_query));
     REQUIRE(discovery.at("opening_book").at("selection").at("source") == "indexed");
     REQUIRE(discovery.at("opening_book").at("selection").at("path") ==
             fs::absolute(book).lexically_normal().string());
@@ -1227,6 +1251,15 @@ TEST_CASE("indexed discovery finds external books tablebases and legacy timing e
         discovery.at("timing_profile").at("candidates").at(0);
     REQUIRE(timing_candidate.at("details").at("validation").at("classification") ==
             "legacy_parseable");
+    for (const auto kind : {"lichess_single_game_profile",
+                            "lichess_capacity_profile",
+                            "lichess_transport_profile"}) {
+        const json& candidate = discovery.at(kind).at("candidates").at(0);
+        REQUIRE(candidate.at("source") == "indexed");
+        REQUIRE(candidate.at("details").at("validation").at("classification") ==
+                "qualified_declared");
+        REQUIRE(discovery.at(kind).at("indexed_search").at("accepted_candidates") == 1);
+    }
     const json& search = discovery.at("syzygy").at("indexed_search");
     REQUIRE(search.at("state") == "complete");
     REQUIRE(search.at("ownership") == "external_dependency");
@@ -1237,6 +1270,18 @@ TEST_CASE("indexed discovery finds external books tablebases and legacy timing e
     REQUIRE(book_search.at("accepted_candidates") == 1);
     REQUIRE(book_search.at("rejected_candidates") == 1);
     REQUIRE_FALSE(fs::exists(paths.data_root / "locators"));
+
+    const json bounded = SetupEngine::inventory(paths, {external});
+    for (const auto kind : {"timing_profile", "lichess_single_game_profile",
+                            "lichess_capacity_profile",
+                            "lichess_transport_profile"}) {
+        REQUIRE(bounded.at("discovery")
+                    .at(kind)
+                    .at("selection")
+                    .at("source") == "discovered");
+    }
+    REQUIRE(bounded.at("discovery").at("opening_book").at("selection").at("path") ==
+            fs::absolute(book).lexically_normal().string());
     fs::remove_all(root);
 }
 
@@ -1249,6 +1294,7 @@ TEST_CASE("saved knowledge locator outranks an indexed candidate") {
     std::ofstream(indexed) << "indexed";
     const json imported = SetupEngine::import_path(paths, "opening_book", saved);
     REQUIRE(imported.at("mode") == "in_place_reference");
+    std::ofstream(saved, std::ios::app) << "-updated-after-selection";
 
     arena::ports::IndexedAssetSearchResult result;
     result.adapter = "fake_system_index";
@@ -1264,6 +1310,12 @@ TEST_CASE("saved knowledge locator outranks an indexed candidate") {
                 .at("opening_book")
                 .at("selection")
                 .at("source") == "saved_locator");
+    REQUIRE(inventory.at("discovery")
+                .at("opening_book")
+                .at("selection")
+                .at("details")
+                .at("validation")
+                .at("book_bytes") == fs::file_size(saved));
     REQUIRE(inventory.at("discovery")
                 .at("opening_book")
                 .at("candidates")
@@ -1314,7 +1366,7 @@ TEST_CASE("saved in-place Syzygy locator is projected into knowledge inventory")
     fs::remove_all(root);
 }
 
-TEST_CASE("discovery precedence is receipt then locator then provider manifest") {
+TEST_CASE("discovery precedence is locator then receipt then provider manifest") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const fs::path provider_root =
@@ -1357,7 +1409,13 @@ TEST_CASE("discovery precedence is receipt then locator then provider manifest")
                .dump();
     inventory = SetupEngine::inventory(paths, {provider_root});
     REQUIRE(inventory.at("discovery").at("book_forge").at("selection").at("source") ==
-            "install_receipt");
+            "saved_locator");
+    REQUIRE(std::ranges::any_of(
+        inventory.at("discovery").at("book_forge").at("candidates"),
+        [](const json& candidate) {
+            return candidate.value("source", "") == "install_receipt" &&
+                   candidate.value("state", "") == "installed_managed";
+        }));
     fs::remove_all(root);
 }
 
@@ -1456,6 +1514,33 @@ TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
                 .at("locators")
                 .at("selected") == fs::absolute(token).lexically_normal().string());
     generated_input.close();
+    fs::remove_all(root);
+}
+
+TEST_CASE("explicit saved knowledge selection does not erase installed authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path bundled = root / "bundled.book";
+    const fs::path selected = root / "selected.book";
+    std::ofstream(bundled) << "bootstrap";
+    std::ofstream(selected) << "operator selection with stronger retained evidence";
+
+    const json managed =
+        SetupEngine::import_path(paths, "opening_book", bundled, true);
+    REQUIRE(managed.at("state") == "installed_managed");
+    static_cast<void>(
+        SetupEngine::import_path(paths, "opening_book", selected, false));
+
+    const json inventory = SetupEngine::inventory(paths);
+    const json& discovery = inventory.at("discovery").at("opening_book");
+    REQUIRE(discovery.at("selection").at("source") == "saved_locator");
+    REQUIRE(discovery.at("selection").at("path") ==
+            fs::absolute(selected).lexically_normal().string());
+    REQUIRE(std::ranges::any_of(
+        discovery.at("candidates"), [](const json& candidate) {
+            return candidate.value("source", "") == "install_receipt" &&
+                   candidate.value("state", "") == "installed_managed";
+        }));
     fs::remove_all(root);
 }
 

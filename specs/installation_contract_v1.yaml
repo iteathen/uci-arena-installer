@@ -1091,9 +1091,10 @@ discovery:
     - lichess_token_path
     - restaurant
   precedence:
-    - install_receipt
     - saved_locator
+    - install_receipt
     - provider_manifest
+    - indexed
     - discovered
     - unresolved
   bounded_sources:
@@ -1111,7 +1112,13 @@ discovery:
     - operating_system_file_index
   indexed_asset_search:
     owner: replaceable_platform_search_adapter
-    kinds: [opening_book, syzygy, timing_profile]
+    kinds:
+      - opening_book
+      - syzygy
+      - timing_profile
+      - lichess_single_game_profile
+      - lichess_capacity_profile
+      - lichess_transport_profile
     windows_adapter: Windows_Search_SystemIndex
     linux_adapter: plocate_or_locate_database
     maximum_results: 256
@@ -1120,6 +1127,9 @@ discovery:
     rules:
       - Indexed search queries only immutable extension or bounded filename patterns;
         it never walks the filesystem recursively.
+      - Product-owned query rules cross the platform port as typed extension
+        and filename-glob data. Windows Search and locate adapters translate
+        those rules without owning UCI Arena filenames or resource semantics.
       - The platform adapter returns candidate paths and bounded status only.
         Kind inspectors classify content, directory shape, identity, legacy
         status, and symbolic-link safety without turning ordinary discovery
@@ -1129,6 +1139,10 @@ discovery:
         explicit browse without failing inventory.
       - Duplicate candidates are normalized and deterministic. A search result
         is never installation authority and requires explicit import before use.
+      - Within one discovery source class, deterministic content evidence ranks
+        the stronger reusable candidate before path ordering. Book payload bytes,
+        Syzygy coverage bytes, and evidence qualification/sample counts are
+        advisory discovery quality only and never substitute for activation gates.
       - Syzygy candidates are reduced to their containing flat collection and
         referenced in place. Opening books and timing-evidence candidates are
         never copied merely because the index found them.
@@ -1136,6 +1150,11 @@ discovery:
         legacy, incomplete, or incompatible with the currently selected
         runtime. Exact identity and qualification are enforced only when a
         consumer claims the profile is applied or protected-live-safe.
+      - Parseable single-game, capacity, and transport evidence remains
+        discoverable when unqualified, legacy, incomplete, or runtime-mismatched.
+        Discovery reports the evidence classification; import and consumer
+        activation retain their exact schema, closure, qualification, and
+        identity gates.
       - Discovery and preservation never compare a book, Syzygy collection, or
         timing-evidence file to the suite product version. Compatibility is
         capability- and content-based. Unknown optional metadata, newer minor
@@ -1153,15 +1172,30 @@ discovery:
       - Any nonempty flat Syzygy WDL or DTZ subset is discoverable and usable
         for the positions it covers. WDL does not require DTZ, and incomplete
         cardinality coverage is reported rather than rejected.
+      - A validated saved locator is the operator's selected asset and outranks
+        an installed bootstrap candidate in the read-only discovery projection.
+        Installed authority remains visible on its receipt candidate and is
+        never inferred from selection precedence.
+      - Inventory re-inspects the current content behind a saved knowledge or
+        evidence locator. Cached locator validation is not current authority;
+        unreadable or invalid retained content remains visible as broken and
+        requires explicit reselection.
+      - When a saved locator names the exact same normalized resource as a valid
+        managed receipt, the receipt is selected so the projection does not
+        demote known installation authority to unmanaged retained state.
   user_selected_root_behavior:
     maximum_directory_depth: 1
     multiple_explicit_roots: supported
     detected_at_root_or_direct_child:
       - opening_book_file_or_flat_directory
       - syzygy_directory
+      - timing_profile_file
+      - lichess_single_game_profile_file
+      - lichess_capacity_profile_file
+      - lichess_transport_profile_file
       - known_uci_engine_filename
       - provider_component_manifest
-    ordering: normalized_path_ascending
+    ordering: source_precedence_then_advisory_quality_then_normalized_path
     rule: >
       A user-selected or explicitly mounted root is inspected only at the root
       and its direct non-symbolic-link children. It is never treated as

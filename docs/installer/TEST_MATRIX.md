@@ -32,8 +32,23 @@ Required scenarios:
   receipt/preservation root or any explicitly external/unknown path;
 - retained paths never counting as installed authority and reinstall
   revalidation of preserved state;
+- a saved locator for the exact receipt-managed resource preserving the receipt
+  as selected installation authority while a different explicit locator wins;
+- same-source retained candidates selecting stronger content evidence before
+  deterministic path order without treating discovery quality as authority;
+- saved knowledge/evidence locators being re-inspected after their external
+  content changes, with invalid content remaining visible as broken;
 - idempotent configuration, PATH, shortcuts, startup, and migration;
 - post-install health success and failure;
+- read-only indexed discovery for opening books, partial Syzygy collections,
+  timing evidence, and Lichess single-game/capacity/transport profiles through
+  typed product-owned query rules and replaceable Windows/Linux adapters;
+- unavailable, timed-out, truncated, empty, legacy, incomplete, incompatible,
+  and decoy indexed results remaining visible or rejected as appropriate
+  without registration, copying, activation, or filesystem mutation;
+- explicit root inspection bounded to root/direct-child files, saved-locator
+  selection outranking a bundled bootstrap asset, and installed receipt
+  authority remaining visible independently of the selected locator;
 - arbitrary component identities exercising declarative selection, default
   activation, capacity policy, and knowledge accounting without engine changes;
 - declarative knowledge activation with an unrelated component identity,

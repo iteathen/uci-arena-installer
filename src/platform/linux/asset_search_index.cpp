@@ -7,7 +7,7 @@
 #include <chrono>
 #include <exception>
 #include <filesystem>
-#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,37 +18,50 @@ namespace {
 using Clock = std::chrono::steady_clock;
 namespace fs = std::filesystem;
 
-std::optional<IndexedAssetKind> classify(const fs::path& path) {
-    std::string extension = path.extension().string();
-    std::ranges::transform(extension, extension.begin(), [](const unsigned char value) {
-        return static_cast<char>(std::tolower(value));
-    });
-    std::string filename = path.filename().string();
-    std::ranges::transform(filename, filename.begin(), [](const unsigned char value) {
-        return static_cast<char>(std::tolower(value));
-    });
-    if (extension == ".rtbw" || extension == ".rtbz") {
-        return IndexedAssetKind::syzygy;
+std::string regex_escape(const std::string_view value, const bool glob) {
+    std::string result;
+    result.reserve(value.size() * 2);
+    for (const char character : value) {
+        if (glob && character == '*') {
+            result.append("[^/]*");
+        } else if (glob && character == '?') {
+            result.append("[^/]");
+        } else {
+            if (std::string_view(".^$|()[]{}+?*\\").find(character) !=
+                std::string_view::npos) {
+                result.push_back('\\');
+            }
+            result.push_back(character);
+        }
     }
-    if (extension == ".book" || extension == ".bin") {
-        return IndexedAssetKind::opening_book;
+    return result;
+}
+
+std::string locate_expression(const IndexedAssetRule& rule) {
+    std::vector<std::string> alternatives;
+    alternatives.reserve(rule.file_extensions.size() + rule.filename_globs.size());
+    for (const auto& extension : rule.file_extensions) {
+        alternatives.push_back(regex_escape(extension, false) + "$");
     }
-    const bool named_time_profile =
-        filename.starts_with("uci_time_profile_v") && filename.ends_with(".json");
-    const bool descriptive_time_profile =
-        extension == ".json" && filename.find("profile") != std::string::npos &&
-        (filename.find("timing") != std::string::npos ||
-         filename.find("time") != std::string::npos);
-    if (named_time_profile || descriptive_time_profile) {
-        return IndexedAssetKind::timing_profile;
+    for (const auto& glob : rule.filename_globs) {
+        alternatives.push_back("/" + regex_escape(glob, true) + "$");
     }
-    return std::nullopt;
+    std::ostringstream expression;
+    expression << '(';
+    for (std::size_t index = 0; index < alternatives.size(); ++index) {
+        if (index != 0) {
+            expression << '|';
+        }
+        expression << alternatives[index];
+    }
+    expression << ')';
+    return expression.str();
 }
 
 bool execute_locate_query(
     const fs::path& executable,
     const std::string_view expression,
-    const IndexedAssetKind expected_kind,
+    const IndexedAssetRule& rule,
     const std::size_t limit,
     const Clock::time_point deadline,
     std::vector<IndexedAssetCandidate>& candidates,
@@ -69,8 +82,8 @@ bool execute_locate_query(
                 std::min(remaining, std::chrono::milliseconds(100)));
             line.has_value()) {
             const fs::path path = *line;
-            if (classify(path) == expected_kind) {
-                candidates.push_back({expected_kind, path});
+            if (indexed_asset_rule_matches(rule, path)) {
+                candidates.push_back({rule.kind, path});
                 ++accepted;
             }
             continue;
@@ -89,8 +102,8 @@ bool execute_locate_query(
                 break;
             }
             const fs::path path = *line;
-            if (classify(path) == expected_kind) {
-                candidates.push_back({expected_kind, path});
+            if (indexed_asset_rule_matches(rule, path)) {
+                candidates.push_back({rule.kind, path});
                 ++accepted;
             }
         }
@@ -118,9 +131,7 @@ class LocateAssetSearchIndex final : public AssetSearchIndex {
                 Clock::now() - started);
             return result;
         };
-        if (query.maximum_results == 0 || query.maximum_results > 4096 ||
-            query.timeout <= std::chrono::milliseconds::zero() ||
-            query.timeout > std::chrono::seconds(30)) {
+        if (!valid_indexed_asset_query(query)) {
             return finish(IndexedSearchState::failed, "invalid_search_budget");
         }
         fs::path executable;
@@ -138,20 +149,11 @@ class LocateAssetSearchIndex final : public AssetSearchIndex {
 
         const auto deadline = started + query.timeout;
         const std::size_t per_kind = std::max<std::size_t>(
-            1, query.maximum_results / 3);
-        const struct {
-            IndexedAssetKind kind;
-            std::string_view expression;
-        } queries[]{
-            {IndexedAssetKind::syzygy, R"(\.(rtbw|rtbz)$)"},
-            {IndexedAssetKind::timing_profile,
-             R"((uci_time_profile_v[^/]*\.json|[^/]*(timing[^/]*profile|time[^/]*profile)[^/]*\.json)$)"},
-            {IndexedAssetKind::opening_book, R"(\.(book|bin)$)"},
-        };
+            1, query.maximum_results / query.rules.size());
         try {
-            for (const auto& item : queries) {
+            for (const auto& rule : query.rules) {
                 if (!execute_locate_query(
-                        executable, item.expression, item.kind, per_kind,
+                        executable, locate_expression(rule), rule, per_kind,
                         deadline, result.candidates, result.truncated)) {
                     return finish(IndexedSearchState::timed_out,
                                   "search_budget_exhausted");

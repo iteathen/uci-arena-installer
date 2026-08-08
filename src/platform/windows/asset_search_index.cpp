@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cwchar>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace arena::ports {
@@ -45,10 +46,58 @@ class ComApartment final {
     HRESULT result_{};
 };
 
-std::wstring query_sql(const std::size_t limit, const std::wstring_view predicate) {
+std::wstring ascii_widen(const std::string_view value) {
+    return {value.begin(), value.end()};
+}
+
+std::wstring filename_glob_to_like(const std::string_view glob) {
+    std::wstring result;
+    result.reserve(glob.size() + 8);
+    for (const char character : glob) {
+        if (character == '*') {
+            result.push_back(L'%');
+        } else if (character == '?') {
+            result.push_back(L'_');
+        } else if (character == '_') {
+            result.append(L"[_]");
+        } else if (character == '%') {
+            result.append(L"[%]");
+        } else {
+            result.push_back(static_cast<wchar_t>(
+                static_cast<unsigned char>(character)));
+        }
+    }
+    return result;
+}
+
+std::wstring rule_predicate(const IndexedAssetRule& rule) {
+    std::wstring predicate = L"(";
+    bool first = true;
+    auto append = [&](const std::wstring& condition) {
+        if (!first) {
+            predicate.append(L" OR ");
+        }
+        predicate.append(condition);
+        first = false;
+    };
+    for (const auto& extension : rule.file_extensions) {
+        append(L"System.FileExtension = '" + ascii_widen(extension) + L"'");
+    }
+    for (const auto& glob : rule.filename_globs) {
+        if (glob.find_first_of("*?") == std::string::npos) {
+            append(L"System.ItemNameDisplay = '" + ascii_widen(glob) + L"'");
+        } else {
+            append(L"System.ItemNameDisplay LIKE '" + filename_glob_to_like(glob) + L"'");
+        }
+    }
+    predicate.push_back(L')');
+    return predicate;
+}
+
+std::wstring query_sql(const std::size_t limit, const IndexedAssetRule& rule) {
     return L"SELECT TOP " + std::to_wstring(limit) +
            L" System.ItemPathDisplay FROM SystemIndex WHERE " +
-           std::wstring(predicate);
+           rule_predicate(rule);
 }
 
 HRESULT set_command_timeout(ICommandText* command, const std::chrono::milliseconds remaining) {
@@ -188,9 +237,7 @@ class WindowsSearchIndex final : public AssetSearchIndex {
                 Clock::now() - started);
             return result;
         };
-        if (query.maximum_results == 0 || query.maximum_results > 4096 ||
-            query.timeout <= std::chrono::milliseconds::zero() ||
-            query.timeout > std::chrono::seconds(30)) {
+        if (!valid_indexed_asset_query(query)) {
             return finish(IndexedSearchState::failed, "invalid_search_budget");
         }
         ComApartment apartment;
@@ -268,20 +315,10 @@ class WindowsSearchIndex final : public AssetSearchIndex {
 
         const auto deadline = started + query.timeout;
         const std::size_t per_kind = std::max<std::size_t>(
-            1, query.maximum_results / 3);
-        const std::pair<IndexedAssetKind, std::wstring_view> queries[]{
-            {IndexedAssetKind::syzygy,
-             L"(System.FileExtension = '.rtbw' OR System.FileExtension = '.rtbz')"},
-            {IndexedAssetKind::timing_profile,
-             L"(System.ItemNameDisplay LIKE 'uci_time_profile_v%.json' OR "
-             L"System.ItemNameDisplay LIKE '%timing%profile%.json' OR "
-             L"System.ItemNameDisplay LIKE '%time%profile%.json')"},
-            {IndexedAssetKind::opening_book,
-             L"(System.FileExtension = '.book' OR System.FileExtension = '.bin')"},
-        };
-        for (const auto& [kind, predicate] : queries) {
+            1, query.maximum_results / query.rules.size());
+        for (const auto& rule : query.rules) {
             status = execute_query(
-                command_factory.Get(), query_sql(per_kind, predicate), kind,
+                command_factory.Get(), query_sql(per_kind, rule), rule.kind,
                 per_kind, deadline, result.candidates, result.truncated);
             if (status == DB_E_CANCELED || Clock::now() >= deadline) {
                 data_source->Uninitialize();

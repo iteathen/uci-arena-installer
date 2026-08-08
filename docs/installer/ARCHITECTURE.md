@@ -36,6 +36,22 @@ Consumers enforce only the capabilities needed for a requested activation and
 must retain incompatible timing evidence as cataloged evidence with an explicit
 migration or requalification reason.
 
+Indexed discovery is split at a platform port. Installer-owned policy supplies
+typed resource kinds, exact extensions, and bounded filename globs; Windows
+Search and locate adapters translate those rules and return path evidence only.
+Content inspectors classify books, Syzygy collections, timing evidence, and
+Lichess single-game/capacity/transport profiles without activating or copying
+them. Within one source class, advisory content quality ranks more developed
+assets before deterministic path order without relaxing later activation gates.
+A saved locator is the operator-selected resource and outranks a bundled
+bootstrap candidate, while the latter's receipt remains separate installation
+authority. If both records name the exact same managed resource, the receipt is
+selected so known installation authority is not projected as retained unmanaged
+state. Inventory re-inspects saved knowledge and evidence content instead of
+treating cached locator validation as current authority. If the operating-system
+index is unavailable, an explicitly selected
+root may be inspected only at the root and its direct children.
+
 Removal is implemented as a separate `RemovalLifecycle` brick behind the
 `SetupEngine` façade. Its contract separates `plan_uninstall` from `uninstall`
 and `plan_purge` from `purge`. Provider startup behavior enters through explicit

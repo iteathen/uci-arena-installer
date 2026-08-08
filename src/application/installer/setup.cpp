@@ -1121,6 +1121,12 @@ struct ValidatedComponentPayload {
 };
 
 bool valid_discovery_kind(std::string_view kind);
+json validate_book_locator(const fs::path& path);
+json validate_syzygy_locator(const fs::path& path);
+json inspect_timing_evidence_candidate(const fs::path& path);
+json inspect_lichess_profile_candidate(const fs::path& path,
+                                       std::string_view schema_prefix,
+                                       std::string_view current_schema);
 
 bool valid_knowledge_activation_kind(const std::string_view kind) {
     return kind == "opening_book" || kind == "syzygy";
@@ -2008,8 +2014,83 @@ void append_discovery_candidate(json& rows, std::map<std::string, std::set<std::
         candidate["details"] = details;
     }
     rows.at(kind).at("candidates").push_back(candidate);
-    if (rows.at(kind).at("selection").is_null()) {
-        rows.at(kind)["selection"] = std::move(candidate);
+}
+
+int discovery_source_rank(const std::string_view source) noexcept {
+    if (source == "saved_locator") {
+        return 0;
+    }
+    if (source == "install_receipt") {
+        return 1;
+    }
+    if (source == "provider_manifest") {
+        return 2;
+    }
+    if (source == "indexed") {
+        return 3;
+    }
+    if (source == "discovered") {
+        return 4;
+    }
+    return 5;
+}
+
+std::uint64_t discovery_quality_score(const json& candidate) noexcept {
+    try {
+        const json& details = candidate.at("details");
+        const json& validation = details.at("validation");
+        if (validation.contains("quality_score") &&
+            validation.at("quality_score").is_number_unsigned()) {
+            return validation.at("quality_score").get<std::uint64_t>();
+        }
+    } catch (const std::exception&) {
+    }
+    return 0;
+}
+
+void select_discovery_candidates(json& rows) {
+    for (const auto kind : discovery_kinds) {
+        const json* best = nullptr;
+        for (const auto& candidate : rows.at(std::string(kind)).at("candidates")) {
+            const std::string state = candidate.value("state", "");
+            if (state == "broken" || state == "unresolved") {
+                continue;
+            }
+            if (best == nullptr) {
+                best = &candidate;
+                continue;
+            }
+            const int rank = discovery_source_rank(candidate.value("source", ""));
+            const int best_rank = discovery_source_rank(best->value("source", ""));
+            const std::uint64_t quality = discovery_quality_score(candidate);
+            const std::uint64_t best_quality = discovery_quality_score(*best);
+            const std::string path = candidate.value("path", "");
+            const std::string best_path = best->value("path", "");
+            const std::string source = candidate.value("source", "");
+            const std::string best_source = best->value("source", "");
+            const bool same_managed_resource =
+                path == best_path &&
+                ((source == "install_receipt" && best_source == "saved_locator") ||
+                 (source == "saved_locator" && best_source == "install_receipt"));
+            const bool better_by_precedence =
+                rank < best_rank ||
+                (rank == best_rank &&
+                 (quality > best_quality ||
+                  (quality == best_quality && path < best_path)));
+            if ((same_managed_resource && source == "install_receipt") ||
+                (!same_managed_resource && better_by_precedence)) {
+                best = &candidate;
+            }
+        }
+        if (best != nullptr) {
+            rows.at(std::string(kind))["selection"] = *best;
+        } else {
+            rows.at(std::string(kind))["selection"] = {
+                {"source", "unresolved"},
+                {"state", "unresolved"},
+                {"path", nullptr},
+            };
+        }
     }
 }
 
@@ -2124,7 +2205,70 @@ bool directory_has_extension(const fs::path& root, const std::set<std::string>& 
 json validate_book_locator(const fs::path& path);
 json inspect_indexed_book_candidate(const fs::path& path);
 json validate_syzygy_locator(const fs::path& path);
-json inspect_timing_evidence_candidate(const fs::path& path);
+struct InspectedIndexedCandidate {
+    fs::path path;
+    json validation;
+};
+
+InspectedIndexedCandidate inspect_indexed_asset_candidate(
+    const ports::IndexedAssetCandidate& candidate) {
+    fs::path selected = candidate.path;
+    if (candidate.kind == ports::IndexedAssetKind::opening_book) {
+        return {selected, inspect_indexed_book_candidate(selected)};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::syzygy) {
+        if (fs::is_regular_file(selected)) {
+            selected = selected.parent_path();
+        }
+        return {selected, validate_syzygy_locator(selected)};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::timing_profile) {
+        return {selected, inspect_timing_evidence_candidate(selected)};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::lichess_single_game_profile) {
+        return {selected,
+                inspect_lichess_profile_candidate(
+                    selected, "uci_arena_single_game_profile_v",
+                    "uci_arena_single_game_profile_v1")};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::lichess_capacity_profile) {
+        return {selected,
+                inspect_lichess_profile_candidate(
+                    selected, "uci_arena_lichess_capacity_profile_v",
+                    "uci_arena_lichess_capacity_profile_v1")};
+    }
+    return {selected,
+            inspect_lichess_profile_candidate(
+                selected, "uci_arena_lichess_transport_profile_v",
+                "uci_arena_lichess_transport_profile_v2")};
+}
+
+ports::IndexedAssetQuery indexed_asset_query() {
+    return {
+        256,
+        std::chrono::milliseconds(2000),
+        {
+            {ports::IndexedAssetKind::opening_book, {".book", ".bin"}, {}},
+            {ports::IndexedAssetKind::syzygy, {".rtbw", ".rtbz"}, {}},
+            {ports::IndexedAssetKind::timing_profile,
+             {},
+             {"uci_time_profile_v*.json", "*timing*profile*.json",
+              "*time*profile*.json"}},
+            {ports::IndexedAssetKind::lichess_single_game_profile,
+             {},
+             {"uci_arena_single_game_profile_v*.json",
+              "*single*game*profile*.json"}},
+            {ports::IndexedAssetKind::lichess_capacity_profile,
+             {},
+             {"uci_arena_lichess_capacity_profile_v*.json",
+              "*lichess*capacity*profile*.json"}},
+            {ports::IndexedAssetKind::lichess_transport_profile,
+             {},
+             {"transport_profile_v*.json",
+              "*lichess*transport*profile*.json"}},
+        },
+    };
+}
 
 json indexed_search_projection(const ports::IndexedAssetSearchResult& result,
                                const std::string_view kind,
@@ -2161,7 +2305,8 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             {"schema_version", 1},
             {"kind", kind},
             {"precedence",
-             {"install_receipt", "saved_locator", "provider_manifest", "discovered", "unresolved"}},
+             {"saved_locator", "install_receipt", "provider_manifest", "indexed",
+              "discovered", "unresolved"}},
             {"selection", nullptr},
             {"candidates", json::array()},
             {"browse", browse_contract(kind)},
@@ -2261,10 +2406,43 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
                     continue;
                 }
                 const fs::path selected = locator.at("path").get<std::string>();
-                const bool healthy = fs::exists(selected) && !contains_symbolic_link(selected);
+                bool healthy = fs::exists(selected) && !contains_symbolic_link(selected);
+                json details{{"mode", locator.value("mode", "in_place_reference")}};
+                if (healthy) {
+                    try {
+                        if (kind == "opening_book") {
+                            details["validation"] = validate_book_locator(selected);
+                        } else if (kind == "syzygy") {
+                            details["validation"] = validate_syzygy_locator(selected);
+                        } else if (kind == "timing_profile") {
+                            details["validation"] = inspect_timing_evidence_candidate(selected);
+                        } else if (kind == "lichess_single_game_profile") {
+                            details["validation"] = inspect_lichess_profile_candidate(
+                                selected, "uci_arena_single_game_profile_v",
+                                "uci_arena_single_game_profile_v1");
+                        } else if (kind == "lichess_capacity_profile") {
+                            details["validation"] = inspect_lichess_profile_candidate(
+                                selected, "uci_arena_lichess_capacity_profile_v",
+                                "uci_arena_lichess_capacity_profile_v1");
+                        } else if (kind == "lichess_transport_profile") {
+                            details["validation"] = inspect_lichess_profile_candidate(
+                                selected, "uci_arena_lichess_transport_profile_v",
+                                "uci_arena_lichess_transport_profile_v2");
+                        } else if (locator.contains("validation") &&
+                                   locator.at("validation").is_object()) {
+                            details["validation"] = locator.at("validation");
+                        }
+                    } catch (const std::exception&) {
+                        healthy = false;
+                        details["validation"] = {
+                            {"classification", "unreadable_or_invalid"},
+                            {"activation", "requires_explicit_reselection"},
+                        };
+                    }
+                }
                 append_discovery_candidate(rows, seen, std::string(kind), "saved_locator", selected,
-                                           healthy ? "saved" : "broken",
-                                           {{"mode", locator.value("mode", "in_place_reference")}});
+                                            healthy ? "saved" : "broken",
+                                            details);
             } catch (const std::exception&) {
             }
         }
@@ -2279,38 +2457,31 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
     inspect_provider_roots(rows, seen, bounded_roots);
 
     if (search_index != nullptr) {
-        const ports::IndexedAssetSearchResult indexed = search_index->search(
-            ports::IndexedAssetQuery{256, std::chrono::milliseconds(2000)});
+        const ports::IndexedAssetSearchResult indexed =
+            search_index->search(indexed_asset_query());
         std::map<std::string, std::size_t> accepted;
         std::map<std::string, std::size_t> rejected;
         for (const auto& candidate : indexed.candidates) {
             const std::string kind(
                 ports::indexed_asset_kind_name(candidate.kind));
             try {
-                fs::path selected = candidate.path;
-                json validation;
-                if (candidate.kind == ports::IndexedAssetKind::opening_book) {
-                    validation = inspect_indexed_book_candidate(selected);
-                } else if (candidate.kind == ports::IndexedAssetKind::syzygy) {
-                    if (fs::is_regular_file(selected)) {
-                        selected = selected.parent_path();
-                    }
-                    validation = validate_syzygy_locator(selected);
-                } else {
-                    validation = inspect_timing_evidence_candidate(selected);
-                }
+                InspectedIndexedCandidate inspected =
+                    inspect_indexed_asset_candidate(candidate);
                 append_discovery_candidate(
-                    rows, seen, kind, "indexed", selected,
+                    rows, seen, kind, "indexed", inspected.path,
                     "detected_unmanaged",
                     {{"adapter", indexed.adapter},
                      {"ownership", "external_dependency"},
-                     {"validation", std::move(validation)}});
+                     {"validation", std::move(inspected.validation)}});
                 ++accepted[kind];
             } catch (const std::exception&) {
                 ++rejected[kind];
             }
         }
-        for (const auto kind : {"opening_book", "syzygy", "timing_profile"}) {
+        for (const auto kind : {"opening_book", "syzygy", "timing_profile",
+                                "lichess_single_game_profile",
+                                "lichess_capacity_profile",
+                                "lichess_transport_profile"}) {
             rows.at(kind)["indexed_search"] = indexed_search_projection(
                 indexed, kind, accepted[kind], rejected[kind]);
         }
@@ -2318,13 +2489,18 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
 
     const fs::path book_root = paths.knowledge_root / "opening_books";
     if (directory_has_extension(book_root, {".bin", ".book"})) {
-        append_discovery_candidate(rows, seen, "opening_book", "discovered", book_root,
-                                   "detected_unmanaged");
+        try {
+            append_discovery_candidate(rows, seen, "opening_book", "discovered", book_root,
+                                       "detected_unmanaged",
+                                       {{"validation", validate_book_locator(book_root)}});
+        } catch (const std::exception&) {
+        }
     }
     const fs::path tablebase_root = paths.knowledge_root / "tablebases";
     if (directory_has_extension(tablebase_root, {".rtbw", ".rtbz"})) {
         append_discovery_candidate(rows, seen, "syzygy", "discovered", tablebase_root,
-                                   "detected_unmanaged");
+                                   "detected_unmanaged",
+                                   {{"validation", validate_syzygy_locator(tablebase_root)}});
     }
 
     const auto selected_roots = bounded_root_candidates(extra_roots);
@@ -2336,17 +2512,74 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             });
             if (extension == ".bin" || extension == ".book") {
                 append_discovery_candidate(rows, seen, "opening_book", "discovered", selected,
-                                           "detected_unmanaged");
+                                           "detected_unmanaged",
+                                           {{"validation", validate_book_locator(selected)}});
             }
             continue;
         }
         if (directory_has_extension(selected, {".bin", ".book"})) {
-            append_discovery_candidate(rows, seen, "opening_book", "discovered", selected,
-                                       "detected_unmanaged");
+            try {
+                append_discovery_candidate(rows, seen, "opening_book", "discovered", selected,
+                                           "detected_unmanaged",
+                                           {{"validation", validate_book_locator(selected)}});
+            } catch (const std::exception&) {
+            }
         }
         if (directory_has_extension(selected, {".rtbw", ".rtbz"})) {
             append_discovery_candidate(rows, seen, "syzygy", "discovered", selected,
-                                       "detected_unmanaged");
+                                       "detected_unmanaged",
+                                       {{"validation", validate_syzygy_locator(selected)}});
+        }
+    }
+
+    const ports::IndexedAssetQuery asset_query = indexed_asset_query();
+    std::map<std::string, fs::path> bounded_files;
+    for (const auto& candidate_root : extra_roots) {
+        if (candidate_root.empty()) {
+            continue;
+        }
+        const fs::path root = normalized_absolute(candidate_root);
+        if (contains_symbolic_link(root)) {
+            continue;
+        }
+        if (fs::is_regular_file(root) && !fs::is_symlink(root)) {
+            bounded_files.emplace(root.string(), root);
+            continue;
+        }
+        if (!fs::is_directory(root)) {
+            continue;
+        }
+        std::error_code error;
+        for (fs::directory_iterator
+                 iterator(root, fs::directory_options::skip_permission_denied, error),
+             end;
+             iterator != end && !error; iterator.increment(error)) {
+            if (iterator->is_regular_file(error) && !error &&
+                !iterator->is_symlink(error) && !error) {
+                const fs::path child = normalized_absolute(iterator->path());
+                bounded_files.emplace(child.string(), child);
+            }
+            error.clear();
+        }
+    }
+    for (const auto& [key, file] : bounded_files) {
+        (void)key;
+        for (const auto& rule : asset_query.rules) {
+            if (rule.kind == ports::IndexedAssetKind::syzygy ||
+                !ports::indexed_asset_rule_matches(rule, file)) {
+                continue;
+            }
+            try {
+                const ports::IndexedAssetCandidate candidate{rule.kind, file};
+                InspectedIndexedCandidate inspected =
+                    inspect_indexed_asset_candidate(candidate);
+                append_discovery_candidate(
+                    rows, seen, std::string(ports::indexed_asset_kind_name(rule.kind)),
+                    "discovered", inspected.path, "detected_unmanaged",
+                    {{"ownership", "external_dependency"},
+                     {"validation", std::move(inspected.validation)}});
+            } catch (const std::exception&) {
+            }
         }
     }
 
@@ -2416,15 +2649,7 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
                                    {{"hint", hint}});
     }
 
-    for (const auto kind : discovery_kinds) {
-        if (rows.at(std::string(kind)).at("selection").is_null()) {
-            rows.at(std::string(kind))["selection"] = {
-                {"source", "unresolved"},
-                {"state", "unresolved"},
-                {"path", nullptr},
-            };
-        }
-    }
+    select_discovery_candidates(rows);
     return rows;
 }
 
@@ -2479,15 +2704,19 @@ json validate_provider_locator(const fs::path& path, const std::string& expected
 
 json validate_book_locator(const fs::path& path) {
     if (fs::is_regular_file(path)) {
+        const std::uint64_t bytes = fs::file_size(path);
         return {
             {"validation", "regular_file"},
             {"file_name", path.filename().string()},
+            {"book_bytes", bytes},
+            {"quality_score", bytes},
         };
     }
     if (!fs::is_directory(path)) {
         throw std::runtime_error("opening book locator must be a regular file or flat directory");
     }
     std::uint64_t file_count = 0;
+    std::uint64_t book_bytes = 0;
     bool has_book = false;
     for (const auto& entry : fs::directory_iterator(path)) {
         if (entry.is_symlink()) {
@@ -2502,7 +2731,15 @@ json validate_book_locator(const fs::path& path) {
         std::ranges::transform(extension, extension.begin(), [](const unsigned char character) {
             return static_cast<char>(std::tolower(character));
         });
-        has_book = has_book || extension == ".bin" || extension == ".book";
+        const bool supported_book = extension == ".bin" || extension == ".book";
+        has_book = has_book || supported_book;
+        if (supported_book) {
+            const std::uint64_t bytes = entry.file_size();
+            if (bytes > (std::numeric_limits<std::uint64_t>::max)() - book_bytes) {
+                throw std::runtime_error("opening book size exceeds the supported range");
+            }
+            book_bytes += bytes;
+        }
     }
     if (file_count == 0 || !has_book) {
         throw std::runtime_error("opening book directory contains no supported book file");
@@ -2510,6 +2747,8 @@ json validate_book_locator(const fs::path& path) {
     return {
         {"validation", "flat_directory"},
         {"file_count", file_count},
+        {"book_bytes", book_bytes},
+        {"quality_score", book_bytes},
     };
 }
 
@@ -2538,7 +2777,11 @@ json validate_syzygy_locator(const fs::path& path) {
         } else {
             continue;
         }
-        bytes += entry.file_size();
+        const auto file_bytes = static_cast<std::uint64_t>(entry.file_size());
+        if (file_bytes > (std::numeric_limits<std::uint64_t>::max)() - bytes) {
+            throw std::runtime_error("Syzygy collection size exceeds the supported range");
+        }
+        bytes += file_bytes;
     }
     if (wdl_files == 0 && dtz_files == 0) {
         throw std::runtime_error("Syzygy directory contains no .rtbw or .rtbz files");
@@ -2548,6 +2791,10 @@ json validate_syzygy_locator(const fs::path& path) {
         {"wdl_files", wdl_files},
         {"dtz_files", dtz_files},
         {"bytes", bytes},
+        {"quality_score", std::min<std::uint64_t>(
+                              bytes, (std::numeric_limits<std::uint64_t>::max)() -
+                                         (wdl_files + dtz_files)) +
+                              wdl_files + dtz_files},
     };
 }
 
@@ -2566,6 +2813,7 @@ json inspect_indexed_book_candidate(const fs::path& path) {
             {"validation", "opaque_book_file"},
             {"classification", "extension_candidate"},
             {"bytes", bytes},
+            {"quality_score", bytes},
         };
     }
     if (extension != ".bin" || bytes < 16 || bytes % 16 != 0) {
@@ -2604,6 +2852,7 @@ json inspect_indexed_book_candidate(const fs::path& path) {
         {"classification", "polyglot_framed"},
         {"bytes", bytes},
         {"sampled_records", inspected},
+        {"quality_score", bytes},
     };
 }
 
@@ -2641,6 +2890,16 @@ json inspect_timing_evidence_candidate(const fs::path& path) {
             ? "legacy_parseable"
             : qualified && identity_valid ? "qualified_identity"
                                           : "parseable_incomplete";
+    const std::uint64_t sample_count =
+        profile.value("samples", json::array()).is_array()
+            ? profile.value("samples", json::array()).size()
+            : 0;
+    const std::uint64_t quality_score =
+        (classification == "qualified_identity"
+             ? 3'000'000'000ULL
+             : classification == "parseable_incomplete" ? 2'000'000'000ULL
+                                                          : 1'000'000'000ULL) +
+        std::min<std::uint64_t>(sample_count, 999'999'999ULL);
     return {
         {"validation", "timing_evidence_inspection"},
         {"schema", schema},
@@ -2648,10 +2907,86 @@ json inspect_timing_evidence_candidate(const fs::path& path) {
         {"classification", classification},
         {"identity_valid", identity_valid},
         {"qualified", qualified},
+        {"sample_count", sample_count},
+        {"quality_score", quality_score},
         {"activation", qualified && identity_valid
                            ? "requires_runtime_identity_match"
                            : "catalog_only_until_migrated_or_requalified"},
     };
+}
+
+json inspect_lichess_profile_candidate(const fs::path& path,
+                                       const std::string_view schema_prefix,
+                                       const std::string_view current_schema) {
+    std::error_code error;
+    if (!fs::is_regular_file(path) ||
+        fs::is_symlink(fs::symlink_status(path, error)) || error) {
+        throw std::runtime_error(
+            "Lichess evidence candidate must reference a safe regular file");
+    }
+    const auto size = fs::file_size(path, error);
+    if (error || size == 0 || size > 16ULL * 1024ULL * 1024ULL) {
+        throw std::runtime_error(
+            "Lichess evidence candidate must be non-empty and no larger than 16 MiB");
+    }
+    const json profile = read_json(path);
+    if (!profile.is_object()) {
+        throw std::runtime_error("Lichess evidence candidate must be a JSON object");
+    }
+    const std::string schema = profile.value("schema", "");
+    if (!schema.starts_with(schema_prefix)) {
+        throw std::runtime_error("JSON candidate is not the requested Lichess evidence kind");
+    }
+    const bool current = schema == current_schema;
+    const bool qualified = profile.value("qualified", false);
+    const std::string classification =
+        current ? qualified ? "qualified_declared" : "parseable_incomplete"
+                : "legacy_parseable";
+    std::uint64_t evidence_count = 0;
+    if (profile.contains("evidence") && profile.at("evidence").is_object()) {
+        evidence_count = profile.at("evidence").size();
+    }
+    std::uint64_t measurement_count = 0;
+    if (profile.contains("samples") && profile.at("samples").is_array()) {
+        measurement_count = profile.at("samples").size();
+    }
+    if (profile.contains("sample_count") &&
+        profile.at("sample_count").is_number_unsigned()) {
+        measurement_count = (std::max)(
+            measurement_count,
+            profile.at("sample_count").get<std::uint64_t>());
+    }
+    const std::uint64_t quality_score =
+        (current && qualified ? 3'000'000'000ULL
+                             : current ? 2'000'000'000ULL
+                                       : 1'000'000'000ULL) +
+        std::min<std::uint64_t>(evidence_count * 1'000'000ULL,
+                                500'000'000ULL) +
+        std::min<std::uint64_t>(measurement_count, 499'999'999ULL);
+    json result{
+        {"validation", "lichess_evidence_inspection"},
+        {"schema", schema},
+        {"sha256", sha256_file(path)},
+        {"classification", classification},
+        {"qualified", qualified},
+        {"evidence_count", evidence_count},
+        {"measurement_count", measurement_count},
+        {"quality_score", quality_score},
+        {"activation", current && qualified
+                           ? "requires_exact_import_and_runtime_validation"
+                           : "catalog_only_until_migrated_or_requalified"},
+    };
+    if (profile.contains("published_at") && profile.at("published_at").is_string()) {
+        result["published_at"] = profile.at("published_at");
+    }
+    if (profile.contains("generated_at") && profile.at("generated_at").is_string()) {
+        result["generated_at"] = profile.at("generated_at");
+    }
+    if (profile.contains("maximum_concurrency") &&
+        profile.at("maximum_concurrency").is_number_unsigned()) {
+        result["maximum_concurrency"] = profile.at("maximum_concurrency");
+    }
+    return result;
 }
 
 json validate_uci_locator(const fs::path& path) {
@@ -3206,6 +3541,7 @@ ProviderInstallResult render_provider_installation(
             }
         }
     }
+
     json locators = json::object();
     for (const auto& binding : integration.at("locator_bindings")) {
         const std::string name = binding.at("name").get<std::string>();
