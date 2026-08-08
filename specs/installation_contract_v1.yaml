@@ -970,11 +970,17 @@ knowledge_assets:
   opening_book:
     default_component: opening_book.standard
     runtime_dependencies: []
-    required_files:
-      - strong_rare_v1.bin
-      - strong_rare_v1.ffstats
-      - strong_rare_v1.policy
-      - snapshot.manifest.json
+    snapshot_schema: uci_arena_book_snapshot_v2
+    manifest: snapshot.manifest.json
+    required_files_source: snapshot_manifest_artifact_map
+    rules:
+      - Inventory validates the bounded, path-safe artifact map and current
+        file presence without turning discovery into an unbounded hash pass.
+        Reviewed import and staged activation validate every exact declared
+        digest before granting managed authority. Installer mechanism code
+        contains no opening-book filename list.
+      - A provider filename or layout change updates the provider manifest and
+        composition data without changing inventory or deployment control flow.
     behavior: >
       Install a mutually validated provider snapshot. If only the Book Forge
       bootstrap snapshot is available, label it integration and do not claim

@@ -44,6 +44,14 @@ requiring sidecars, a publication manifest, or a package version. Discovery
 records an external in-place
 candidate only; explicit import remains the sole locator-registration step.
 
+A published opening-book snapshot owns its artifact names through the bounded,
+path-safe `artifacts` map in `snapshot.manifest.json`. Inventory checks the
+declared files are present and exposes partial or invalid state without hashing
+an arbitrarily large book during discovery. Reviewed import and staged
+activation validate the exact declared digests before granting managed
+authority. Installer mechanism code must not carry a provider-specific opening-
+book filename list.
+
 Installable components publish discoverable resources through the bounded
 `discovery` array in `arena-component.json`. Each entry declares a resource kind
 and locates it at the active root, a named digest-verified entrypoint, or a safe

@@ -4283,14 +4283,60 @@ json SetupEngine::persist_release_media(const json& catalog, const SetupPaths& p
     }
 }
 
+json inspect_opening_book_snapshot(const fs::path& book_root) {
+    json result{{"state", "missing"},
+                {"path", book_root.string()},
+                {"missing_files", json::array()}};
+    const fs::path manifest_path = book_root / "snapshot.manifest.json";
+    try {
+        if (!fs::is_directory(book_root) || contains_symbolic_link(book_root) ||
+            !fs::is_regular_file(manifest_path) || contains_symbolic_link(manifest_path)) {
+            result["missing_files"].push_back("snapshot.manifest.json");
+            return result;
+        }
+        if (fs::file_size(manifest_path) > 1024ULL * 1024ULL) {
+            throw std::runtime_error("snapshot manifest exceeds one MiB");
+        }
+        const json manifest = read_json(manifest_path);
+        if (!manifest.is_object() || !manifest.contains("schema") ||
+            !manifest.at("schema").is_string() || !manifest.contains("artifacts") ||
+            !manifest.at("artifacts").is_object() || manifest.at("artifacts").empty() ||
+            manifest.at("artifacts").size() > managed_book_max_files) {
+            throw std::runtime_error("snapshot manifest has no bounded artifact map");
+        }
+        result["snapshot_schema"] = manifest.at("schema");
+        result["artifact_count"] = manifest.at("artifacts").size();
+        for (const auto& [name, digest] : manifest.at("artifacts").items()) {
+            const fs::path relative = fs::path(name);
+            const bool valid_digest =
+                digest.is_string() && digest.get_ref<const std::string&>().size() == 64 &&
+                std::ranges::all_of(digest.get_ref<const std::string&>(),
+                                    [](const unsigned char character) {
+                                        return std::isdigit(character) != 0 ||
+                                               (character >= 'a' && character <= 'f');
+                                    });
+            if (!safe_relative_path(relative) || relative == fs::path("snapshot.manifest.json") ||
+                !valid_digest) {
+                throw std::runtime_error("snapshot manifest contains an unsafe artifact declaration");
+            }
+            const fs::path artifact = book_root / relative;
+            if (!fs::is_regular_file(artifact) || contains_symbolic_link(artifact)) {
+                result["missing_files"].push_back(relative.generic_string());
+            }
+        }
+        result["state"] = result["missing_files"].empty() ? "detected_unmanaged" : "partial";
+    } catch (const std::exception& error) {
+        result["state"] = "invalid";
+        result["validation_error"] = error.what();
+    }
+    return result;
+}
+
 json SetupEngine::inventory(const SetupPaths& paths,
-                            const std::vector<fs::path>& extra_roots,
-                            ports::AssetSearchIndex* search_index) {
+                             const std::vector<fs::path>& extra_roots,
+                             ports::AssetSearchIndex* search_index) {
     json knowledge{
-        {"opening_book",
-         {{"state", "missing"},
-          {"path", paths.knowledge_root.string()},
-          {"missing_files", json::array()}}},
+        {"opening_book", inspect_opening_book_snapshot(paths.knowledge_root / "opening_books")},
         {"syzygy",
          {{"state", "missing"},
           {"path", paths.knowledge_root.string()},
@@ -4312,22 +4358,6 @@ json SetupEngine::inventory(const SetupPaths& paths,
         }
         return json(ids);
     };
-    const fs::path book_root = paths.knowledge_root / "opening_books";
-    const std::array<const char*, 4> book_files{
-        "strong_rare_v1.bin",
-        "strong_rare_v1.ffstats",
-        "strong_rare_v1.policy",
-        "snapshot.manifest.json",
-    };
-    for (const char* name : book_files) {
-        if (!fs::is_regular_file(book_root / name) || contains_symbolic_link(book_root / name)) {
-            knowledge["opening_book"]["missing_files"].push_back(name);
-        }
-    }
-    if (knowledge["opening_book"]["missing_files"].empty()) {
-        knowledge["opening_book"]["state"] = "detected_unmanaged";
-        knowledge["opening_book"]["path"] = book_root.string();
-    }
     const fs::path tablebase_root = paths.knowledge_root / "tablebases";
     if (fs::is_directory(tablebase_root) && !contains_symbolic_link(tablebase_root)) {
         for (const auto& entry : fs::directory_iterator(tablebase_root)) {

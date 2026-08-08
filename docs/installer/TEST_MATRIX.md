@@ -43,6 +43,9 @@ Required scenarios:
 - read-only indexed discovery for opening books, partial Syzygy collections,
   timing evidence, and Lichess single-game/capacity/transport profiles through
   typed product-owned query rules and replaceable Windows/Linux adapters;
+- manifest-driven opening-book snapshot inventory, including complete, partial,
+  malformed, and path-escaping artifact declarations without provider filename
+  knowledge in installer mechanism code;
 - unavailable, timed-out, truncated, empty, legacy, incomplete, incompatible,
   and decoy indexed results remaining visible or rejected as appropriate
   without registration, copying, activation, or filesystem mutation;

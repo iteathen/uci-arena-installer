@@ -910,16 +910,38 @@ TEST_CASE("inventory reports actionable missing and present knowledge assets") {
     const fs::path tablebase_root = paths.knowledge_root / "tablebases";
     fs::create_directories(book_root);
     fs::create_directories(tablebase_root);
-    for (const std::string name : {"strong_rare_v1.bin", "strong_rare_v1.ffstats",
-                                   "strong_rare_v1.policy", "snapshot.manifest.json"}) {
+    const std::array<std::string, 3> book_files{
+        "strong_rare_v1.bin", "strong_rare_v1.stats", "strong_rare_v1.policy"};
+    json book_artifacts = json::object();
+    for (const std::string& name : book_files) {
         std::ofstream(book_root / name) << "fixture";
+        book_artifacts[name] = sha256_text("fixture");
     }
+    std::ofstream(book_root / "snapshot.manifest.json")
+        << json{{"schema", "uci_arena_book_snapshot_v2"},
+                {"artifacts", std::move(book_artifacts)}}.dump(2);
     std::ofstream(tablebase_root / "KQvK.rtbw") << "fixture";
 
     inventory = SetupEngine::inventory(paths);
     REQUIRE(inventory.at("knowledge").at("opening_book").at("state") == "detected_unmanaged");
     REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "detected_unmanaged");
     REQUIRE(inventory.at("knowledge").at("syzygy").at("wdl_files") == 1);
+
+    fs::remove(book_root / "strong_rare_v1.stats");
+    inventory = SetupEngine::inventory(paths);
+    REQUIRE(inventory.at("knowledge").at("opening_book").at("state") == "partial");
+    REQUIRE(inventory.at("knowledge").at("opening_book").at("missing_files") ==
+            json::array({"strong_rare_v1.stats"}));
+
+    std::ofstream(book_root / "strong_rare_v1.stats") << "fixture";
+    std::ofstream(book_root / "snapshot.manifest.json")
+        << json{{"schema", "uci_arena_book_snapshot_v2"},
+                {"artifacts",
+                 {{"../escaped.bin", sha256_text("fixture")}}}}
+               .dump(2);
+    inventory = SetupEngine::inventory(paths);
+    REQUIRE(inventory.at("knowledge").at("opening_book").at("state") == "invalid");
+    REQUIRE(inventory.at("knowledge").at("opening_book").contains("validation_error"));
 
     fs::remove_all(root);
 }
