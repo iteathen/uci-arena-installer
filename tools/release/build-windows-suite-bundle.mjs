@@ -225,7 +225,8 @@ export function buildWindowsSuiteBundleSource(options) {
     options.development
       ? "--allow-unsigned-development-catalog"
       : `--metadata-dir ${quoted("[WixBundleExecutePackageCacheFolder]release\\tuf")}`,
-  ].join(" ");
+    options.offline ? "--offline" : null,
+  ].filter(Boolean).join(" ");
   const install = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].install.json")} apply --yes ${featureArguments}`;
   const repair = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].repair.json")} repair --yes ${featureArguments}`;
   const uninstall = [
@@ -244,7 +245,8 @@ export function buildWindowsSuiteBundleSource(options) {
     `    <Variable Name="${xml(feature.variable)}" Type="numeric" Value="${defaults.has(feature.component_id) ? 1 : 0}" Persisted="yes" bal:Overridable="yes" />`);
   const payloadLines = payloads.map((relative, index) =>
     `        <Payload Id="SuiteMedia${String(index + 1).padStart(4, "0")}" SourceFile="${xml(path.join(media, relative))}" Name="${xml(payloadName(relative).replaceAll("/", "\\"))}" />`);
-  const name = `${policy.display_name} ${selectedScope.name_suffix}`;
+  const name = `${policy.display_name} ${selectedScope.name_suffix}`
+    + (options.offline ? " Offline" : "");
   return {
     source: [
       '<?xml version="1.0" encoding="UTF-8"?>',
@@ -319,6 +321,10 @@ function main() {
     if (!args[required]) throw new Error(`missing --${required}`);
   }
   const development = args.development === "true";
+  if (args.offline !== undefined && !["true", "false"].includes(args.offline)) {
+    throw new Error("--offline must be true or false");
+  }
+  const offline = args.offline === "true";
   process.stdout.write(`${JSON.stringify(buildWindowsSuiteBundle({
     mediaRoot: args["media-root"],
     managerMsi: args["manager-msi"],
@@ -331,6 +337,7 @@ function main() {
     output: args.output,
     wix: args.wix,
     development,
+    offline,
   }))}\n`);
 }
 

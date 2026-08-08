@@ -107,6 +107,17 @@ signed_provenance:
       - Official suite locks accept only the trusted provider workflow from
         refs/heads/main with workflow_dispatch. Source-tag candidates may be
         diagnostic provider outputs but have no official suite authority.
+      - A local complete-development review build may accept a separately
+        generated, non-release-ready review lock only through the explicit
+        diagnostic-review mode. Every row remains bound to one exact trusted
+        workflow, branch ref, source commit, immutable private release, result,
+        artifact, and Sigstore bundle; the certificate identity must derive
+        from that exact locked ref.
+      - Diagnostic-review acceptance changes only the permitted locked source
+        ref. It does not weaken digest, OIDC issuer, workflow, trigger,
+        repository, source-commit, predicate, transparency-log, or independent
+        DSSE-payload verification, and it can emit only an unsigned suite
+        candidate that is ineligible for mirroring or promotion.
       - Independently decode the verified DSSE payload and require exactly one
         subject for the locked artifact digest plus a predicate exactly equal
         to the separately digest-pinned arena_provider_release_result_v1.
@@ -592,6 +603,10 @@ packaging:
         - source_commit
         - target_platform
         - build_preset
+        - composition_sha256
+        - release_lock_sha256
+        - exact_component_input_digests
+        - exact_component_source_commits_and_workflow_refs
         - exact_artifact_names
         - artifact_sizes
         - artifact_sha256_digests
@@ -638,6 +653,10 @@ packaging:
         arena_clean_build_result_v1 manifest and cannot succeed when any
         required installer is missing, empty, ambiguously named, or accompanied
         by stale installer output.
+      - The result distinguishes release_ready_lock from
+        diagnostic_review_lock input authority and records every composed
+        component repository, version, target, source commit, workflow ref,
+        artifact digest, result digest, and Sigstore-bundle digest.
       - Manager publishes one immutable, manifest-bound component candidate per
         target. Installer release assembly consumes that candidate through the
         same component contract locally and in protected CI; it never reads a
@@ -649,6 +668,18 @@ packaging:
         cannot bypass provider attestation verification, synthesize a
         component, accept an unreviewed source checkout, or label the result
         official.
+      - Before merge, the additional explicit --diagnostic-review-lock path
+        may compose one complete target-specific non-release-ready lock from
+        immutable private branch candidates. It validates the same component,
+        dependency, manifest, digest, and provenance contracts as the normal
+        complete-development path, records unsigned_suite_candidate, and is
+        rejected by protected release, provider mirroring, and suite signing.
+      - Diagnostic review acquisition consumes a declarative source set with
+        exactly one component id, private repository, immutable prerelease tag,
+        and exact release-target commit for every composed component. The
+        package-source adapter downloads exactly the artifact, release result,
+        and Sigstore bundle into a fresh bounded root, derives the review lock
+        from those bytes, and publishes neither the lock nor the candidates.
       - A Complete development bootstrapper enables MSI same-version upgrades
         so a newer source commit can repair or replace an installed candidate
         that has the same unreleased suite version. Manager-only and official
@@ -675,6 +706,9 @@ packaging:
         Stockfish, Book Forge, standard opening book, Evidence runtime,
         Evidence Service, and the Lichess adapter according to the exact
         reviewed catalog.
+      - The Windows feature surface exposes the packaged standard opening book
+        as its own default-selected knowledge component. Selecting Book Forge
+        does not silently stand in for selecting a published book artifact.
       - The protected Installer workflow is the canonical complete clean build.
         It requires a release-ready lock, acquires immutable Manager and provider
         candidates for both platforms, validates their manifests and provenance,
@@ -901,6 +935,9 @@ packaging:
       Carries the same accepted core component digest set and forces
       arena-setup offline mode; credentials and external Syzygy bytes remain
       excluded.
+    transport_rule: >
+      Offline fixed-scope bundles pass --offline to both apply and repair;
+      online bundles omit it. Uninstall never receives a transport flag.
     retained_channel:
       location: manager_data_root/release
       contents: [signed_catalog, signed_tuf_metadata, current_platform_payloads]

@@ -192,6 +192,7 @@ function renderFileComponent({
 
 export function buildManagerMsiSource({
   managerRoot,
+  managerVersion,
   installerRoot,
   installerVersion,
   scopeMarker,
@@ -221,7 +222,7 @@ export function buildManagerMsiSource({
   const policy = readJson(path.resolve(policyPath), "Manager Windows integration policy");
   const selectedScope = validatePolicy(policy, scope);
   const { manifest, declared, manifestPath } = validateManagerArtifact(
-    resolvedRoot, version, policy,
+    resolvedRoot, managerVersion ?? version, policy,
   );
   const sources = new Map(declared);
   sources.set("arena-component.json", manifestPath);
@@ -358,6 +359,7 @@ function main() {
   }
   process.stdout.write(`${JSON.stringify(buildManagerMsi({
     managerRoot: args["manager-root"],
+    managerVersion: args["manager-version"] ?? args.version,
     installerRoot: args["installer-root"],
     installerVersion: args["installer-version"],
     scopeMarker: args["scope-marker"],

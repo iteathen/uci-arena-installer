@@ -13,6 +13,7 @@ const SAFE_NAME = /^[A-Za-z0-9._-]+$/u;
 const TARGETS = new Set(["windows-x86_64", "linux-x86_64", "any", "any-any"]);
 const PLATFORM_TARGETS = ["windows-x86_64", "linux-x86_64"];
 const INSTALLER_REPOSITORY = "iteathen/uci-arena-installer";
+const HEAD_REF = /^refs\/heads\/(?!.*\.\.)(?!.*\/\/)(?!.*[\/.]$)[A-Za-z0-9._\/-]+$/u;
 
 export function sha256File(filename) {
   return createHash("sha256").update(readFileSync(filename)).digest("hex");
@@ -52,9 +53,21 @@ function validateArtifactIdentity(row, context, errors) {
   }
 }
 
-function validateProvenance(row, provider, context, errors) {
+function validateProvenance(row, provider, context, errors, provenanceMode) {
+  const workflowRef = requiredText(row, "provenance_workflow_ref", context, errors);
+  if (provenanceMode === "official") {
+    if (workflowRef !== "refs/heads/main") {
+      errors.push(`${context} is not a main-branch candidate`);
+    }
+  } else if (provenanceMode === "diagnostic_review") {
+    if (!HEAD_REF.test(workflowRef)) {
+      errors.push(`${context}.provenance_workflow_ref is not an exact branch ref`);
+    }
+  } else {
+    errors.push(`unsupported provenance validation mode: ${provenanceMode}`);
+  }
   const expectedIdentity =
-    `https://github.com/${provider.repository}/${provider.workflow_path}@refs/heads/main`;
+    `https://github.com/${provider.repository}/${provider.workflow_path}@${workflowRef}`;
   if (row.provenance_certificate_identity !== expectedIdentity) {
     errors.push(`${context}.provenance_certificate_identity does not match its provider workflow`);
   }
@@ -64,9 +77,8 @@ function validateProvenance(row, provider, context, errors) {
   if (row.provenance_workflow_name !== provider.workflow_name) {
     errors.push(`${context}.provenance_workflow_name does not match its provider`);
   }
-  if (row.provenance_workflow_ref !== "refs/heads/main"
-      || row.provenance_workflow_trigger !== "workflow_dispatch") {
-    errors.push(`${context} is not an explicitly dispatched main-branch candidate`);
+  if (row.provenance_workflow_trigger !== "workflow_dispatch") {
+    errors.push(`${context} is not an explicitly dispatched candidate`);
   }
   requiredText(row, "provenance_bundle_name", context, errors);
   requiredText(row, "provenance_bundle_sha256", context, errors, DIGEST);
@@ -101,7 +113,9 @@ function providerByRepository(lock, errors) {
   return byRepository;
 }
 
-function validateProviderRow(row, index, compositionById, providers, errors) {
+function validateProviderRow(
+  row, index, compositionById, providers, errors, provenanceMode,
+) {
   const context = `components[${index}]`;
   if (!isObject(row)) {
     errors.push(`${context} must be an object`);
@@ -132,11 +146,11 @@ function validateProviderRow(row, index, compositionById, providers, errors) {
   requiredText(row, "provider_result_name", context, errors);
   requiredText(row, "provider_result_sha256", context, errors, DIGEST);
   validateArtifactIdentity(row, context, errors);
-  if (provider) validateProvenance(row, provider, context, errors);
+  if (provider) validateProvenance(row, provider, context, errors, provenanceMode);
   return { id, target: row.target_triple };
 }
 
-function validateManagedRow(row, index, compositionById, errors) {
+function validateManagedRow(row, index, compositionById, errors, provenanceMode) {
   const context = `managed_components[${index}]`;
   if (!isObject(row)) {
     errors.push(`${context} must be an object`);
@@ -174,11 +188,11 @@ function validateManagedRow(row, index, compositionById, errors) {
     repository: INSTALLER_REPOSITORY,
     workflow_path: ".github/workflows/managed-component-release.yml",
     workflow_name: "Managed component candidate",
-  }, context, errors);
+  }, context, errors, provenanceMode);
   return { id, target: row.target_triple };
 }
 
-function validateCoverage(composition, identities, errors) {
+function validateCoverage(composition, identities, errors, requiredTargets) {
   const targetsById = new Map();
   for (const identity of identities.filter(Boolean)) {
     const targets = targetsById.get(identity.id) ?? new Set();
@@ -196,7 +210,7 @@ function validateCoverage(composition, identities, errors) {
       continue;
     }
     if (!portable) {
-      for (const target of PLATFORM_TARGETS) {
+      for (const target of requiredTargets) {
         if (!targets.has(target)) errors.push(`${component.component_id} is missing ${target}`);
       }
       for (const target of targets) {
@@ -210,6 +224,9 @@ function validateCoverage(composition, identities, errors) {
 
 export function validateReleaseLock(lock, compositionCandidate, {
   requireReady = true,
+  requireNotReady = false,
+  provenanceMode = "official",
+  requiredTargets = undefined,
   compositionFileName = undefined,
   compositionSha256 = undefined,
 } = {}) {
@@ -228,6 +245,15 @@ export function validateReleaseLock(lock, compositionCandidate, {
   }
   if (typeof lock.release_ready !== "boolean") errors.push("release_ready must be boolean");
   if (requireReady && lock.release_ready !== true) errors.push("release lock is not release-ready");
+  if (requireNotReady && lock.release_ready !== false) {
+    errors.push("diagnostic review lock must not be release-ready");
+  }
+  if (requiredTargets !== undefined
+      && (!Array.isArray(requiredTargets)
+        || requiredTargets.length === 0
+        || requiredTargets.some((target) => !PLATFORM_TARGETS.includes(target)))) {
+    errors.push("requiredTargets must contain supported platform targets");
+  }
   if (!isObject(lock.composition)) {
     errors.push("composition identity is required");
   } else {
@@ -272,11 +298,14 @@ export function validateReleaseLock(lock, compositionCandidate, {
   if (!Array.isArray(lock.managed_components)) errors.push("managed_components must be an array");
   const identities = [
     ...(Array.isArray(lock.components) ? lock.components.map((row, index) =>
-      validateProviderRow(row, index, compositionById, providers, errors)) : []),
+      validateProviderRow(
+        row, index, compositionById, providers, errors, provenanceMode,
+      )) : []),
     ...(Array.isArray(lock.managed_components) ? lock.managed_components.map((row, index) =>
-      validateManagedRow(row, index, compositionById, errors)) : []),
+      validateManagedRow(row, index, compositionById, errors, provenanceMode)) : []),
   ];
-  if (lock.release_ready === true) validateCoverage(composition, identities, errors);
+  const coverage = requiredTargets ?? (lock.release_ready === true ? PLATFORM_TARGETS : []);
+  if (coverage.length > 0) validateCoverage(composition, identities, errors, coverage);
   return { ok: errors.length === 0, errors };
 }
 

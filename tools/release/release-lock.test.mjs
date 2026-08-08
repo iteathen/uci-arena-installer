@@ -168,3 +168,36 @@ test("ready lock fails when any composed component lacks platform coverage", () 
   assert.equal(result.ok, false);
   assert.match(result.errors.join("\n"), /manager\.core is missing linux-x86_64/u);
 });
+
+test("diagnostic review accepts exact branch provenance without granting release authority", () => {
+  const lock = readyLock();
+  lock.release_ready = false;
+  for (const row of lock.components) {
+    const provider = lock.providers[row.provider_id];
+    row.provenance_workflow_ref = "refs/heads/agent/system-sanity";
+    row.provenance_certificate_identity =
+      `https://github.com/${provider.repository}/${provider.workflow_path}`
+      + `@${row.provenance_workflow_ref}`;
+  }
+
+  assert.deepEqual(validateReleaseLock(lock, composition, {
+    requireReady: false,
+    requireNotReady: true,
+    provenanceMode: "diagnostic_review",
+    requiredTargets: ["windows-x86_64"],
+  }), { ok: true, errors: [] });
+
+  const official = validateReleaseLock(lock, composition, { requireReady: false });
+  assert.equal(official.ok, false);
+  assert.match(official.errors.join("\n"), /not a main-branch candidate/u);
+
+  lock.components[0].provenance_certificate_identity += "-substituted";
+  const substituted = validateReleaseLock(lock, composition, {
+    requireReady: false,
+    requireNotReady: true,
+    provenanceMode: "diagnostic_review",
+    requiredTargets: ["windows-x86_64"],
+  });
+  assert.equal(substituted.ok, false);
+  assert.match(substituted.errors.join("\n"), /certificate_identity/u);
+});

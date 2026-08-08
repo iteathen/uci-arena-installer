@@ -63,6 +63,21 @@ Required scenarios:
   destination restoration after later failure, and normal-uninstall
   preservation after receipt and binary authority are removed;
 - cleanup after success and failure;
+- complete-development review acquisition from private immutable prereleases,
+  including exact target commit, three-asset inventory, source-set coverage,
+  private-repository enforcement, safe names, and transactional replacement;
+- official release locks rejecting branch provenance while an explicit
+  non-release-ready diagnostic review lock accepts only exact branch refs and
+  still enforces workflow, commit, trigger, digest, Cosign, transparency-log,
+  and independent DSSE-predicate identity;
+- clean-build target selection rejecting missing, duplicate, or ambiguous
+  portable/platform candidates and preserving the last complete output after a
+  synthetic package failure;
+- catalog generation deriving dependency closure from composition, activation
+  roles and knowledge groups from component manifests, and capacities from
+  verified payload evidence without component-id branches;
+- Manager component version remaining independent from the suite MSI package
+  version;
 - Manager artifact byte/manifest mismatch and version-drift rejection before
   MSI generation;
 - WiX compilation of both fixed-scope Manager MSIs from a synthetic immutable
@@ -72,6 +87,8 @@ Required scenarios:
 - WiX compilation of both fixed-scope suite bundles with default-on persisted
   Modify controls, explicit apply/repair operations, and normal uninstall with
   no purge path;
+- a distinct default-on standard opening-book control and offline-only
+  `--offline` apply/repair arguments with no transport flag on uninstall;
 - Personal delegation without elevation;
 - All-users delegation to the elevation-requiring machine bundle;
 - deterministic online and offline launcher envelopes, exact embedded bundle

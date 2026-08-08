@@ -144,7 +144,10 @@
           "const": "https://token.actions.githubusercontent.com"
         },
         "provenance_workflow_name": {"type": "string"},
-        "provenance_workflow_ref": {"const": "refs/heads/main"},
+        "provenance_workflow_ref": {
+          "type": "string",
+          "pattern": "^refs/heads/[A-Za-z0-9._/-]+$"
+        },
         "provenance_workflow_trigger": {"const": "workflow_dispatch"}
       }
     }

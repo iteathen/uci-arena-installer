@@ -12,6 +12,7 @@ import {
   buildExpectedManagedStatement,
   prepareManagedProvenance,
   verifyBundlePayload,
+  verifyManagedCandidate,
 } from "./managed-provenance.mjs";
 
 const repositoryRoot = path.resolve(
@@ -92,6 +93,86 @@ test("Installer managed provenance rejects obsolete Manager authority", () => {
       managedResultPath: resultPath,
       statementDirectory: path.join(root, "statements"),
     }), /does not bind the exact Installer artifact/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("managed candidate consumption pins lock bytes, workflow claims, and predicate", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "arena-installer-managed-consume-"));
+  try {
+    const artifactPath = path.join(root, "node_runtime.private-24.15.0-windows-x86_64.tar.gz");
+    const artifact = Buffer.from("managed artifact", "utf8");
+    writeFileSync(artifactPath, artifact);
+    const result = {
+      schema: "arena_managed_component_release_result_v1",
+      component_id: "node_runtime.private",
+      component_version: "24.15.0",
+      target_triple: "windows-x86_64",
+      release_authority: "installer_managed_component_only",
+      suite_installer_authority: "iteathen/uci-arena-installer",
+      source_repository: "iteathen/uci-arena-installer",
+      source_commit: "4".repeat(40),
+      artifact_name: path.basename(artifactPath),
+      artifact_sha256: sha256(artifact),
+      artifact_size_bytes: artifact.length,
+      component_manifest_sha256: "5".repeat(64),
+      licenses_sha256: "6".repeat(64),
+      workflow_identity:
+        "iteathen/uci-arena-installer/.github/workflows/managed-component-release.yml"
+        + "@refs/heads/main#1234.1",
+    };
+    const resultPath = path.join(
+      root, "node_runtime.private-24.15.0-windows-x86_64.managed-result.json",
+    );
+    writeFileSync(resultPath, `${JSON.stringify(result)}\n`);
+    const statement = buildExpectedManagedStatement(result);
+    const bundlePath = `${artifactPath}.sigstore.json`;
+    writeFileSync(bundlePath, `${JSON.stringify({
+      mediaType: SIGSTORE_BUNDLE_MEDIA_TYPE,
+      verificationMaterial: {
+        certificate: { rawBytes: "certificate" },
+        tlogEntries: [{ inclusionProof: { checkpoint: "checkpoint" } }],
+      },
+      dsseEnvelope: {
+        payload: Buffer.from(JSON.stringify(statement), "utf8").toString("base64"),
+        payloadType: "application/vnd.in-toto+json",
+        signatures: [{ sig: "signature" }],
+      },
+    })}\n`);
+    const lockRow = {
+      component_id: result.component_id,
+      component_version: result.component_version,
+      target_triple: result.target_triple,
+      source_commit: result.source_commit,
+      artifact_name: result.artifact_name,
+      artifact_sha256: result.artifact_sha256,
+      component_manifest_sha256: result.component_manifest_sha256,
+      licenses_sha256: result.licenses_sha256,
+      managed_result_name: path.basename(resultPath),
+      managed_result_sha256: sha256(readFileSync(resultPath)),
+      provenance_bundle_name: path.basename(bundlePath),
+      provenance_bundle_sha256: sha256(readFileSync(bundlePath)),
+      provenance_certificate_identity:
+        "https://github.com/iteathen/uci-arena-installer/"
+        + ".github/workflows/managed-component-release.yml@refs/heads/main",
+      provenance_oidc_issuer: "https://token.actions.githubusercontent.com",
+      provenance_workflow_name: "Managed component candidate",
+      provenance_workflow_ref: "refs/heads/main",
+      provenance_workflow_trigger: "workflow_dispatch",
+    };
+    let request;
+    const verified = verifyManagedCandidate({
+      artifactPath,
+      managedResultPath: resultPath,
+      bundlePath,
+      lockRow,
+      cosignExecutable: "cosign-fixture",
+      cosignVerify(executable, value) { request = { executable, ...value }; },
+    });
+    assert.equal(verified.component_id, "node_runtime.private");
+    assert.equal(request.executable, "cosign-fixture");
+    assert.equal(request.sourceCommit, "4".repeat(40));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

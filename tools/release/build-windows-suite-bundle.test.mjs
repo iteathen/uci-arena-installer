@@ -32,6 +32,7 @@ const wixAvailable = process.platform === "win32"
 const features = [
   "uci_arena.engine",
   "book_forge.service",
+  "opening_book.standard",
   "uci_arena_evidence.service",
   "lichess.adapter",
 ];
@@ -80,6 +81,7 @@ function options(f, scope, managerMsi = path.join(f.root, "manager.msi")) {
     localizationPath,
     themePath: localizationPath,
     development: true,
+    offline: false,
   };
 }
 
@@ -125,6 +127,14 @@ test("suite bundle derives default-on Modify features and lifecycle commands fro
     assert.doesNotMatch(source, /restart-manager-service/u);
     assert.match(theme, /LatticeKnight default/u);
     assert.match(theme, /Everything is selected by default/u);
+
+    const offline = buildWindowsSuiteBundleSource({
+      ...options(f, "per-user"),
+      offline: true,
+    });
+    assert.equal(offline.source.match(/--offline/gu)?.length, 2);
+    assert.match(offline.source, /Name="UCI Arena Suite Setup \(Personal\) Offline"/u);
+    assert.doesNotMatch(source, /--offline/u);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

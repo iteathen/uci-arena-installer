@@ -124,6 +124,7 @@ function options(f, scope) {
     managerRoot: f.managerRoot,
     installerRoot: f.installerRoot,
     installerVersion: "0.1.0",
+    managerVersion: "0.3.8",
     scopeMarker: scope === "per-user" ? f.perUserMarker : f.perMachineMarker,
     policyPath,
     version: "0.3.8",
@@ -191,11 +192,19 @@ test("Manager MSI rejects a mismatched Manager and Installer runtime collision",
   }
 });
 
-test("Manager MSI source rejects component version drift before packaging", () => {
+test("Manager MSI separates component identity from suite package version", () => {
   const f = fixture();
   try {
+    const source = buildManagerMsiSource({
+      ...options(f, "per-user"),
+      version: "0.3.9",
+    });
+    assert.match(source, /Version="0\.3\.9"/u);
     assert.throws(
-      () => buildManagerMsiSource({ ...options(f, "per-user"), version: "0.3.9" }),
+      () => buildManagerMsiSource({
+        ...options(f, "per-user"),
+        managerVersion: "0.3.9",
+      }),
       /does not match the requested release identity/u,
     );
   } finally {
