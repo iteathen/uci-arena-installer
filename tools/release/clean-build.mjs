@@ -66,6 +66,35 @@ function runChecked(executable, args, { cwd = repositoryRoot, environment = proc
   return String(result.stdout ?? "").trim();
 }
 
+export function resolveNpmInvocation({
+  platform = process.platform,
+  execPath = process.execPath,
+  environment = process.env,
+  fileExists = existsSync,
+} = {}) {
+  if (platform !== "win32") return { executable: "npm", argsPrefix: [] };
+
+  const windowsPath = path.win32;
+  const candidates = [
+    environment.ARENA_NPM_CLI_PATH,
+    environment.npm_execpath,
+    windowsPath.join(windowsPath.dirname(execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+    ...String(environment.PATH ?? "")
+      .split(";")
+      .filter((entry) => entry.length > 0)
+      .map((entry) => windowsPath.join(entry, "node_modules", "npm", "bin", "npm-cli.js")),
+  ];
+  const npmCli = candidates.find((candidate) => typeof candidate === "string"
+    && windowsPath.isAbsolute(candidate)
+    && fileExists(candidate));
+  if (!npmCli) {
+    throw new Error(
+      "npm CLI is unavailable; install npm beside Node.js or set ARENA_NPM_CLI_PATH to npm-cli.js",
+    );
+  }
+  return { executable: execPath, argsPrefix: [windowsPath.resolve(npmCli)] };
+}
+
 function sourceIdentity() {
   const status = runChecked("git", ["status", "--porcelain", "--untracked-files=no"]);
   if (status !== "") throw new Error("clean build requires a clean tracked worktree");
@@ -234,7 +263,8 @@ function buildInstallerSource({ platform, installTree }) {
     }
     environment.VCPKG_ROOT = localVcpkg;
   }
-  runChecked("npm", ["run", "check"], { environment });
+  const npm = resolveNpmInvocation({ environment });
+  runChecked(npm.executable, [...npm.argsPrefix, "run", "check"], { environment });
   runChecked("cmake", ["--preset", preset], { environment });
   runChecked("cmake", ["--build", "--preset", preset], { environment });
   runChecked("ctest", ["--preset", preset], { environment });

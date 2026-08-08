@@ -42,6 +42,9 @@ only a complete digest-bound output directory. Official mode accepts main-only
 release-ready provenance. The explicit diagnostic-review mode changes only the
 permitted exact workflow ref and emits `unsigned_suite_candidate`. Both modes
 consume immutable artifacts and never read another repository's source tree.
+On Windows it invokes npm through the selected Node executable and a resolved
+`npm-cli.js` entrypoint, with `ARENA_NPM_CLI_PATH` as an explicit override; it
+does not rely on shell interpretation of `npm.cmd`.
 
 Clean-build output is transactional: work and publish roots are fresh and
 bounded; the last complete output is retained until all native tests, package

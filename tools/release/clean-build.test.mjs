@@ -12,9 +12,34 @@ import test from "node:test";
 
 import {
   cleanBuildArtifactNames,
+  resolveNpmInvocation,
   selectLockedComponents,
   transactionalOutput,
 } from "./clean-build.mjs";
+
+test("clean build invokes npm through Node on Windows without shell parsing", () => {
+  const node = String.raw`C:\Program Files\nodejs\node.exe`;
+  const npmCli = String.raw`C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js`;
+  assert.deepEqual(resolveNpmInvocation({
+    platform: "win32",
+    execPath: node,
+    environment: {},
+    fileExists: (candidate) => candidate === npmCli,
+  }), {
+    executable: node,
+    argsPrefix: [npmCli],
+  });
+  assert.deepEqual(resolveNpmInvocation({ platform: "linux" }), {
+    executable: "npm",
+    argsPrefix: [],
+  });
+  assert.throws(() => resolveNpmInvocation({
+    platform: "win32",
+    execPath: String.raw`C:\portable\node.exe`,
+    environment: { PATH: String.raw`C:\unrelated` },
+    fileExists: () => false,
+  }), /npm CLI is unavailable/u);
+});
 
 test("clean build publishes the complete platform-specific output contract", () => {
   assert.deepEqual(cleanBuildArtifactNames("windows-x86_64", "0.3.9"), [
