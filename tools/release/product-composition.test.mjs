@@ -39,7 +39,7 @@ test("complete composition declares independently versioned suite bricks", () =>
       "manager.core": "0.3.9",
       "uci_arena.engine": "0.1.4",
       "uci_arena_evidence.runtime": "0.3.3",
-      "lichess.adapter": "1.0.3",
+      "lichess.adapter": "1.0.4",
       "book_forge.service": "0.4.0",
       "opening_book.standard": "0.4.0",
       "uci_arena_evidence.service": "0.3.10",

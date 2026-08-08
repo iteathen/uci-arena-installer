@@ -36,7 +36,7 @@
     {
       "role": "lichess_bot",
       "component_id": "lichess.adapter",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "repository": "iteathen/uci-arena-lichess-bot",
       "required": false,
       "default_enabled": true,
