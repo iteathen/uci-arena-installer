@@ -101,6 +101,9 @@ Required scenarios:
 - a distinct default-on standard opening-book control and offline-only
   `--offline` apply/repair arguments with no transport flag on uninstall;
 - Personal delegation without elevation;
+- execution of each final scope-neutral Windows envelope in bounded dry-run
+  mode before publication, including complete embedded-payload hashing without
+  using the default thread stack for payload buffers;
 - All-users delegation to the elevation-requiring machine bundle;
 - deterministic online and offline launcher envelopes, exact embedded bundle
   digests, corrupt-envelope rejection, and temporary-child cleanup;

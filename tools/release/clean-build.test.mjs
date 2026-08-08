@@ -15,6 +15,7 @@ import {
   resolveNpmInvocation,
   selectLockedComponents,
   transactionalOutput,
+  validateWindowsLauncherExecutable,
 } from "./clean-build.mjs";
 
 test("clean build invokes npm through Node on Windows without shell parsing", () => {
@@ -58,6 +59,27 @@ test("clean build publishes the complete platform-specific output contract", () 
   assert.throws(
     () => cleanBuildArtifactNames("linux-x86_64", "manager-version"),
     /three-field suite version/u,
+  );
+});
+
+test("clean build executes each assembled Windows launcher before publication", () => {
+  const calls = [];
+  validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+    scope: "all-users",
+    execute: (filename, args, options) => {
+      calls.push({ filename, args, options });
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].filename, String.raw`C:\candidate\setup.exe`);
+  assert.deepEqual(calls[0].args, ["--dry-run", "--scope", "all-users"]);
+  assert.equal(calls[0].options.timeout, 30_000);
+  assert.throws(
+    () => validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+      execute: () => ({ status: -1073741571, stdout: "", stderr: "" }),
+    }),
+    /dry-run failed for personal: exit -1073741571/u,
   );
 });
 

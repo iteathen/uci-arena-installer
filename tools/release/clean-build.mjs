@@ -66,6 +66,29 @@ function runChecked(executable, args, { cwd = repositoryRoot, environment = proc
   return String(result.stdout ?? "").trim();
 }
 
+export function validateWindowsLauncherExecutable(filename, {
+  scope = "personal",
+  execute = spawnSync,
+} = {}) {
+  if (!["personal", "all-users"].includes(scope)) {
+    throw new Error("Windows launcher dry-run scope is invalid");
+  }
+  const result = execute(filename, ["--dry-run", "--scope", scope], {
+    cwd: path.dirname(filename),
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 30_000,
+  });
+  if (result.error || result.status !== 0) {
+    const diagnostic = [result.error?.message, result.stderr, result.stdout]
+      .filter((value) => typeof value === "string" && value.trim().length > 0)
+      .join("\n");
+    throw new Error(
+      `Windows installer launcher dry-run failed for ${scope}: ${diagnostic || `exit ${result.status}`}`,
+    );
+  }
+}
+
 export function resolveNpmInvocation({
   platform = process.platform,
   execPath = process.execPath,
@@ -468,6 +491,8 @@ function buildWindowsOutputs({
     "--all-users", children["per-machine-offline"],
     "--output", offline,
   ]);
+  validateWindowsLauncherExecutable(online, { scope: "personal" });
+  validateWindowsLauncherExecutable(offline, { scope: "all-users" });
   return [online, offline, userMsi, machineMsi].map(artifactRecord);
 }
 

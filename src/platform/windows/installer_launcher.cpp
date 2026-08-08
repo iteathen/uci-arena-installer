@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 namespace arena::platform {
 namespace {
@@ -43,6 +44,7 @@ constexpr std::array<std::byte, 16> kEnvelopeMagic{
     static_cast<std::byte>('!'), static_cast<std::byte>(0),
 };
 constexpr std::uint32_t kEnvelopeVersion = 1;
+constexpr std::size_t kPayloadIoBufferSize = 1024 * 1024;
 constexpr wchar_t kTitle[] = L"UCI Arena Suite Setup";
 constexpr wchar_t kPerUserUpgradeCode[] =
     L"{143E64C2-4153-4E8B-8C93-6FB590779E9E}";
@@ -293,7 +295,7 @@ std::array<std::byte, 32> hash_payload(
         input.clear();
         input.seekg(static_cast<std::streamoff>(payload.offset), std::ios::beg);
         std::uint64_t remaining = payload.size;
-        std::array<unsigned char, 1024 * 1024> buffer{};
+        std::vector<unsigned char> buffer(kPayloadIoBufferSize);
         while (remaining > 0) {
             const std::size_t requested = static_cast<std::size_t>(
                 std::min<std::uint64_t>(remaining, buffer.size()));
@@ -482,7 +484,7 @@ void extract_payload(const fs::path& self,
     }
     input.seekg(static_cast<std::streamoff>(payload.offset), std::ios::beg);
     std::uint64_t remaining = payload.size;
-    std::array<char, 1024 * 1024> buffer{};
+    std::vector<char> buffer(kPayloadIoBufferSize);
     while (remaining > 0) {
         const std::size_t requested = static_cast<std::size_t>(
             std::min<std::uint64_t>(remaining, buffer.size()));
