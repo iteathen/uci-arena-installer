@@ -1738,7 +1738,7 @@ TEST_CASE("provider startup cleanup uses only the declared startup control") {
     fs::remove_all(root);
 }
 
-TEST_CASE("timing profile imports require qualified exact runtime identity") {
+TEST_CASE("timing profile imports retain qualified build provenance without granting authority") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const json identity{
@@ -1766,6 +1766,9 @@ TEST_CASE("timing profile imports require qualified exact runtime identity") {
     REQUIRE(imported.at("validation").at("validation") == "qualified_uci_time_profile_v3");
     REQUIRE(imported.at("validation").at("model_id") == "model-1");
     REQUIRE(imported.at("validation").at("provider") == "cpu");
+    REQUIRE(imported.at("validation").at("qualified_engine_provenance_sha256") ==
+            "sha256:" + std::string(64, 'a'));
+    REQUIRE_FALSE(imported.at("validation").contains("engine_sha256"));
     const json inventory = SetupEngine::inventory(paths);
     REQUIRE(inventory.at("discovery").at("timing_profile").at("selection").at("source") ==
             "saved_locator");

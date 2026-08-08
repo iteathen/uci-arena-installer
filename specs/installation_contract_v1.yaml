@@ -1266,10 +1266,13 @@ local_import:
     - Lichess capacity and transport profiles remain qualified in-place
       references and are never copied or rewritten. The capacity profile must
       bind the exact selected single-game profile digest.
-    - Consumer activation verifies timing and single-game profile executable,
-      model, provider, and hardware identity against the exact installed
-      engine and model. An incompatible profile remains discoverable evidence
-      but is never presented as applied.
+    - Consumer activation verifies a timing profile's Engine-owned semantic
+      timing authority against the installed timing/search contract, model
+      semantics, provider/runtime and hardware identity, and effective search
+      topology. Its qualified executable digest remains provenance and may
+      differ after a timing-compatible rebuild. Single-game and capacity
+      evidence remain bound to the exact installed executable. An incompatible
+      profile remains discoverable evidence but is never presented as applied.
     - A successful import transaction regenerates and verifies every installed
       consumer configuration and active-model pointer affected by that locator
       before committing the locator. Failure restores the previous locator,
@@ -1634,22 +1637,24 @@ transaction:
       - Verify regenerates the expected configuration from receipt-verified
         component roots and currently valid saved locators, and fails on
         missing, stale, or altered generated configuration.
-      - When an exact qualified timing profile is selected, arena-setup writes
+      - When a qualified timing profile is selected, arena-setup writes
         and transactionally verifies an Evidence-compatible active-model
         pointer bound to the installed engine, model root, provider, options,
         and the executable digest computed from the verified installed
-        entrypoint. A profile digest is never substituted for the installed
-        executable digest. It never points the service at its own
-        configuration file.
+        entrypoint. The timing profile's historical executable digest is
+        retained as qualified-build provenance and is never substituted for
+        the installed executable digest or used as timing authority. It never
+        points the service at its own configuration file.
       - Lichess activation fails closed before credential access when timing,
         single-game, capacity, or transport evidence is missing, incomplete,
         or incompatible with the exact installed engine/model identity.
       - Runtime verification requires opening_book_active and syzygy_active,
         not merely the presence of saved locators.
       - Protected live acceptance requires the selected timing profile to be
-        accepted, applied, exact-identity-bound, and provider-safety-qualified
-        with a positive reserve after installer-owned knowledge locators are
-        applied.
+        accepted, applied, exact-semantic-timing-authority-bound, and
+        provider-safety-qualified with a positive reserve after installer-owned
+        knowledge locators are applied. Provenance-only engine-build drift is
+        reported and does not invalidate that timing authority.
   repair:
     rules:
       - Repair restages every selected component from verified release media
@@ -1744,10 +1749,11 @@ release_gate_rules:
     receipts and passes them with the installed model root and configured
     shared knowledge root to the installed adapter. It never relies on
     provider-checkout-relative template paths.
-  - The bounded protected Lichess gate requires the installed, exact-identity
-    calibrated time profile to be accepted and applied with provider safety
-    qualification and a positive service reserve. Exact single-game and
-    one-child capacity qualification remain mandatory.
+  - The bounded protected Lichess gate requires the installed,
+    exact-semantic-timing-authority calibrated time profile to be accepted and
+    applied with provider safety qualification and a positive service reserve.
+    Provenance-only engine-build drift is retained and reported. Exact
+    single-game and one-child capacity qualification remain mandatory.
   - The Syzygy gate verifies signed full manifests without downloading the full
     collection, exercises range downloads against tiny local fixtures, and
     probes either a pinned real three-man test fixture or an explicitly supplied

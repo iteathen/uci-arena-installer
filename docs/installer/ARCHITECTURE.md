@@ -36,6 +36,14 @@ Consumers enforce only the capabilities needed for a requested activation and
 must retain incompatible timing evidence as cataloged evidence with an explicit
 migration or requalification reason.
 
+Timing authority is semantic, not a build-file identity. The Engine-owned
+contract binds the timing/search contract, model semantics, provider/runtime
+and hardware identity, and effective search topology. A qualified executable
+digest remains provenance; a timing-compatible rebuild is reported without
+invalidating the curve. Exact executable identity remains mandatory for fresh
+measurement and complete-game/single-game evidence that claims what actually
+ran.
+
 Indexed discovery is split at a platform port. Installer-owned policy supplies
 typed resource kinds, exact extensions, and bounded filename globs; Windows
 Search and locate adapters translate those rules and return path evidence only.

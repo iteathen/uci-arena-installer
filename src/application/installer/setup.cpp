@@ -2910,7 +2910,7 @@ json inspect_timing_evidence_candidate(const fs::path& path) {
         {"sample_count", sample_count},
         {"quality_score", quality_score},
         {"activation", qualified && identity_valid
-                           ? "requires_runtime_identity_match"
+                           ? "requires_semantic_timing_authority_match"
                            : "catalog_only_until_migrated_or_requalified"},
     };
 }
@@ -3042,13 +3042,15 @@ json validate_timing_profile_locator(const fs::path& path) {
     const std::string model_id = identity.value("model", json::object()).value("model_id", "");
     const std::string model_fingerprint =
         identity.value("model", json::object()).value("model_fingerprint", "");
-    const std::string engine_sha256 =
+    const std::string qualified_engine_provenance_sha256 =
         identity.value("engine", json::object()).value("executable_sha256", "");
     const std::string provider =
         identity.value("search", json::object()).value("provider_effective", "");
-    if (!valid_identifier(model_id) || model_fingerprint.empty() || engine_sha256.size() != 71 ||
-        !engine_sha256.starts_with("sha256:") || provider.empty()) {
-        throw std::runtime_error("timing profile exact runtime identity is incomplete");
+    if (!valid_identifier(model_id) || model_fingerprint.empty() ||
+        qualified_engine_provenance_sha256.size() != 71 ||
+        !qualified_engine_provenance_sha256.starts_with("sha256:") || provider.empty()) {
+        throw std::runtime_error(
+            "timing profile provenance, model, or provider identity is incomplete");
     }
     return {
         {"validation", "qualified_uci_time_profile_v3"},
@@ -3056,7 +3058,7 @@ json validate_timing_profile_locator(const fs::path& path) {
         {"identity_sha256", identity_sha256},
         {"model_id", model_id},
         {"model_fingerprint", model_fingerprint},
-        {"engine_sha256", engine_sha256},
+        {"qualified_engine_provenance_sha256", qualified_engine_provenance_sha256},
         {"provider", provider},
         {"permissions", permissions},
     };
