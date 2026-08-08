@@ -269,6 +269,12 @@ function acquireRelease(source, destination, visibilityCache) {
   ]);
 }
 
+export function prepareDiagnosticReviewStaging(stagingRoot) {
+  rmSync(stagingRoot, { recursive: true, force: true });
+  mkdirSync(stagingRoot, { recursive: false });
+  mkdirSync(path.join(stagingRoot, "assets"), { recursive: false });
+}
+
 export function acquireDiagnosticReviewInputs({
   baseLock,
   composition,
@@ -282,9 +288,8 @@ export function acquireDiagnosticReviewInputs({
   const sources = sourceByComponent(sourceSet, validateProductComposition(composition));
   const staging = `${output}.staging-${process.pid}`;
   const previous = `${output}.previous-${process.pid}`;
-  rmSync(staging, { recursive: true, force: true });
+  prepareDiagnosticReviewStaging(staging);
   rmSync(previous, { recursive: true, force: true });
-  mkdirSync(staging, { recursive: false });
   try {
     const candidateDirectories = new Map();
     const visibilityCache = new Map();

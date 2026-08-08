@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,7 +12,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { buildDiagnosticReviewLock } from "./diagnostic-review-inputs.mjs";
+import {
+  buildDiagnosticReviewLock,
+  prepareDiagnosticReviewStaging,
+} from "./diagnostic-review-inputs.mjs";
 import { validateReleaseLock } from "./release-lock.mjs";
 
 function sha256(filename) {
@@ -86,6 +90,19 @@ function writeCandidate(root, component, sourceCommit) {
   writeFileSync(path.join(directory, `${artifactName}.sigstore.json`), "bundle");
   return directory;
 }
+
+test("diagnostic acquisition prepares an isolated asset staging root", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "arena-review-stage-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const staging = path.join(root, "candidate.staging");
+  mkdirSync(staging);
+  writeFileSync(path.join(staging, "stale.txt"), "stale");
+
+  prepareDiagnosticReviewStaging(staging);
+
+  assert.equal(existsSync(path.join(staging, "stale.txt")), false);
+  assert.equal(existsSync(path.join(staging, "assets")), true);
+});
 
 test("diagnostic input builder creates complete non-promotable exact-ref lock", (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "arena-review-lock-"));
