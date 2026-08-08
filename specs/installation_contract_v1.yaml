@@ -633,6 +633,12 @@ packaging:
         from an explicit COSIGN_EXECUTABLE, then the exact repository-local
         build/tooling/cosign-3.0.6 payload, then PATH. Missing verification
         tooling or any provenance failure remains blocking.
+      - Linux portable-media construction receives trust mode and transport
+        mode as explicit release-assembly inputs. Development launchers pass
+        --allow-unsigned-development-catalog and never pretend to carry TUF;
+        official launchers require release/tuf/root.json and pass
+        --metadata-dir. Offline launchers additionally pass --offline, while
+        online launchers do not.
       - Pull-request CI and the protected suite release workflow install the
         same explicit Linux native-build prerequisite set before vcpkg
         dependency bootstrap. Release-only package validators may extend that

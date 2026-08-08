@@ -20,6 +20,8 @@ import { fileURLToPath } from "node:url";
 
 import { main as assembleWindowsLauncher } from "./assemble-windows-installer-launcher.mjs";
 import { buildInstallerRuntime } from "./build-installer-runtime.mjs";
+import { buildLinuxPortableInstaller } from "./build-linux-portable-installer.mjs";
+import { buildManagerLinuxPackage } from "./build-manager-linux-package.mjs";
 import { buildManagerMsi } from "./build-manager-msi.mjs";
 import { buildWindowsSuiteBundle } from "./build-windows-suite-bundle.mjs";
 import { validateExtractedComponent } from "./component-artifact.mjs";
@@ -261,22 +263,46 @@ function artifactRecord(filename) {
   };
 }
 
-function buildWindowsOutputs({
+export function cleanBuildArtifactNames(platform, suiteVersion) {
+  if (!/^\d+\.\d+\.\d+$/u.test(suiteVersion ?? "")) {
+    throw new Error("clean build requires a three-field suite version");
+  }
+  if (platform === "windows-x86_64") {
+    return [
+      `UCI-Arena-Setup-${suiteVersion}-windows-x64-online.exe`,
+      `UCI-Arena-Setup-${suiteVersion}-windows-x64-offline.exe`,
+      `UCI-Arena-Manager-${suiteVersion}-windows-x64-user.msi`,
+      `UCI-Arena-Manager-${suiteVersion}-windows-x64-machine.msi`,
+    ];
+  }
+  if (platform === "linux-x86_64") {
+    return [
+      `uci-arena-setup-${suiteVersion}-linux-x86_64-online.run`,
+      `uci-arena-setup-${suiteVersion}-linux-x86_64-offline.run`,
+      `uci-arena-manager_${suiteVersion}_amd64.deb`,
+      `uci-arena-manager-${suiteVersion}-1.x86_64.rpm`,
+      `uci-arena-manager-${suiteVersion}-linux-x86_64.tar.gz`,
+    ];
+  }
+  throw new Error(`unsupported clean-build platform: ${platform}`);
+}
+
+function buildSuiteMedia({
   composition,
   candidates,
   nativeBuild,
   installTree,
   sourceEpoch,
   workRoot,
-  publishRoot,
+  target,
+  featureComponentIds,
 }) {
-  const suiteVersion = composition.product_release;
   const runtimeRoot = path.join(workRoot, "installer-runtime");
   buildInstallerRuntime({
     installTree,
     outputRoot: runtimeRoot,
     version: nativeBuild.installerVersion,
-    target: "windows-x86_64",
+    target,
     sourceDateEpoch: sourceEpoch,
   });
   const mediaRoot = path.join(workRoot, "media");
@@ -289,23 +315,51 @@ function buildWindowsOutputs({
       path.join(payloadRoot, candidate.lockRow.artifact_name),
     );
   }
-  const windowsPolicyPath = path.join(repositoryRoot, "packaging", "windows", "suite-bundle.json");
-  const windowsPolicy = readJson(windowsPolicyPath, "Windows suite bundle policy");
   const catalog = buildSuiteCatalog({
     composition,
-    target: "windows-x86_64",
+    target,
     candidates,
-    featureComponentIds: windowsPolicy.features.map((feature) => feature.component_id),
+    featureComponentIds,
   });
   mkdirSync(path.join(mediaRoot, "release"), { recursive: true });
   writeFileSync(
     path.join(mediaRoot, "release", "catalog.json"),
     `${JSON.stringify(catalog, null, 2)}\n`,
   );
-  const manager = candidates.find((candidate) =>
-    composition.components.find((component) => component.role === "manager")
-      ?.component_id === candidate.lockRow.component_id);
+  const managerComponent = composition.components.find(
+    (component) => component.role === "manager",
+  );
+  const manager = candidates.find(
+    (candidate) => managerComponent?.component_id === candidate.lockRow.component_id,
+  );
   if (!manager) throw new Error("validated Manager component is unavailable");
+  return { runtimeRoot, mediaRoot, manager };
+}
+
+function buildWindowsOutputs({
+  composition,
+  candidates,
+  nativeBuild,
+  installTree,
+  sourceEpoch,
+  workRoot,
+  publishRoot,
+}) {
+  const suiteVersion = composition.product_release;
+  const windowsPolicyPath = path.join(repositoryRoot, "packaging", "windows", "suite-bundle.json");
+  const windowsPolicy = readJson(windowsPolicyPath, "Windows suite bundle policy");
+  const { runtimeRoot, mediaRoot, manager } = buildSuiteMedia({
+    composition,
+    candidates,
+    nativeBuild,
+    installTree,
+    sourceEpoch,
+    workRoot,
+    target: "windows-x86_64",
+    featureComponentIds: windowsPolicy.features.map((feature) => feature.component_id),
+  });
+  const [onlineName, offlineName, userMsiName, machineMsiName] =
+    cleanBuildArtifactNames("windows-x86_64", suiteVersion);
   const markerRoot = path.join(workRoot, "scope-markers");
   mkdirSync(markerRoot, { recursive: true });
   const userMarker = writeScopeMarker(markerRoot, "per-user");
@@ -314,12 +368,8 @@ function buildWindowsOutputs({
   const managerPolicy = path.join(
     repositoryRoot, "packaging", "windows", "manager-integration.json",
   );
-  const userMsi = path.join(
-    publishRoot, `UCI-Arena-Manager-${suiteVersion}-windows-x64-user.msi`,
-  );
-  const machineMsi = path.join(
-    publishRoot, `UCI-Arena-Manager-${suiteVersion}-windows-x64-machine.msi`,
-  );
+  const userMsi = path.join(publishRoot, userMsiName);
+  const machineMsi = path.join(publishRoot, machineMsiName);
   for (const [scope, marker, output] of [
     ["per-user", userMarker, userMsi],
     ["per-machine", machineMarker, machineMsi],
@@ -370,12 +420,8 @@ function buildWindowsOutputs({
     "Release",
     "uci-arena-installer-launcher.exe",
   );
-  const online = path.join(
-    publishRoot, `UCI-Arena-Setup-${suiteVersion}-windows-x64-online.exe`,
-  );
-  const offline = path.join(
-    publishRoot, `UCI-Arena-Setup-${suiteVersion}-windows-x64-offline.exe`,
-  );
+  const online = path.join(publishRoot, onlineName);
+  const offline = path.join(publishRoot, offlineName);
   assembleWindowsLauncher([
     "--stub", stub,
     "--personal", children["per-user-online"],
@@ -389,6 +435,62 @@ function buildWindowsOutputs({
     "--output", offline,
   ]);
   return [online, offline, userMsi, machineMsi].map(artifactRecord);
+}
+
+function buildLinuxOutputs({
+  composition,
+  candidates,
+  nativeBuild,
+  installTree,
+  sourceEpoch,
+  workRoot,
+  publishRoot,
+}) {
+  const suiteVersion = composition.product_release;
+  const { mediaRoot, manager } = buildSuiteMedia({
+    composition,
+    candidates,
+    nativeBuild,
+    installTree,
+    sourceEpoch,
+    workRoot,
+    target: "linux-x86_64",
+    featureComponentIds: composition.components.map((component) => component.component_id),
+  });
+  const [onlineName, offlineName, debName, rpmName, tarName] =
+    cleanBuildArtifactNames("linux-x86_64", suiteVersion);
+  const policyPath = path.join(
+    repositoryRoot, "packaging", "linux", "manager-integration.json",
+  );
+  for (const [format, name] of [
+    ["deb", debName],
+    ["rpm", rpmName],
+    ["tar", tarName],
+  ]) {
+    buildManagerLinuxPackage({
+      managerRoot: manager.extractedRoot,
+      policyPath,
+      managerVersion: manager.lockRow.component_version,
+      version: suiteVersion,
+      format,
+      output: path.join(publishRoot, name),
+      sourceDateEpoch: sourceEpoch,
+    });
+  }
+  for (const [offline, name] of [
+    [false, onlineName],
+    [true, offlineName],
+  ]) {
+    buildLinuxPortableInstaller({
+      mediaRoot,
+      output: path.join(publishRoot, name),
+      sourceDateEpoch: sourceEpoch,
+      offline,
+      development: true,
+    });
+  }
+  return [onlineName, offlineName, debName, rpmName, tarName]
+    .map((name) => artifactRecord(path.join(publishRoot, name)));
 }
 
 export function transactionalOutput(outputRoot, producer) {
@@ -451,8 +553,8 @@ export function cleanBuild({
   if (!["windows-x86_64", "linux-x86_64"].includes(platform)) {
     throw new Error("--platform must be windows-x86_64 or linux-x86_64");
   }
-  if (platform !== "windows-x86_64") {
-    throw new Error("Linux clean-build execution must run through the Linux package adapter");
+  if (platform === "linux-x86_64" && process.platform !== "linux") {
+    throw new Error("Linux clean-build execution requires a Linux host");
   }
   const source = sourceIdentity();
   const inputs = loadReleaseInputs(lockFilename, compositionDirectory);
@@ -478,7 +580,9 @@ export function cleanBuild({
     });
     const installTree = path.join(workRoot, "installer-install-tree");
     const nativeBuild = buildInstallerSource({ platform, installTree });
-    const artifacts = buildWindowsOutputs({
+    const buildOutputs = platform === "windows-x86_64"
+      ? buildWindowsOutputs : buildLinuxOutputs;
+    const artifacts = buildOutputs({
       composition: inputs.composition,
       candidates,
       nativeBuild,

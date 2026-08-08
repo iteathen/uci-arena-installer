@@ -192,13 +192,15 @@ export function buildManagerLinuxPackage(options) {
 function main() {
   const args = parse(process.argv.slice(2));
   for (const required of [
-    "manager-root", "policy", "version", "format", "output", "source-date-epoch",
+    "manager-root", "policy", "manager-version", "version", "format", "output",
+    "source-date-epoch",
   ]) {
     if (!args[required]) throw new Error(`missing --${required}`);
   }
   process.stdout.write(`${JSON.stringify(buildManagerLinuxPackage({
     managerRoot: args["manager-root"],
     policyPath: args.policy,
+    managerVersion: args["manager-version"],
     version: args.version,
     format: args.format,
     output: args.output,

@@ -103,15 +103,23 @@ function assertIndependentRoots(source, output) {
   return outputRoot;
 }
 
-export function createManagerLinuxPackagePlan({ managerRoot, policyPath, version }) {
-  if (!VERSION_PATTERN.test(version ?? "")) {
-    throw new Error("Linux Manager package requires a three-field version");
+export function createManagerLinuxPackagePlan({
+  managerRoot,
+  policyPath,
+  managerVersion,
+  version,
+}) {
+  if (!VERSION_PATTERN.test(managerVersion ?? "")
+      || !VERSION_PATTERN.test(version ?? "")) {
+    throw new Error(
+      "Linux Manager package requires explicit three-field Manager and suite versions",
+    );
   }
   const { policy, policyRoot } = readPolicy(policyPath);
   const manager = validateExtractedComponent({
     root: path.resolve(managerRoot),
     componentId: policy.component_id,
-    version,
+    version: managerVersion,
     target: "linux-x86_64",
   });
   const entries = new Map();
@@ -185,7 +193,15 @@ export function createManagerLinuxPackagePlan({ managerRoot, policyPath, version
       || !maintainerScripts.rpm?.preun || !maintainerScripts.rpm?.postun) {
     throw new Error("Linux maintainer-script contract is incomplete");
   }
-  return { policy, manager, entries, generated, maintainerScripts, version };
+  return {
+    policy,
+    manager,
+    entries,
+    generated,
+    maintainerScripts,
+    managerVersion,
+    version,
+  };
 }
 
 function writeGeneratedGzip(destination, text, epoch) {
@@ -198,6 +214,7 @@ function writeGeneratedGzip(destination, text, epoch) {
 export function stageManagerLinuxPackage({
   managerRoot,
   policyPath,
+  managerVersion,
   version,
   outputRoot,
   sourceDateEpoch,
@@ -206,7 +223,12 @@ export function stageManagerLinuxPackage({
   if (!Number.isSafeInteger(epoch) || epoch < 0) {
     throw new Error("source date epoch must be a nonnegative integer");
   }
-  const plan = createManagerLinuxPackagePlan({ managerRoot, policyPath, version });
+  const plan = createManagerLinuxPackagePlan({
+    managerRoot,
+    policyPath,
+    managerVersion,
+    version,
+  });
   const output = assertIndependentRoots(managerRoot, outputRoot);
   const staging = `${output}.staging-${process.pid}`;
   const previous = `${output}.previous-${process.pid}`;

@@ -11,9 +11,30 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  cleanBuildArtifactNames,
   selectLockedComponents,
   transactionalOutput,
 } from "./clean-build.mjs";
+
+test("clean build publishes the complete platform-specific output contract", () => {
+  assert.deepEqual(cleanBuildArtifactNames("windows-x86_64", "0.3.9"), [
+    "UCI-Arena-Setup-0.3.9-windows-x64-online.exe",
+    "UCI-Arena-Setup-0.3.9-windows-x64-offline.exe",
+    "UCI-Arena-Manager-0.3.9-windows-x64-user.msi",
+    "UCI-Arena-Manager-0.3.9-windows-x64-machine.msi",
+  ]);
+  assert.deepEqual(cleanBuildArtifactNames("linux-x86_64", "0.3.9"), [
+    "uci-arena-setup-0.3.9-linux-x86_64-online.run",
+    "uci-arena-setup-0.3.9-linux-x86_64-offline.run",
+    "uci-arena-manager_0.3.9_amd64.deb",
+    "uci-arena-manager-0.3.9-1.x86_64.rpm",
+    "uci-arena-manager-0.3.9-linux-x86_64.tar.gz",
+  ]);
+  assert.throws(
+    () => cleanBuildArtifactNames("linux-x86_64", "manager-version"),
+    /three-field suite version/u,
+  );
+});
 
 test("clean build selects one exact target or portable row per composed component", () => {
   const composition = {

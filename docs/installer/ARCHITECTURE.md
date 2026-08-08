@@ -50,6 +50,16 @@ only the new transaction root. The result records the composition and lock
 digests plus every component repository, version, target, source commit,
 workflow ref, artifact digest, result digest, and provenance-bundle digest.
 
+Linux release assembly uses the same verified component inputs, catalog
+builder, Installer runtime, and transactional publication boundary as Windows.
+The Linux package adapter validates immutable `manager.core` bytes with the
+Manager component version, then applies the suite release version only to DEB,
+RPM, and portable-tar package identity. The portable `.run` adapter receives
+trust and transport modes independently: development media explicitly enables
+the unsigned-development catalog, official media requires embedded TUF root
+metadata, and only offline media passes `--offline`. Its temporary extraction
+root is removed after both successful and failed setup execution.
+
 The catalog derives dependencies from product composition and activation roles
 from component manifests. Windows feature labels and selection belong only to
 `packaging/windows/suite-bundle.json`; the standard opening-book artifact has a

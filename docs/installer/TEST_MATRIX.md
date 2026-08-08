@@ -78,6 +78,14 @@ Required scenarios:
   verified payload evidence without component-id branches;
 - Manager component version remaining independent from the suite MSI package
   version;
+- Manager component version remaining independent from the Linux DEB, RPM,
+  and portable-tar suite package version;
+- exact Linux clean-build output naming for the two portable installers and
+  all three Manager package formats;
+- deterministic Linux portable-media bytes, explicit development-versus-TUF
+  trust selection, explicit online-versus-offline transport selection, missing
+  official trust-root rejection, secret-path rejection, and temporary payload
+  cleanup after setup returns;
 - Manager artifact byte/manifest mismatch and version-drift rejection before
   MSI generation;
 - WiX compilation of both fixed-scope Manager MSIs from a synthetic immutable

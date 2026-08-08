@@ -85,7 +85,8 @@ test("Linux package staging composes immutable Manager bytes through policy", ()
     const staged = stageManagerLinuxPackage({
       managerRoot: f.managerRoot,
       policyPath,
-      version: "0.3.8",
+      managerVersion: "0.3.8",
+      version: "0.3.9",
       outputRoot: f.output,
       sourceDateEpoch: 1_700_000_000,
     });
@@ -104,7 +105,7 @@ test("Linux package staging composes immutable Manager bytes through policy", ()
       gunzipSync(readFileSync(path.join(
         f.output, "usr", "share", "doc", "uci-arena-manager", "changelog.gz",
       ))).toString("utf8"),
-      /0\.3\.8/u,
+      /0\.3\.9/u,
     );
     const control = renderDebianControl(staged);
     assert.match(control, /^Package: uci-arena-manager$/mu);
@@ -126,6 +127,7 @@ test("Linux package policy fails closed on drift and overlapping roots", () => {
       () => createManagerLinuxPackagePlan({
         managerRoot: f.managerRoot,
         policyPath,
+        managerVersion: "0.3.8",
         version: "0.3.8",
       }),
       /inventory mismatch/u,
@@ -135,6 +137,7 @@ test("Linux package policy fails closed on drift and overlapping roots", () => {
       () => stageManagerLinuxPackage({
         managerRoot: f.managerRoot,
         policyPath,
+        managerVersion: "0.3.8",
         version: "0.3.8",
         outputRoot: path.join(f.managerRoot, "nested"),
         sourceDateEpoch: 1_700_000_000,
@@ -154,7 +157,8 @@ test("Linux tar adapter is deterministic and uninstall scripts preserve state", 
     const common = {
       managerRoot: f.managerRoot,
       policyPath,
-      version: "0.3.8",
+      managerVersion: "0.3.8",
+      version: "0.3.9",
       format: "tar",
       sourceDateEpoch: 1_700_000_000,
     };
