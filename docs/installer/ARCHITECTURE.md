@@ -57,7 +57,9 @@ does not rely on shell interpretation of `npm.cmd`.
 Clean-build output is transactional: work and publish roots are fresh and
 bounded; the last complete output is retained until all native tests, package
 adapters, launcher envelopes, and artifact digests succeed. A failure removes
-only the new transaction root. The result records the composition and lock
+only the new transaction root. WiX debug sidecars remain disabled in final
+package adapters so the published directory contains only its declared
+artifacts and structured result. The result records the composition and lock
 digests plus every component repository, version, target, source commit,
 workflow ref, artifact digest, result digest, and provenance-bundle digest.
 

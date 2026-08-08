@@ -343,7 +343,7 @@ export function buildManagerMsi(options) {
     writeFileSync(sourcePath, source);
     rmSync(staging, { force: true });
     const result = spawnSync(options.wix ?? "wix", [
-      "build", "-arch", "x64", "-o", staging, sourcePath,
+      "build", "-arch", "x64", "-pdbtype", "none", "-o", staging, sourcePath,
     ], { encoding: "utf8", windowsHide: true });
     if (result.error || result.status !== 0) {
       const diagnostics = [result.error?.message, result.stderr, result.stdout]

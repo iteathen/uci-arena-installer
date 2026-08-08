@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -228,6 +229,7 @@ test("WiX compiles both generated fixed-scope Manager MSIs", {
       buildManagerMsi({ ...options(f, scope), output });
       assert.ok(statSync(output).size > 0);
     }
+    assert.equal(readdirSync(f.root).some((name) => name.endsWith(".wixpdb")), false);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
