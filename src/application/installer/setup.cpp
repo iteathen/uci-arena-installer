@@ -3970,6 +3970,51 @@ bool supports_startup_capability(const json& receipt, const std::string_view cap
                                                 std::string(capability)) != capabilities.end();
 }
 
+struct ProviderWorkspaceInvocation {
+    fs::path workspace;
+    fs::path control_workspace;
+};
+
+ProviderWorkspaceInvocation validated_provider_workspace(
+    const SetupPaths& paths, const json& receipt, const json& workspace_argument,
+    const bool trusted_existing_receipt_workspace) {
+    const std::string component_id = receipt.at("component_id").get<std::string>();
+    const auto data_paths = receipt.value("data_paths", json::array());
+    if (data_paths.empty() || !data_paths.at(0).is_string()) {
+        throw std::runtime_error("startup-capable component has no managed workspace: " +
+                                 component_id);
+    }
+    const fs::path recorded_workspace = data_paths.at(0).get<std::string>();
+    if (!recorded_workspace.is_absolute()) {
+        throw std::runtime_error("startup-capable component workspace is not absolute: " +
+                                 component_id);
+    }
+    const fs::path workspace = normalized_absolute(recorded_workspace);
+    const bool trusted_receipt_workspace =
+        trusted_existing_receipt_workspace && receipt.contains("startup") &&
+        receipt.at("startup").is_object() &&
+        receipt.at("startup").value("installed", false);
+    if (!within(paths.workspace_root, workspace) && !trusted_receipt_workspace) {
+        throw std::runtime_error(
+            "startup-capable component workspace is outside the selected workspace "
+            "root");
+    }
+    const fs::path workspace_relative = fs::path(
+        workspace_argument.at("relative_path").get<std::string>()).lexically_normal();
+    const fs::path control_workspace = workspace_relative == fs::path(".")
+                                           ? workspace
+                                           : normalized_absolute(workspace / workspace_relative);
+    if (!at_or_within(workspace, control_workspace)) {
+        throw std::runtime_error(
+            "startup control workspace escapes its provider workspace");
+    }
+    if (contains_symbolic_link(control_workspace)) {
+        throw std::runtime_error(
+            "startup control workspace contains a symbolic-link boundary");
+    }
+    return {workspace, control_workspace};
+}
+
 json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
                              const std::string& action,
                              const bool trusted_existing_receipt_workspace = false) {
@@ -3998,50 +4043,20 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
     const std::string control_entrypoint =
         control.at("entrypoint").get<std::string>();
     const fs::path cli = installed_entrypoint(receipts_root, component_id, control_entrypoint);
-    const auto data_paths = receipt.value("data_paths", json::array());
-    if (data_paths.empty() || !data_paths.at(0).is_string()) {
-        throw std::runtime_error("startup-capable component has no managed workspace: " +
-                                 component_id);
-    }
-    const fs::path recorded_workspace = data_paths.at(0).get<std::string>();
-    if (!recorded_workspace.is_absolute()) {
-        throw std::runtime_error("startup-capable component workspace is not absolute: " +
-                                 component_id);
-    }
-    const fs::path workspace = normalized_absolute(recorded_workspace);
-    const bool trusted_receipt_workspace =
-        trusted_existing_receipt_workspace && receipt.contains("startup") &&
-        receipt.at("startup").is_object() &&
-        receipt.at("startup").value("installed", false);
-    if (!within(paths.workspace_root, workspace) && !trusted_receipt_workspace) {
-        throw std::runtime_error(
-            "startup-capable component workspace is outside the selected workspace "
-            "root");
-    }
     std::vector<std::string> arguments{cli.string()};
     for (const auto& argument : control.at("actions").at(action)) {
         arguments.push_back(argument.get<std::string>());
     }
     const json& workspace_argument = control.at("workspace_argument");
-    const fs::path workspace_relative = fs::path(
-        workspace_argument.at("relative_path").get<std::string>()).lexically_normal();
-    const fs::path control_workspace = workspace_relative == fs::path(".")
-                                           ? workspace
-                                           : normalized_absolute(workspace / workspace_relative);
-    if (!at_or_within(workspace, control_workspace)) {
-        throw std::runtime_error(
-            "startup control workspace escapes its provider workspace");
-    }
-    if (contains_symbolic_link(control_workspace)) {
-        throw std::runtime_error(
-            "startup control workspace contains a symbolic-link boundary");
-    }
+    const ProviderWorkspaceInvocation provider_workspace =
+        validated_provider_workspace(paths, receipt, workspace_argument,
+                                     trusted_existing_receipt_workspace);
     arguments.push_back(workspace_argument.at("flag").get<std::string>());
-    arguments.push_back(control_workspace.string());
+    arguments.push_back(provider_workspace.control_workspace.string());
     const std::string configuration_path = receipt.value("configuration_path", "");
     if (!configuration_path.empty()) {
         const fs::path configuration = normalized_absolute(configuration_path);
-        const bool valid_configuration = within(workspace, configuration) &&
+        const bool valid_configuration = within(provider_workspace.workspace, configuration) &&
                                          fs::is_regular_file(configuration) &&
                                          !fs::is_symlink(configuration);
         if (!valid_configuration && action == "install") {
@@ -4086,6 +4101,128 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
                                  component_id);
     }
     return status;
+}
+
+void verify_provider_service_health(const SetupPaths& paths, const json& receipt,
+                                    const ValidatedComponentPayload& validated) {
+    if (!validated.service_contract.has_value() ||
+        validated.service_contract->value("schema", "") !=
+            "uci_arena_standalone_service_contract_v1") {
+        throw std::runtime_error(
+            "installed startup authority has no standalone service health contract: " +
+            receipt.at("component_id").get<std::string>());
+    }
+    const json& manifest = validated.manifest;
+    if (!manifest.contains("entrypoints") ||
+        !manifest.at("entrypoints").is_object() ||
+        !manifest.at("entrypoints").contains("cli") ||
+        !manifest.at("entrypoints").at("cli").is_string()) {
+        throw std::runtime_error("installed service health CLI is unavailable");
+    }
+
+    const std::string component_id = receipt.at("component_id").get<std::string>();
+    const std::string component_version =
+        receipt.at("component_version").get<std::string>();
+    const fs::path active_root = receipt.at("active_root").get<std::string>();
+    const fs::path receipts_root = paths.data_root / "receipts";
+    const fs::path cli = installed_entrypoint(receipts_root, component_id, "cli");
+    fs::path executable = cli;
+    std::vector<std::string> arguments;
+    const json* startup_control = nullptr;
+    if (manifest.contains("installer_integration") &&
+        manifest.at("installer_integration").is_object()) {
+        const json& integration = manifest.at("installer_integration");
+        const json& invocation = integration.at("invocation");
+        executable = installed_entrypoint(
+            receipts_root,
+            invocation.at("runtime_component_id").get<std::string>(),
+            invocation.at("runtime_entrypoint").get<std::string>());
+        arguments.push_back(cli.string());
+        if (integration.contains("startup_control")) {
+            startup_control = &integration.at("startup_control");
+        }
+    }
+
+    const json& service_contract = *validated.service_contract;
+    const bool manager_integrated =
+        service_contract.contains("manager_integration_api");
+    if (manager_integrated) {
+        const json& api = service_contract.at("manager_integration_api");
+        for (const auto& argument : api.at("arguments")) {
+            arguments.push_back(argument.get<std::string>());
+        }
+        arguments.emplace_back("status");
+    } else {
+        const fs::path contract_path =
+            active_root / fs::path(manifest.at("contract_manifest").get<std::string>());
+        const json contract = read_json(contract_path);
+        arguments.push_back(
+            contract.at("health_smoke").at("command").get<std::string>());
+    }
+
+    if (startup_control != nullptr) {
+        const json& workspace_argument = startup_control->at("workspace_argument");
+        const ProviderWorkspaceInvocation provider_workspace =
+            validated_provider_workspace(paths, receipt, workspace_argument, true);
+        arguments.push_back(workspace_argument.at("flag").get<std::string>());
+        arguments.push_back(provider_workspace.control_workspace.string());
+    }
+
+    arena::application::ProcessSupervisor process;
+    const json response =
+        process.run_json(executable, active_root, arguments, std::chrono::seconds(30));
+    const std::string expected_status_schema =
+        service_contract.at("status_schema").get<std::string>();
+    if (manager_integrated) {
+        const json& api = service_contract.at("manager_integration_api");
+        if (!response.is_object()) {
+            throw std::runtime_error(
+                "provider Manager API status failed contract validation: " +
+                component_id);
+        }
+        const std::string response_api_version =
+            response.value("api_version", "");
+        const std::string declared_api_version = api.value("version", "");
+        const auto major_version = [](const std::string& version) {
+            return version.substr(0, version.find('.'));
+        };
+        if (response.value("schema", "") !=
+                "uci_arena_manager_service_api_v1" ||
+            !response.contains("api_version") ||
+            !response.at("api_version").is_string() ||
+            !compatible_manager_api_version(
+                response.at("api_version").get_ref<const std::string&>()) ||
+            !api.contains("version") || !api.at("version").is_string() ||
+            major_version(response_api_version) !=
+                major_version(declared_api_version) ||
+            response.value("component_id", "") != component_id ||
+            response.value("component_version", "") != component_version ||
+            response.value("operation", "") != "status" ||
+            !response.contains("ok") || !response.at("ok").is_boolean() ||
+            !response.at("ok").get<bool>() ||
+            !response.contains("payload") || !response.at("payload").is_object() ||
+            !response.at("payload").contains("status") ||
+            !response.at("payload").at("status").is_object() ||
+            response.at("payload").at("status").value("schema", "") !=
+                expected_status_schema) {
+            throw std::runtime_error(
+                "provider Manager API status failed contract validation: " +
+                component_id);
+        }
+        return;
+    }
+
+    if (!response.is_object()) {
+        throw std::runtime_error("provider health response is not an object: " +
+                                 component_id);
+    }
+    const json status = response.value("schema", "") == expected_status_schema
+                            ? response
+                            : response.value("status", json::object());
+    if (!status.is_object() || status.value("schema", "") != expected_status_schema) {
+        throw std::runtime_error("provider health status schema is invalid: " +
+                                 component_id);
+    }
 }
 
 void rename_managed_component_tree_with_retry(const fs::path& source,
@@ -5677,7 +5814,7 @@ json SetupEngine::verify(const SetupPaths& paths) {
             }
             if (receipt.contains("startup") && receipt.at("startup").is_object() &&
                 receipt.at("startup").value("installed", false)) {
-                invoke_provider_startup(paths, receipt, "status");
+                verify_provider_service_health(paths, receipt, validated);
             }
             results.push_back(
                 {{"component_id", receipt.at("component_id")}, {"state", "verified"}});

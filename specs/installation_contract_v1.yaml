@@ -412,6 +412,16 @@ standalone_service_contracts:
     - Manager service API metadata is covered by the immutable component
       manifest and provider attestation; installer or Manager code never
       synthesizes it for an installed provider.
+    - Verify invokes a Manager-integrated service's declared dependency
+      runtime, CLI entrypoint, fixed Manager API argument prefix, status
+      operation, and bounded provider workspace argument. It accepts only an
+      exit-zero uci_arena_manager_service_api_v1 envelope with the exact
+      compatible API major, component id, component version, status operation,
+      ok true, and payload status schema declared by the validated contract.
+    - A standalone service without Manager integration is verified through its
+      declared health_smoke command and status schema. Startup install and
+      uninstall actions are lifecycle mutation contracts and are never
+      extended or guessed to perform health inspection.
   receipt:
     fields:
       - schema
@@ -792,8 +802,11 @@ packaging:
       - Per-user and per-machine MSIs package one tested native binary set and
         install an MSI-owned share/uci-arena/install-scope.txt marker containing
         exactly per-user or per-machine. Native entry points fail safely to
-        per-machine semantics when the marker is absent or invalid; scope is
-        never inferred from a React value or an untrusted catalog.
+        per-machine semantics when the marker is absent or invalid. Public and
+        private native entrypoints resolve the nearest marker through a bounded
+        ancestor search from their own executable directory so the private
+        libexec layout cannot silently change Personal roots to machine roots;
+        scope is never inferred from a React value or an untrusted catalog.
       - Installer validates every Manager artifact file against its component
         manifest before generating either MSI. The MSI builder overlays only
         manifest-bound Installer runtime files beneath the policy-declared
@@ -1668,9 +1681,10 @@ transaction:
         transaction fails before commit when the replacement daemon is not
         live; a retained status file or successful task creation is not a
         substitute.
-      - Verify invokes the provider's public startup status operation and fails
-        when an installed startup receipt no longer reports installed true or
-        reports matchesCurrentConfiguration false.
+      - Verify uses the provider's public service-health contract, not an
+        undeclared startup-control action. A malformed, identity-mismatched,
+        schema-mismatched, unhealthy, or unavailable live status fails
+        verification without mutation.
       - Transaction rollback invokes startup_uninstall before restoring or
         removing the provider payload.
       - Disabled component binaries are installed without startup registration.

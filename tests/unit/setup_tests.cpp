@@ -353,34 +353,41 @@ void write_book_forge_service_install(
         << receipt.dump(2);
 }
 
-void write_manager_api_service_install(const SetupPaths& paths, const json& manager_api) {
+void write_manager_api_service_install(
+    const SetupPaths& paths, const json& manager_api,
+    const std::string_view component_version = "0.3.0",
+    const std::string_view status_schema = "uci_arena_evidence_status_v1") {
     constexpr std::string_view component_id = "uci_arena_evidence.service";
-    constexpr std::string_view component_version = "0.3.0";
     constexpr std::string_view cli_relative = "services/evidence-service/src/cli.mjs";
     constexpr std::string_view contract_relative =
         "services/evidence-service/contracts/service-contract.json";
     constexpr std::string_view cli_contents = "evidence";
-    const fs::path active_root =
-        paths.install_root / "components" / component_id / component_version;
+    write_mock_renderer_runtime(paths);
+    const fs::path active_root = paths.install_root / "components" /
+                                 component_id / component_version;
     const fs::path cli = active_root / cli_relative;
     const fs::path contract_path = active_root / contract_relative;
+    const fs::path workspace = paths.workspace_root / "evidence-service";
     fs::create_directories(cli.parent_path());
     fs::create_directories(contract_path.parent_path());
     fs::create_directories(paths.data_root / "receipts");
+    fs::create_directories(workspace);
     std::ofstream(cli, std::ios::binary) << cli_contents;
 
     const json startup{
         {"windows", "per_user_task_scheduler"},
         {"linux", "per_user_systemd"},
     };
+    const json capabilities =
+        json::array({"status", "start", "startup_install", "startup_uninstall"});
     const json contract{
         {"schema", "uci_arena_standalone_service_contract_v1"},
         {"component_id", component_id},
-        {"component_version", component_version},
+        {"component_version", std::string(component_version)},
         {"cli_entrypoint", cli_relative},
         {"configuration_schema", "uci_arena_evidence_service_config_v1"},
-        {"status_schema", "uci_arena_evidence_status_v1"},
-        {"capabilities", json::array({"status", "start"})},
+        {"status_schema", std::string(status_schema)},
+        {"capabilities", capabilities},
         {"data_paths", json::array({"workspace"})},
         {"startup", startup},
         {"health_smoke",
@@ -395,19 +402,50 @@ void write_manager_api_service_install(const SetupPaths& paths, const json& mana
     const std::string contract_contents = contract.dump();
     std::ofstream(contract_path, std::ios::binary) << contract_contents;
     const std::string contract_sha256 = sha256_text(contract_contents);
+    const json integration{
+        {"schema", "arena_provider_installer_integration_v1"},
+        {"schema_version", 1},
+        {"entrypoint", "cli"},
+        {"invocation",
+         {{"kind", "dependency_runtime"},
+          {"runtime_component_id", "runtime.host"},
+          {"runtime_entrypoint", "execute"}}},
+        {"arguments", json::array({"--context"})},
+        {"workspace_name", "evidence-service"},
+        {"configure_when_disabled", true},
+        {"dependency_bindings", json::array()},
+        {"locator_bindings", json::array()},
+        {"startup_control",
+         {{"schema", "arena_provider_startup_control_v1"},
+          {"schema_version", 1},
+          {"entrypoint", "cli"},
+          {"actions",
+           {{"install", json::array({"lifecycle", "enable"})},
+            {"uninstall", json::array({"lifecycle", "disable"})}}},
+          {"workspace_argument",
+           {{"flag", "--workspace"}, {"relative_path", "."}}},
+          {"configuration_argument", "--config"},
+          {"result",
+           {{"envelope", "root"},
+            {"require_configuration_match_on_install", true},
+            {"require_live_on_install", true}}}}},
+    };
 
     std::ofstream(active_root / "arena-component.json", std::ios::binary)
         << json{
                {"schema", "arena_install_component_v1"},
                {"schema_version", 1},
                {"component_id", component_id},
-               {"component_version", component_version},
+               {"component_version", std::string(component_version)},
                {"entrypoints", {{"cli", cli_relative}}},
                {"contract_manifest", contract_relative},
                {"manager_integration_api", manager_api},
-               {"capabilities", json::array({"status", "start"})},
+               {"capabilities", capabilities},
                {"data_paths", json::array({"workspace"})},
                {"startup", startup},
+               {"dependencies", json::array({"runtime.host"})},
+               {"workspace_name", "evidence-service"},
+               {"installer_integration", integration},
                {"files",
                 json::array(
                     {{{"path", cli_relative},
@@ -426,20 +464,24 @@ void write_manager_api_service_install(const SetupPaths& paths, const json& mana
                {"schema", "arena_install_receipt_v1"},
                {"schema_version", 1},
                {"component_id", component_id},
-               {"component_version", component_version},
+               {"component_version", std::string(component_version)},
                {"state", "installed_managed"},
                {"active_root", active_root.string()},
                {"artifact_sha256", std::string(64, 'a')},
-               {"dependencies", json::array()},
-               {"data_paths", json::array()},
+               {"dependencies", json::array({"runtime.host"})},
+               {"data_paths", json::array({workspace.string()})},
                {"configuration_path", ""},
                {"activated_files", json::array()},
+               {"startup",
+                {{"installed", true},
+                 {"matchesCurrentConfiguration", true},
+                 {"active", true}}},
                {"service_contract",
                 {{"schema", "uci_arena_standalone_service_contract_v1"},
                  {"path", contract_relative},
                  {"sha256", contract_sha256},
                  {"configuration_schema", "uci_arena_evidence_service_config_v1"},
-                 {"status_schema", "uci_arena_evidence_status_v1"},
+                 {"status_schema", std::string(status_schema)},
                  {"manager_integration_api", manager_api}}},
            }
                .dump(2);
@@ -890,10 +932,49 @@ TEST_CASE("standalone Manager API accepts additive typed operations") {
     write_manager_api_service_install(incomplete_paths, incomplete_api);
     const json rejected = SetupEngine::verify(incomplete_paths);
     REQUIRE(rejected.at("ok") == false);
-    REQUIRE(
-        rejected.at("components").at(0).at("error") ==
-        "standalone service Manager API operations are incomplete");
+    REQUIRE(std::ranges::any_of(
+        rejected.at("components"), [](const json& component) {
+            return component.value("component_id", "") ==
+                       "uci_arena_evidence.service" &&
+                   component.value("error", "") ==
+                       "standalone service Manager API operations are incomplete";
+        }));
     fs::remove_all(incomplete_root);
+}
+
+TEST_CASE("verify rejects live provider status identity and schema drift") {
+    const json api = manager_service_api(
+        {"orchestration_status", "target_register", "campaign_enqueue", "job_control"});
+
+    const fs::path version_root = temporary_directory();
+    const SetupPaths version_paths = paths_under(version_root);
+    write_manager_api_service_install(version_paths, api, "0.3.1");
+    const json version_result = SetupEngine::verify(version_paths);
+    REQUIRE(version_result.at("ok") == false);
+    REQUIRE(std::ranges::any_of(
+        version_result.at("components"), [](const json& component) {
+            return component.value("component_id", "") ==
+                       "uci_arena_evidence.service" &&
+                   component.value("state", "") == "broken" &&
+                   component.value("error", "") ==
+                       "provider Manager API status failed contract validation: "
+                       "uci_arena_evidence.service";
+        }));
+    fs::remove_all(version_root);
+
+    const fs::path schema_root = temporary_directory();
+    const SetupPaths schema_paths = paths_under(schema_root);
+    write_manager_api_service_install(
+        schema_paths, api, "0.3.0", "uci_arena_evidence_status_v2");
+    const json schema_result = SetupEngine::verify(schema_paths);
+    REQUIRE(schema_result.at("ok") == false);
+    REQUIRE(std::ranges::any_of(
+        schema_result.at("components"), [](const json& component) {
+            return component.value("component_id", "") ==
+                       "uci_arena_evidence.service" &&
+                   component.value("state", "") == "broken";
+        }));
+    fs::remove_all(schema_root);
 }
 
 TEST_CASE("download missing knowledge selects opening book and bounded Syzygy WDL") {
