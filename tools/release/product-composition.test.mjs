@@ -125,3 +125,18 @@ test("composition may add explicit suite wiring without rewriting provider manif
   ).manifest.dependencies = [];
   assert.equal(validateCompositionManifests(expanded, available).length, expanded.components.length);
 });
+
+test("an omitted optional dependency projection means no manifest dependencies", () => {
+  const available = availableWithManifests();
+  const managedNode = available.find(
+    (component) => component.component_id === "node_runtime.private",
+  );
+  delete managedNode.manifest.dependencies;
+  assert.equal(validateCompositionManifests(composition, available).length, composition.components.length);
+
+  managedNode.manifest.dependencies = null;
+  assert.throws(
+    () => validateCompositionManifests(composition, available),
+    /resolved manifest dependencies are invalid/u,
+  );
+});

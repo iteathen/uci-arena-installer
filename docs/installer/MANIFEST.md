@@ -16,7 +16,9 @@ Release assembly validates composition edges against every resolved immutable
 `arena-component.json`. All dependencies declared by the provider manifest must
 also appear in that component's composition entry. Composition may add an
 explicit suite-level wiring edge, but it cannot omit or weaken a provider-owned
-runtime dependency. A contradiction fails before catalog generation or any
+runtime dependency. The schema-v1 optional `dependencies` field denotes no
+provider-owned dependencies when absent; a present field must be a valid unique
+array. A contradiction fails before catalog generation or any
 installation mutation.
 
 `arena_suite_release_lock_v2` binds one realization to the exact composition

@@ -118,13 +118,14 @@ export function validateCompositionManifests(candidate, availableComponents) {
         || manifest.component_version !== component.version) {
       fail(`resolved manifest identity differs for ${component.component_id}`);
     }
-    if (!Array.isArray(manifest.dependencies)
-        || new Set(manifest.dependencies).size !== manifest.dependencies.length
-        || manifest.dependencies.some((dependency) => !COMPONENT_ID.test(dependency))) {
+    const manifestDependencies = manifest.dependencies === undefined ? [] : manifest.dependencies;
+    if (!Array.isArray(manifestDependencies)
+        || new Set(manifestDependencies).size !== manifestDependencies.length
+        || manifestDependencies.some((dependency) => !COMPONENT_ID.test(dependency))) {
       fail(`resolved manifest dependencies are invalid for ${component.component_id}`);
     }
     const compositionDependencies = new Set(component.requires);
-    const omitted = manifest.dependencies.filter(
+    const omitted = manifestDependencies.filter(
       (dependency) => !compositionDependencies.has(dependency),
     );
     if (omitted.length > 0) {
