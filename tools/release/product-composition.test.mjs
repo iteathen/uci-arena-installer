@@ -42,7 +42,7 @@ test("complete composition declares independently versioned suite bricks", () =>
       "lichess.adapter": "1.0.4",
       "book_forge.service": "0.4.0",
       "opening_book.standard": "0.4.0",
-      "uci_arena_evidence.service": "0.3.10",
+      "uci_arena_evidence.service": "0.3.11",
       "node_runtime.private": "24.15.0",
       "stockfish.engine": "15.1",
     },
