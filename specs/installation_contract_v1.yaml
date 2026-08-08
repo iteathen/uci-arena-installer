@@ -1248,7 +1248,7 @@ local_import:
     timing_profile: qualified_uci_time_profile_v3_regular_file
     lichess_single_game_profile: >
       qualified_uci_arena_single_game_profile_v1_with_complete_hash_verified_evidence_closure
-    lichess_capacity_profile: qualified_uci_arena_lichess_capacity_profile_v1_regular_file
+    lichess_capacity_profile: qualified_uci_arena_lichess_capacity_profile_v2_regular_file
     lichess_transport_profile: qualified_uci_arena_lichess_transport_profile_v2_regular_file
     lichess_token_path: path_reference_only_never_read
     restaurant: detect_only_import_forbidden

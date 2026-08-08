@@ -416,7 +416,7 @@ if ($EnableLichess) {
     $environment.ARENA_LICHESS_TIME_PROFILE_PATH =
         "\\$HostAddress\$($lichessShares.profiles)\uci_time_profile_v3.json"
     $environment.ARENA_LICHESS_CAPACITY_PROFILE_PATH =
-        "\\$HostAddress\$($lichessShares.profiles)\uci_arena_lichess_capacity_profile_v1.json"
+        "\\$HostAddress\$($lichessShares.profiles)\uci_arena_lichess_capacity_profile_v2.json"
 }
 
 $vm = Get-VM -Name $VMName -ErrorAction Stop

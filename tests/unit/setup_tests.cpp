@@ -1216,6 +1216,8 @@ TEST_CASE("indexed discovery finds reusable knowledge and Lichess evidence") {
     const fs::path timing = external / "old-timing-profile.json";
     const fs::path single = write_lichess_single_profile(external);
     const fs::path capacity =
+        external / "uci_arena_lichess_capacity_profile_v2.json";
+    const fs::path legacy_capacity =
         external / "uci_arena_lichess_capacity_profile_v1.json";
     const fs::path transport = external / "transport_profile_v2.json";
     std::ofstream(book, std::ios::binary) << "book";
@@ -1225,10 +1227,17 @@ TEST_CASE("indexed discovery finds reusable knowledge and Lichess evidence") {
                                   {"qualified", true}}
                                  .dump();
     std::ofstream(capacity)
-        << json{{"schema", "uci_arena_lichess_capacity_profile_v1"},
+        << json{{"schema", "uci_arena_lichess_capacity_profile_v2"},
                 {"qualified", true},
                 {"maximum_concurrency", 2},
+                {"time_profile_identity_sha256", "sha256:" + std::string(64, 'a')},
                 {"evidence", {{"single_game", true}}}}
+               .dump();
+    std::ofstream(legacy_capacity)
+        << json{{"schema", "uci_arena_lichess_capacity_profile_v1"},
+                {"qualified", true},
+                {"maximum_concurrency", 4},
+                {"evidence", {{"single_game", true}, {"concurrent", true}}}}
                .dump();
     std::ofstream(transport)
         << json{{"schema", "uci_arena_lichess_transport_profile_v2"},
@@ -1249,6 +1258,7 @@ TEST_CASE("indexed discovery finds reusable knowledge and Lichess evidence") {
         {arena::ports::IndexedAssetKind::syzygy, table},
         {arena::ports::IndexedAssetKind::timing_profile, timing},
         {arena::ports::IndexedAssetKind::lichess_single_game_profile, single},
+        {arena::ports::IndexedAssetKind::lichess_capacity_profile, legacy_capacity},
         {arena::ports::IndexedAssetKind::lichess_capacity_profile, capacity},
         {arena::ports::IndexedAssetKind::lichess_transport_profile, transport},
         {arena::ports::IndexedAssetKind::syzygy, external / "missing.rtbz"},
@@ -1274,7 +1284,6 @@ TEST_CASE("indexed discovery finds reusable knowledge and Lichess evidence") {
     REQUIRE(timing_candidate.at("details").at("validation").at("classification") ==
             "legacy_parseable");
     for (const auto kind : {"lichess_single_game_profile",
-                            "lichess_capacity_profile",
                             "lichess_transport_profile"}) {
         const json& candidate = discovery.at(kind).at("candidates").at(0);
         REQUIRE(candidate.at("source") == "indexed");
@@ -1282,6 +1291,24 @@ TEST_CASE("indexed discovery finds reusable knowledge and Lichess evidence") {
                 "qualified_declared");
         REQUIRE(discovery.at(kind).at("indexed_search").at("accepted_candidates") == 1);
     }
+    const json& capacity_selection =
+        discovery.at("lichess_capacity_profile").at("selection");
+    REQUIRE(capacity_selection.at("path") ==
+            fs::absolute(capacity).lexically_normal().string());
+    REQUIRE(capacity_selection.at("details").at("validation").at("classification") ==
+            "qualified_declared");
+    const json& capacity_candidates =
+        discovery.at("lichess_capacity_profile").at("candidates");
+    REQUIRE(capacity_candidates.size() == 2);
+    REQUIRE(std::any_of(capacity_candidates.begin(), capacity_candidates.end(),
+                        [](const json& candidate) {
+                            return candidate.at("details")
+                                       .at("validation")
+                                       .at("classification") == "legacy_parseable";
+                        }));
+    REQUIRE(discovery.at("lichess_capacity_profile")
+                .at("indexed_search")
+                .at("accepted_candidates") == 2);
     const json& search = discovery.at("syzygy").at("indexed_search");
     REQUIRE(search.at("state") == "complete");
     REQUIRE(search.at("ownership") == "external_dependency");
@@ -1797,8 +1824,8 @@ TEST_CASE("Lichess safety profiles preserve qualification and manage the evidenc
         },
         std::tuple{
             "lichess_capacity_profile",
-            "uci_arena_lichess_capacity_profile_v1",
-            "uci_arena_lichess_capacity_profile_v1.json",
+            "uci_arena_lichess_capacity_profile_v2",
+            "uci_arena_lichess_capacity_profile_v2.json",
         },
         std::tuple{
             "lichess_transport_profile",
@@ -1842,12 +1869,21 @@ TEST_CASE("Lichess safety profiles preserve qualification and manage the evidenc
     const fs::path unqualified = root / "unqualified.json";
     std::ofstream(unqualified)
         << json{
-               {"schema", "uci_arena_lichess_capacity_profile_v1"},
+               {"schema", "uci_arena_lichess_capacity_profile_v2"},
                {"qualified", false},
            }
                .dump(2);
     REQUIRE_THROWS(
         SetupEngine::import_path(paths, "lichess_capacity_profile", unqualified));
+    const fs::path legacy = root / "legacy-capacity.json";
+    std::ofstream(legacy)
+        << json{
+               {"schema", "uci_arena_lichess_capacity_profile_v1"},
+               {"qualified", true},
+           }
+               .dump(2);
+    REQUIRE_THROWS(
+        SetupEngine::import_path(paths, "lichess_capacity_profile", legacy));
     fs::remove_all(root);
 }
 
@@ -1906,8 +1942,8 @@ TEST_CASE("Lichess installation is disabled without blocking on onboarding evide
              },
              std::tuple{
                  "lichess_capacity_profile",
-                 "uci_arena_lichess_capacity_profile_v1",
-                 "uci_arena_lichess_capacity_profile_v1.json",
+                 "uci_arena_lichess_capacity_profile_v2",
+                 "uci_arena_lichess_capacity_profile_v2.json",
              },
              std::tuple{
                  "lichess_transport_profile",

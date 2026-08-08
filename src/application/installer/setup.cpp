@@ -1924,10 +1924,10 @@ json browse_contract(const std::string_view kind) {
     } else if (kind == "lichess_capacity_profile") {
         result["filters"].push_back(
             {{"label", "Qualified Lichess capacity profile"},
-             {"patterns", {"uci_arena_lichess_capacity_profile_v1.json", "*.json"}}});
+             {"patterns", {"uci_arena_lichess_capacity_profile_v2.json", "*.json"}}});
         result["hints"] = {
-            "Select the qualified capacity profile that matches the single-game profile and "
-            "configured concurrency.",
+            "Select the qualified v2 capacity profile that matches the timing authority, "
+            "single-game profile, and configured concurrency.",
             "The profile remains in place and is never rewritten.",
         };
     } else if (kind == "lichess_transport_profile") {
@@ -2235,7 +2235,7 @@ InspectedIndexedCandidate inspect_indexed_asset_candidate(
         return {selected,
                 inspect_lichess_profile_candidate(
                     selected, "uci_arena_lichess_capacity_profile_v",
-                    "uci_arena_lichess_capacity_profile_v1")};
+                    "uci_arena_lichess_capacity_profile_v2")};
     }
     return {selected,
             inspect_lichess_profile_candidate(
@@ -2423,7 +2423,7 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
                         } else if (kind == "lichess_capacity_profile") {
                             details["validation"] = inspect_lichess_profile_candidate(
                                 selected, "uci_arena_lichess_capacity_profile_v",
-                                "uci_arena_lichess_capacity_profile_v1");
+                                "uci_arena_lichess_capacity_profile_v2");
                         } else if (kind == "lichess_transport_profile") {
                             details["validation"] = inspect_lichess_profile_candidate(
                                 selected, "uci_arena_lichess_transport_profile_v",
@@ -3218,7 +3218,7 @@ json validate_import_locator(const std::string& kind, const fs::path& path) {
     }
     if (kind == "lichess_capacity_profile") {
         return validate_qualified_profile_locator(
-            path, "uci_arena_lichess_capacity_profile_v1", "Lichess capacity profile");
+            path, "uci_arena_lichess_capacity_profile_v2", "Lichess capacity profile");
     }
     if (kind == "lichess_transport_profile") {
         return validate_qualified_profile_locator(
