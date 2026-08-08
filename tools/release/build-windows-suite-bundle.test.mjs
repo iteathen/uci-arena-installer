@@ -133,6 +133,12 @@ test("suite bundle derives default-on Modify features and lifecycle commands fro
       offline: true,
     });
     assert.equal(offline.source.match(/--offline/gu)?.length, 2);
+    assert.match(offline.source, /InstallArguments="[^"]*apply --yes --offline /u);
+    assert.match(offline.source, /RepairArguments="[^"]*repair --yes --offline /u);
+    assert.doesNotMatch(
+      offline.source,
+      /(?:InstallArguments|RepairArguments)="[^"]*--offline[^"]*(?:apply|repair) /u,
+    );
     assert.match(offline.source, /Name="UCI Arena Suite Setup \(Personal\) Offline"/u);
     assert.doesNotMatch(source, /--offline/u);
   } finally {

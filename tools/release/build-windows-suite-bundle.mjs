@@ -226,10 +226,10 @@ export function buildWindowsSuiteBundleSource(options) {
     options.development
       ? "--allow-unsigned-development-catalog"
       : `--metadata-dir ${quoted("[WixBundleExecutePackageCacheFolder]release\\tuf")}`,
-    options.offline ? "--offline" : null,
   ].filter(Boolean).join(" ");
-  const install = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].install.json")} apply --yes ${featureArguments}`;
-  const repair = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].repair.json")} repair --yes ${featureArguments}`;
+  const transport = options.offline ? " --offline" : "";
+  const install = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].install.json")} apply --yes${transport} ${featureArguments}`;
+  const repair = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].repair.json")} repair --yes${transport} ${featureArguments}`;
   const uninstall = [
     `--install-scope ${options.scope}`,
     `--bundle-owner ${quoted("[WixBundleProviderKey]")}`,

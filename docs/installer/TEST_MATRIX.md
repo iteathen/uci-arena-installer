@@ -104,6 +104,8 @@ Required scenarios:
 - execution of each final scope-neutral Windows envelope in bounded dry-run
   mode before publication, including complete embedded-payload hashing without
   using the default thread stack for payload buffers;
+- exact fixed-scope Burn command lines place transport options after their
+  owning apply/repair subcommand and keep uninstall transport-neutral;
 - All-users delegation to the elevation-requiring machine bundle;
 - deterministic online and offline launcher envelopes, exact embedded bundle
   digests, corrupt-envelope rejection, and temporary-child cleanup;
