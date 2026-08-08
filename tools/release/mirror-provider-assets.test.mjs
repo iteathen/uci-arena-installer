@@ -7,7 +7,7 @@ import { buildProviderMirrorPlan } from "./mirror-provider-assets.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const checkedInComposition = JSON.parse(readFileSync(
-  path.join(root, "compositions", "complete-arena-0.3.8.json"),
+  path.join(root, "compositions", "complete-arena-0.3.9.json"),
   "utf8",
 ));
 const checkedInDraft = JSON.parse(readFileSync(

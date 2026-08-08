@@ -1,10 +1,10 @@
 {
   "schema": "arena_suite_release_lock_v2",
-  "suite_version": "0.3.8",
+  "suite_version": "0.3.9",
   "release_ready": false,
   "composition": {
-    "manifest_name": "complete-arena-0.3.8.json",
-    "sha256": "381e916112e4e96b25bd2301e0889e52be487ebb0e90d456223c0fa5a0eb151a"
+    "manifest_name": "complete-arena-0.3.9.json",
+    "sha256": "ecc340ff180515f045c1b1e5779a4e61d973ca15efa7b7de8d0c1298a6228a25"
   },
   "providers": {
     "manager": {
@@ -35,7 +35,7 @@
   },
   "provider_asset_mirror": {
     "repository": "iteathen/uci-arena-installer",
-    "release_tag": "provider-mirror/v0.3.8"
+    "release_tag": "provider-mirror/v0.3.9"
   },
   "managed_repository": "iteathen/uci-arena-installer",
   "components": [],

@@ -10,7 +10,7 @@ import {
 
 const root = path.resolve(import.meta.dirname, "../..");
 const composition = JSON.parse(readFileSync(
-  path.join(root, "compositions", "complete-arena-0.3.8.json"),
+  path.join(root, "compositions", "complete-arena-0.3.9.json"),
   "utf8",
 ));
 const draft = JSON.parse(readFileSync(

@@ -7,13 +7,13 @@ import { resolveComposition, validateProductComposition } from "./product-compos
 
 const root = path.resolve(import.meta.dirname, "../..");
 const composition = JSON.parse(readFileSync(
-  path.join(root, "compositions", "complete-arena-0.3.8.json"),
+  path.join(root, "compositions", "complete-arena-0.3.9.json"),
   "utf8",
 ));
 
 test("complete composition declares independently versioned suite bricks", () => {
   const validated = validateProductComposition(composition);
-  assert.equal(validated.product_release, "0.3.8");
+  assert.equal(validated.product_release, "0.3.9");
   assert.equal(validated.installer.repository, "iteathen/uci-arena-installer");
   assert.deepEqual(
     new Set(validated.components.map((component) => component.repository)),
@@ -25,6 +25,23 @@ test("complete composition declares independently versioned suite bricks", () =>
       "iteathen/uci-arena-book-forge",
       "iteathen/uci-arena-evidence-service",
     ]),
+  );
+  assert.deepEqual(
+    Object.fromEntries(validated.components.map((component) => [
+      component.component_id,
+      component.version,
+    ])),
+    {
+      "manager.core": "0.3.9",
+      "uci_arena.engine": "0.1.4",
+      "uci_arena_evidence.runtime": "0.3.3",
+      "lichess.adapter": "1.0.3",
+      "book_forge.service": "0.4.0",
+      "opening_book.standard": "0.4.0",
+      "uci_arena_evidence.service": "0.3.10",
+      "node_runtime.private": "24.15.0",
+      "stockfish.engine": "15.1",
+    },
   );
 });
 
