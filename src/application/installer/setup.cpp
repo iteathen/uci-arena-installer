@@ -4089,8 +4089,8 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
 }
 
 void rename_managed_component_tree_with_retry(const fs::path& source,
-                                              const fs::path& destination,
-                                              const std::string& component_id) {
+                                               const fs::path& destination,
+                                               const std::string& component_id) {
     constexpr int attempts = 100;
     constexpr auto retry_delay = std::chrono::milliseconds(100);
     std::string failure = "rename did not complete";
@@ -4107,6 +4107,28 @@ void rename_managed_component_tree_with_retry(const fs::path& source,
     }
     throw std::runtime_error("cannot replace managed component " + component_id +
                              " after shutdown: " + failure);
+}
+
+void remove_managed_component_tree_with_retry(const fs::path& target,
+                                               const std::string& component_id) {
+    constexpr int attempts = 100;
+    constexpr auto retry_delay = std::chrono::milliseconds(100);
+    std::string failure = "managed component root remains present";
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        std::error_code remove_error;
+        fs::remove_all(target, remove_error);
+        if (!remove_error && !fs::exists(target)) {
+            return;
+        }
+        if (remove_error) {
+            failure = remove_error.message();
+        }
+        if (attempt + 1 < attempts) {
+            std::this_thread::sleep_for(retry_delay);
+        }
+    }
+    throw std::runtime_error("cannot remove managed component " + component_id +
+                             " during rollback: " + failure);
 }
 
 bool requires_uninstall_startup(const json& receipt) {
@@ -4838,6 +4860,7 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
     const auto ids = selected_ids(catalog, preset, selected_components, download_missing_knowledge,
                                   download_missing_books, download_missing_tablebases);
     json actions = json::array();
+    json blockers = json::array();
     std::uint64_t download = 0;
     std::uint64_t staging = 0;
     std::uint64_t installed = 0;
@@ -4874,6 +4897,18 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
             } catch (const std::exception&) {
             }
         }
+        const std::string selected_version = component.at("version").get<std::string>();
+        const fs::path selected_root =
+            paths.install_root / "components" / id / selected_version;
+        const bool partial_selected_root = fs::exists(selected_root) && !already_current;
+        if (partial_selected_root && !repair) {
+            blockers.push_back({
+                {"code", "partial_installation_requires_repair"},
+                {"component_id", id},
+                {"version", selected_version},
+                {"path", selected_root.string()},
+            });
+        }
         const auto& artifact = platform_artifact(component);
         const std::string hash = artifact.at("sha256").get<std::string>();
         if (artifact_hashes.insert(hash).second) {
@@ -4888,7 +4923,8 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
             knowledge_activation += integer_field(component, "installed_bytes");
         }
         backup += integer_field(component, "backup_bytes");
-        actions.push_back({{"action", already_current ? "repair" : "install"},
+        actions.push_back({{"action", already_current || partial_selected_root ? "repair"
+                                                                             : "install"},
                            {"component_id", id},
                            {"version", component.at("version")},
                            {"dependencies", component.value("dependencies", json::array())},
@@ -4897,7 +4933,6 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
                                             : component.value("default_enabled", true)},
                            {"artifact", artifact}});
     }
-    json blockers = json::array();
     std::uint64_t effective_reserve = reserve;
     if (preset != "complete_arena" && reserve > 0) {
         const fs::space_info workspace_space =
@@ -5358,6 +5393,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         std::error_code rollback_error;
         std::string startup_rollback_failure;
         std::string knowledge_rollback_failure;
+        std::string component_rollback_failure;
         const auto append_startup_rollback_failure =
             [&startup_rollback_failure](const std::string& failure) {
                 if (!startup_rollback_failure.empty()) {
@@ -5369,6 +5405,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
              ++action) {
             const std::string state = action->value("state", "staging");
             bool preserve_action = false;
+            bool action_rollback_failed = false;
             if (action->value("startup_installed", false) && action->contains("receipt_path")) {
                 try {
                     const fs::path receipt_path = action->at("receipt_path").get<std::string>();
@@ -5444,15 +5481,32 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 rollback_error.clear();
             }
             if (state != "staging" && action->contains("target")) {
-                fs::remove_all(action->at("target").get<std::string>(), rollback_error);
-                rollback_error.clear();
+                try {
+                    remove_managed_component_tree_with_retry(
+                        action->at("target").get<std::string>(),
+                        action->value("component_id", "unknown"));
+                } catch (const std::exception& component_error) {
+                    action_rollback_failed = true;
+                    component_rollback_failure +=
+                        (component_rollback_failure.empty() ? "" : "; ") +
+                        std::string(component_error.what());
+                    (*action)["component_rollback_error"] = component_error.what();
+                }
             }
             if (action->contains("rollback_path") && action->contains("target")) {
                 const fs::path rollback = action->at("rollback_path").get<std::string>();
                 const fs::path target = action->at("target").get<std::string>();
                 if (fs::exists(rollback) && !fs::exists(target)) {
-                    fs::rename(rollback, target, rollback_error);
-                    rollback_error.clear();
+                    try {
+                        rename_managed_component_tree_with_retry(
+                            rollback, target, action->value("component_id", "unknown"));
+                    } catch (const std::exception& component_error) {
+                        action_rollback_failed = true;
+                        component_rollback_failure +=
+                            (component_rollback_failure.empty() ? "" : "; ") +
+                            std::string(component_error.what());
+                        (*action)["component_rollback_error"] = component_error.what();
+                    }
                 }
             }
             if (action->contains("receipt_path")) {
@@ -5498,7 +5552,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     }
                 }
             }
-            (*action)["state"] = "rolled_back";
+            (*action)["state"] = action_rollback_failed ? "rollback_failed" : "rolled_back";
             if (action->value("previous_startup_transition_started", false) &&
                 action->contains("previous_startup_receipt")) {
                 try {
@@ -5521,6 +5575,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             rollback_failure += (rollback_failure.empty() ? "" : "; ") +
                                 std::string("knowledge activation: ") +
                                 knowledge_rollback_failure;
+        }
+        if (!component_rollback_failure.empty()) {
+            rollback_failure += (rollback_failure.empty() ? "" : "; ") +
+                                std::string("component roots: ") +
+                                component_rollback_failure;
         }
         journal["state"] = rollback_failure.empty() ? "rolled_back" : "rollback_failed";
         journal["error"] = rollback_failure.empty()

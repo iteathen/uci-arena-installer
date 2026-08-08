@@ -340,6 +340,16 @@ installer_lego_architecture:
     - development_workspace
     - repair_required
   modes: [clean_install, upgrade, repair, reinstall, downgrade, replacement, uninstall, purge]
+  partial_installation_rules:
+    - A selected immutable component root without a matching validated active
+      receipt is partial installation state, not installed authority.
+    - Clean-install planning reports that state as a repair-required blocker
+      before staging or mutating any selected component.
+    - Explicit repair may restage and replace the partial immutable root while
+      preserving provider workspaces, knowledge, locators, and external files.
+    - Rollback retries removal or restoration of managed immutable roots and
+      records rollback_failed when cleanup cannot be completed; it must not
+      report rolled_back while an untracked replacement root remains.
   ownership_classes:
     - application_replaceable
     - user_preserved
@@ -1747,6 +1757,9 @@ transaction:
     rules:
       - Repair restages every selected component from verified release media
         even when the installed version is already current.
+      - Repair adopts recoverable partial installation state only by replacing
+        the unreceipted immutable root with the verified selected artifact and
+        committing a new receipt; the stale root never grants authority.
       - Repair regenerates and verifies installer-owned consumer
         configurations and active-model pointers from current saved locators.
   upgrade:

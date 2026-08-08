@@ -763,6 +763,43 @@ TEST_CASE("repair plan restages components that are already current") {
     fs::remove_all(root);
 }
 
+TEST_CASE("clean plan classifies an unreceipted component root before mutation") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path partial_root =
+        paths.install_root / "components" / "manager.core" / "1.0.0";
+    fs::create_directories(partial_root);
+    std::ofstream(partial_root / "partial.payload", std::ios::binary) << "interrupted";
+    const json catalog{
+        {"schema", "arena_install_catalog_v1"},
+        {"schema_version", 1},
+        {"suite_version", "1.0.0"},
+        {"presets", {{"manager_only", json::array({"manager.core"})}}},
+        {"optional_component_groups",
+         {{"knowledge", json::array()}, {"books", json::array()}, {"tablebases", json::array()}}},
+        {"components", json::array({component("manager.core")})},
+    };
+
+    const json clean =
+        SetupEngine::plan(catalog, paths, "manager_only", {}, true, false);
+    REQUIRE(clean.at("repair") == false);
+    REQUIRE(clean.at("actions").at(0).at("action") == "repair");
+    REQUIRE(clean.at("blockers") ==
+            json::array({{{"code", "partial_installation_requires_repair"},
+                          {"component_id", "manager.core"},
+                          {"version", "1.0.0"},
+                          {"path", partial_root.string()}}}));
+    REQUIRE_FALSE(fs::exists(paths.install_root / ".staging"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "transactions"));
+
+    const json repair =
+        SetupEngine::plan(catalog, paths, "manager_only", {}, true, false, false, false, true);
+    REQUIRE(repair.at("repair") == true);
+    REQUIRE(repair.at("blockers").empty());
+    REQUIRE(repair.at("actions").at(0).at("action") == "repair");
+    fs::remove_all(root);
+}
+
 TEST_CASE("standalone service contracts are identity-bound and receipt-verified") {
     constexpr std::string_view valid_contract =
         R"({"schema":"uci_arena_standalone_service_contract_v1","component_id":"book_forge.service","component_version":"0.2.0","cli_entrypoint":"services/book-forge/src/cli.mjs","configuration_schema":"uci_arena_book_forge_config_v1","status_schema":"uci_arena_book_forge_status_v2","capabilities":["status","start"],"data_paths":["workspace"],"startup":{"windows":"per_user_task_scheduler","linux":"per_user_systemd"},"health_smoke":{"command":"status","success":"exit_zero_and_status_schema"},"outputs":{},"persistence":{"upgrade":"preserve_and_migrate","repair":"preserve","uninstall_default":"preserve"}})";
