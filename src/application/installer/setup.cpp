@@ -4166,6 +4166,22 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
             validated_provider_workspace(paths, receipt, workspace_argument, true);
         arguments.push_back(workspace_argument.at("flag").get<std::string>());
         arguments.push_back(provider_workspace.control_workspace.string());
+        const std::string configuration_path =
+            receipt.value("configuration_path", "");
+        if (!configuration_path.empty()) {
+            const fs::path configuration =
+                normalized_absolute(configuration_path);
+            if (!within(provider_workspace.workspace, configuration) ||
+                !fs::is_regular_file(configuration) ||
+                contains_symbolic_link(configuration)) {
+                throw std::runtime_error(
+                    "provider health configuration is unavailable: " +
+                    component_id);
+            }
+            arguments.push_back(
+                startup_control->at("configuration_argument").get<std::string>());
+            arguments.push_back(configuration.string());
+        }
     }
 
     arena::application::ProcessSupervisor process;

@@ -368,11 +368,29 @@ void write_manager_api_service_install(
     const fs::path cli = active_root / cli_relative;
     const fs::path contract_path = active_root / contract_relative;
     const fs::path workspace = paths.workspace_root / "evidence-service";
+    const fs::path configuration = workspace / "manager-config.json";
+    const fs::path generated = workspace / "generated" /
+                               "context-projection.json";
     fs::create_directories(cli.parent_path());
     fs::create_directories(contract_path.parent_path());
     fs::create_directories(paths.data_root / "receipts");
     fs::create_directories(workspace);
+    fs::create_directories(generated.parent_path());
     std::ofstream(cli, std::ios::binary) << cli_contents;
+    std::ofstream(configuration, std::ios::binary)
+        << json{
+               {"schema", "replaceable_provider_configuration_v1"},
+               {"enabled", true},
+               {"bindings", json::object()},
+               {"locators", json::object()},
+           }
+               .dump(2);
+    std::ofstream(generated, std::ios::binary)
+        << json{
+               {"schema", "replaceable_provider_projection_v1"},
+               {"locators", json::object()},
+           }
+               .dump(2);
 
     const json startup{
         {"windows", "per_user_task_scheduler"},
@@ -470,7 +488,7 @@ void write_manager_api_service_install(
                {"artifact_sha256", std::string(64, 'a')},
                {"dependencies", json::array({"runtime.host"})},
                {"data_paths", json::array({workspace.string()})},
-               {"configuration_path", ""},
+               {"configuration_path", configuration.string()},
                {"activated_files", json::array()},
                {"startup",
                 {{"installed", true},

@@ -27,6 +27,15 @@ bool has_model_root_option(const int argc, char** argv) {
     return false;
 }
 
+bool has_option(const int argc, char** argv, const std::string_view option) {
+    for (int index = 1; index + 1 < argc; ++index) {
+        if (std::string_view(argv[index]) == option) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -95,6 +104,9 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (operation == "status") {
+        if (evidence && !has_option(argc, argv, "--config")) {
+            return 4;
+        }
         std::cout
             << (evidence
                     ? R"({"schema":"uci_arena_manager_service_api_v1","api_version":"1.0","component_id":"uci_arena_evidence.service","component_version":"0.3.0","operation":"status","ok":true,"payload":{"status":{"schema":"uci_arena_evidence_status_v1","control":{"paused":false},"collection":{"state":"available","reason":"ready"},"daemon":{"phase":"sleep","stale":false,"lastError":""},"datasets":1}}})"

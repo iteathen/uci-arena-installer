@@ -414,8 +414,10 @@ standalone_service_contracts:
       synthesizes it for an installed provider.
     - Verify invokes a Manager-integrated service's declared dependency
       runtime, CLI entrypoint, fixed Manager API argument prefix, status
-      operation, and bounded provider workspace argument. It accepts only an
-      exit-zero uci_arena_manager_service_api_v1 envelope with the exact
+      operation, bounded provider workspace argument, and the declared
+      configuration argument when the validated receipt owns a generated
+      configuration. It accepts only an exit-zero
+      uci_arena_manager_service_api_v1 envelope with the exact
       compatible API major, component id, component version, status operation,
       ok true, and payload status schema declared by the validated contract.
     - A standalone service without Manager integration is verified through its
