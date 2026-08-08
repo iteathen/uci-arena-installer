@@ -16,7 +16,7 @@ import {
   resolveNpmInvocation,
   selectLockedComponents,
   transactionalOutput,
-  validateWindowsLauncherExecutable,
+  validateWindowsLauncherEnvelope,
 } from "./clean-build.mjs";
 
 test("clean build retries transient Windows rename contention with bounded backoff", () => {
@@ -94,10 +94,9 @@ test("clean build publishes the complete platform-specific output contract", () 
   );
 });
 
-test("clean build executes each assembled Windows launcher before publication", () => {
+test("clean build validates each assembled Windows envelope without installed-scope policy", () => {
   const calls = [];
-  validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
-    scope: "all-users",
+  validateWindowsLauncherEnvelope(String.raw`C:\candidate\setup.exe`, {
     execute: (filename, args, options) => {
       calls.push({ filename, args, options });
       return { status: 0, stdout: "", stderr: "" };
@@ -105,9 +104,9 @@ test("clean build executes each assembled Windows launcher before publication", 
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].filename, String.raw`C:\candidate\setup.exe`);
-  assert.deepEqual(calls[0].args, ["--dry-run", "--scope", "all-users"]);
+  assert.deepEqual(calls[0].args, ["--validate-envelope"]);
   assert.equal(calls[0].options.timeout, 120_000);
-  validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+  validateWindowsLauncherEnvelope(String.raw`C:\candidate\setup.exe`, {
     timeoutMilliseconds: 45_000,
     execute: (filename, args, options) => {
       calls.push({ filename, args, options });
@@ -116,16 +115,16 @@ test("clean build executes each assembled Windows launcher before publication", 
   });
   assert.equal(calls[1].options.timeout, 45_000);
   assert.throws(
-    () => validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+    () => validateWindowsLauncherEnvelope(String.raw`C:\candidate\setup.exe`, {
       timeoutMilliseconds: 0,
     }),
-    /timeout policy is invalid/u,
+    /envelope-validation timeout policy is invalid/u,
   );
   assert.throws(
-    () => validateWindowsLauncherExecutable(String.raw`C:\candidate\setup.exe`, {
+    () => validateWindowsLauncherEnvelope(String.raw`C:\candidate\setup.exe`, {
       execute: () => ({ status: -1073741571, stdout: "", stderr: "" }),
     }),
-    /dry-run failed for personal: exit -1073741571/u,
+    /envelope validation failed: exit -1073741571/u,
   );
 });
 

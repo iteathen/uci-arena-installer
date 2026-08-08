@@ -865,6 +865,12 @@ packaging:
         selection, materializes only the selected child in a private temporary
         directory, and removes that directory after the child exits. This is
         child-bundle transport, not application component extraction.
+      - Release assembly executes each final envelope with the sole
+        --validate-envelope operation. That operation validates the complete
+        envelope and both embedded payload digests, is non-interactive, and
+        exits before installed-state inspection, scope policy, extraction,
+        elevation, or mutation. Operator --dry-run --scope planning remains a
+        separate environment-sensitive lifecycle check.
       - Online and offline launchers are separate deterministic envelopes.
         Their source bundle filenames and suite version are release-assembly
         inputs and never become control-flow constants in the native launcher.

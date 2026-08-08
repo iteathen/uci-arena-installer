@@ -90,19 +90,15 @@ function runChecked(executable, args, { cwd = repositoryRoot, environment = proc
 
 export const windowsLauncherDryRunTimeoutMilliseconds = 120_000;
 
-export function validateWindowsLauncherExecutable(filename, {
-  scope = "personal",
+export function validateWindowsLauncherEnvelope(filename, {
   execute = spawnSync,
   timeoutMilliseconds = windowsLauncherDryRunTimeoutMilliseconds,
 } = {}) {
-  if (!["personal", "all-users"].includes(scope)) {
-    throw new Error("Windows launcher dry-run scope is invalid");
-  }
   if (!Number.isSafeInteger(timeoutMilliseconds)
       || timeoutMilliseconds < 1_000 || timeoutMilliseconds > 300_000) {
-    throw new Error("Windows launcher dry-run timeout policy is invalid");
+    throw new Error("Windows launcher envelope-validation timeout policy is invalid");
   }
-  const result = execute(filename, ["--dry-run", "--scope", scope], {
+  const result = execute(filename, ["--validate-envelope"], {
     cwd: path.dirname(filename),
     encoding: "utf8",
     windowsHide: true,
@@ -113,7 +109,7 @@ export function validateWindowsLauncherExecutable(filename, {
       .filter((value) => typeof value === "string" && value.trim().length > 0)
       .join("\n");
     throw new Error(
-      `Windows installer launcher dry-run failed for ${scope}: ${diagnostic || `exit ${result.status}`}`,
+      `Windows installer launcher envelope validation failed: ${diagnostic || `exit ${result.status}`}`,
     );
   }
 }
@@ -520,8 +516,8 @@ function buildWindowsOutputs({
     "--all-users", children["per-machine-offline"],
     "--output", offline,
   ]);
-  validateWindowsLauncherExecutable(online, { scope: "personal" });
-  validateWindowsLauncherExecutable(offline, { scope: "all-users" });
+  validateWindowsLauncherEnvelope(online);
+  validateWindowsLauncherEnvelope(offline);
   return [online, offline, userMsi, machineMsi].map(artifactRecord);
 }
 

@@ -101,9 +101,10 @@ Required scenarios:
 - a distinct default-on standard opening-book control and offline-only
   `--offline` apply/repair arguments with no transport flag on uninstall;
 - Personal delegation without elevation;
-- execution of each final scope-neutral Windows envelope in bounded dry-run
-  mode before publication, including complete embedded-payload hashing without
-  using the default thread stack for payload buffers;
+- execution of each final scope-neutral Windows envelope through bounded,
+  non-interactive `--validate-envelope` before publication, including complete
+  embedded-payload hashing without installed-scope planning, elevation, or use
+  of the default thread stack for payload buffers;
 - exact fixed-scope Burn command lines place transport options after their
   owning apply/repair subcommand and keep uninstall transport-neutral;
 - All-users delegation to the elevation-requiring machine bundle;

@@ -631,13 +631,36 @@ WindowsInstallationSnapshot detect_windows_installation() {
 
 int run_windows_installer_launcher(
     const std::vector<std::wstring>& arguments) {
+    const bool envelope_validation_requested =
+        std::find(
+            arguments.begin(), arguments.end(), L"--validate-envelope") !=
+        arguments.end();
     std::unique_ptr<LauncherLog> log;
     fs::path temporary_directory;
     try {
+        if (envelope_validation_requested &&
+            (arguments.size() != 1 ||
+             arguments.front() != L"--validate-envelope")) {
+            throw LauncherFailure(
+                InstallerExitCode::invalid_invocation,
+                "--validate-envelope must be the only launcher argument");
+        }
         log = std::make_unique<LauncherLog>();
         const fs::path self = executable_path();
         const WindowsInstallerEnvelope envelope = read_envelope(self);
         validate_payloads(self, envelope);
+        if (envelope_validation_requested) {
+            log->write({
+                {"event", "envelope_validated"},
+                {"package", utf8_path(self)},
+                {"per_user_payload_bytes", envelope.per_user.size},
+                {"per_machine_payload_bytes", envelope.per_machine.size},
+                {"exit_code", 0},
+                {"exit_category", installer_exit_category(
+                    InstallerExitCode::success)},
+            });
+            return 0;
+        }
 
         bool dry_run = false;
         std::vector<std::wstring> forwarded;
@@ -747,7 +770,9 @@ int run_windows_installer_launcher(
                 {"exit_category", installer_exit_category(error.code())},
             });
         }
-        show_failure(error.what(), log_path);
+        if (!envelope_validation_requested) {
+            show_failure(error.what(), log_path);
+        }
         return static_cast<int>(error.code());
     } catch (const std::exception& error) {
         if (!temporary_directory.empty()) {
@@ -764,7 +789,9 @@ int run_windows_installer_launcher(
                     InstallerExitCode::internal_failure)},
             });
         }
-        show_failure(error.what(), log_path);
+        if (!envelope_validation_requested) {
+            show_failure(error.what(), log_path);
+        }
         return static_cast<int>(InstallerExitCode::internal_failure);
     }
 }
