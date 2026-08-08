@@ -12,6 +12,13 @@ The composition and installer engine are versioned independently. Changing a
 provider version or adding a conforming provider changes composition data and
 its lock realization, not transaction control flow.
 
+Release assembly validates composition edges against every resolved immutable
+`arena-component.json`. All dependencies declared by the provider manifest must
+also appear in that component's composition entry. Composition may add an
+explicit suite-level wiring edge, but it cannot omit or weaken a provider-owned
+runtime dependency. A contradiction fails before catalog generation or any
+installation mutation.
+
 `arena_suite_release_lock_v2` binds one realization to the exact composition
 filename and SHA-256. Provider registrations are keyed data whose repository
 must match the composition; they are not a hardcoded list in the validator.

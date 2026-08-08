@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { resolveComposition, validateProductComposition } from "./product-composition.mjs";
+import {
+  resolveComposition,
+  validateCompositionManifests,
+  validateProductComposition,
+} from "./product-composition.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const composition = JSON.parse(readFileSync(
@@ -43,6 +47,12 @@ test("complete composition declares independently versioned suite bricks", () =>
       "stockfish.engine": "15.1",
     },
   );
+  assert.deepEqual(
+    validated.components.find(
+      (component) => component.component_id === "uci_arena_evidence.runtime",
+    ).requires,
+    ["uci_arena.engine", "node_runtime.private"],
+  );
 });
 
 test("composition resolution accepts substitution only through exact identities", () => {
@@ -73,4 +83,45 @@ test("composition rejects undeclared dependencies and dependency cycles", () => 
   cycle.components.find((component) => component.component_id === "uci_arena.engine").requires =
     ["manager.core"];
   assert.throws(() => validateProductComposition(cycle), /dependency cycle/u);
+});
+
+function availableWithManifests(product = composition) {
+  return product.components.map((component) => ({
+    component_id: component.component_id,
+    version: component.version,
+    repository: component.repository,
+    manifest: {
+      schema: "arena_install_component_v1",
+      schema_version: 1,
+      component_id: component.component_id,
+      component_version: component.version,
+      dependencies: [...component.requires],
+    },
+  }));
+}
+
+test("resolved provider dependencies cannot be omitted by composition", () => {
+  const available = availableWithManifests();
+  assert.equal(validateCompositionManifests(composition, available).length, composition.components.length);
+
+  const missing = structuredClone(composition);
+  missing.components.find(
+    (component) => component.component_id === "uci_arena_evidence.runtime",
+  ).requires = ["uci_arena.engine"];
+  assert.throws(
+    () => validateCompositionManifests(missing, available),
+    /composition omits manifest dependencies: node_runtime\.private/u,
+  );
+});
+
+test("composition may add explicit suite wiring without rewriting provider manifests", () => {
+  const expanded = structuredClone(composition);
+  expanded.components.find(
+    (component) => component.component_id === "opening_book.standard",
+  ).requires = ["uci_arena.engine"];
+  const available = availableWithManifests(expanded);
+  available.find(
+    (component) => component.component_id === "opening_book.standard",
+  ).manifest.dependencies = [];
+  assert.equal(validateCompositionManifests(expanded, available).length, expanded.components.length);
 });

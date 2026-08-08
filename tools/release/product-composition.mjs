@@ -107,6 +107,35 @@ export function resolveComposition(candidate, availableComponents) {
   });
 }
 
+export function validateCompositionManifests(candidate, availableComponents) {
+  const resolved = resolveComposition(candidate, availableComponents);
+  for (const component of resolved) {
+    const manifest = component.candidate?.manifest;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)
+        || manifest.schema !== "arena_install_component_v1"
+        || manifest.schema_version !== 1
+        || manifest.component_id !== component.component_id
+        || manifest.component_version !== component.version) {
+      fail(`resolved manifest identity differs for ${component.component_id}`);
+    }
+    if (!Array.isArray(manifest.dependencies)
+        || new Set(manifest.dependencies).size !== manifest.dependencies.length
+        || manifest.dependencies.some((dependency) => !COMPONENT_ID.test(dependency))) {
+      fail(`resolved manifest dependencies are invalid for ${component.component_id}`);
+    }
+    const compositionDependencies = new Set(component.requires);
+    const omitted = manifest.dependencies.filter(
+      (dependency) => !compositionDependencies.has(dependency),
+    );
+    if (omitted.length > 0) {
+      fail(
+        `${component.component_id} composition omits manifest dependencies: ${omitted.join(", ")}`,
+      );
+    }
+  }
+  return resolved;
+}
+
 function main(argv) {
   if (argv.length !== 1) fail("usage: product-composition.mjs <composition.json>");
   const filename = path.resolve(argv[0]);

@@ -97,6 +97,10 @@ signed_provenance:
         provider identity and attestation. Mirror repository identity grants
         no component authority.
       - Verify all three asset SHA-256 values before interpreting them.
+      - Each provider's explicitly dispatched signing job publishes the exact
+        verified archive, provider result, and Sigstore bundle directly to its
+        private immutable candidate prerelease. Actions artifact storage is not
+        part of the candidate transport or authority chain.
       - Cosign verification pins the exact certificate identity, OIDC issuer,
         provider repository, source commit, workflow name, workflow ref,
         workflow trigger, predicate type, and artifact bytes.
@@ -930,6 +934,11 @@ components:
       platform lock realizes that composition with immutable artifact,
       manifest, digest, and provenance identities; it cannot silently replace
       a component version or dependency.
+    - Release assembly compares every resolved immutable component manifest
+      with the product composition before catalog generation. Every dependency
+      declared by arena-component.json must appear in that component's
+      composition dependency edges. Composition may add explicit suite wiring,
+      but it may never omit or weaken a provider-declared runtime dependency.
     - Every platform release lock records the exact product-composition file
       name and SHA-256. Lock validation resolves component identity,
       repository, version, and dependency edges from that composition rather
