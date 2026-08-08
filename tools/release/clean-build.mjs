@@ -398,6 +398,9 @@ function buildWindowsOutputs({
   const managerPolicy = path.join(
     repositoryRoot, "packaging", "windows", "manager-integration.json",
   );
+  const setupLauncher = path.join(
+    nativeBuild.buildRoot, "Release", "arena-setup-launcher.exe",
+  );
   const userMsi = path.join(publishRoot, userMsiName);
   const machineMsi = path.join(publishRoot, machineMsiName);
   for (const [scope, marker, output] of [
@@ -409,6 +412,7 @@ function buildWindowsOutputs({
       managerVersion: manager.lockRow.component_version,
       installerRoot: runtimeRoot,
       installerVersion: nativeBuild.installerVersion,
+      setupLauncher,
       scopeMarker: marker,
       policyPath: managerPolicy,
       version: suiteVersion,

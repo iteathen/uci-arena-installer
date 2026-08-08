@@ -18,6 +18,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { enumerateComponentFiles } from "./component-artifact.mjs";
 import { deterministicTarGz } from "./deterministic-tar.mjs";
@@ -210,6 +211,6 @@ function main() {
   }))}\n`);
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\", "/")}`) {
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   main();
 }

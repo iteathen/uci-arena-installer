@@ -126,6 +126,16 @@ else()
 endif()
 
 if(WIN32)
+  add_executable(
+    arena-setup-launcher
+    apps/setup_launcher/main.cpp
+  )
+  target_link_libraries(arena-setup-launcher PRIVATE shell32)
+  set_property(
+    TARGET arena-setup-launcher
+    PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+  )
+
   add_library(arena_windows_installer_launcher
     src/platform/windows/installer_launcher.cpp
   )
@@ -149,6 +159,8 @@ if(WIN32)
     PRIVATE arena_windows_installer_launcher shell32
   )
   if(MSVC)
+    target_compile_options(
+      arena-setup-launcher PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(
       arena_windows_installer_launcher PRIVATE /W4 /permissive- /EHsc)
     target_compile_options(

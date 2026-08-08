@@ -13,6 +13,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import {
   normalizeComponentPath,
@@ -70,7 +71,8 @@ function readJson(filename, label) {
 function validatePolicy(policy, scope) {
   if (policy?.schema !== "arena_manager_windows_integration_v1"
       || policy.component_id !== "manager.core"
-      || typeof policy.installer_runtime_manifest_destination !== "string") {
+      || typeof policy.installer_runtime_root !== "string"
+      || typeof policy.setup_launcher_destination !== "string") {
     throw new Error("invalid Manager Windows integration policy identity");
   }
   const selected = policy.scopes?.[scope];
@@ -195,6 +197,7 @@ export function buildManagerMsiSource({
   managerVersion,
   installerRoot,
   installerVersion,
+  setupLauncher,
   scopeMarker,
   policyPath,
   version,
@@ -206,11 +209,13 @@ export function buildManagerMsiSource({
   }
   const resolvedRoot = path.resolve(managerRoot);
   const resolvedInstallerRoot = path.resolve(installerRoot);
+  const resolvedSetupLauncher = path.resolve(setupLauncher);
   const resolvedMarker = path.resolve(scopeMarker);
   const resolvedIcon = path.resolve(iconPath);
   for (const [label, filename] of [
     ["Manager component root", resolvedRoot],
     ["Installer runtime root", resolvedInstallerRoot],
+    ["setup launcher", resolvedSetupLauncher],
     ["scope marker", resolvedMarker],
     ["installer icon", resolvedIcon],
   ]) {
@@ -231,37 +236,45 @@ export function buildManagerMsiSource({
     version: installerVersion,
     target: "windows-x86_64",
   });
-  const runtimeManifestDestination = normalizeComponentPath(
-    policy.installer_runtime_manifest_destination,
-    "Installer runtime manifest destination",
+  const runtimeRootRelative = normalizeComponentPath(
+    policy.installer_runtime_root, "Installer runtime destination",
+  );
+  const runtimeDestination = (relative) => normalizeComponentPath(
+    path.posix.join(runtimeRootRelative, relative), "Installer runtime file destination",
+  );
+  const runtimeManifestDestination = runtimeDestination("arena-installer-runtime.json");
+  const launcherDestination = normalizeComponentPath(
+    policy.setup_launcher_destination, "setup launcher destination",
   );
   const markerRelative = normalizeComponentPath(policy.scope_marker, "scope marker path");
-  if (sources.has(runtime.entrypoint) || sources.has(runtimeManifestDestination)
-      || sources.has(markerRelative)) {
-    throw new Error("Manager artifact collides with Installer-owned integration authority");
-  }
   const setupHeader = readFileSync(runtime.declared.get(runtime.entrypoint)).subarray(0, 2);
   if (setupHeader.length !== 2 || setupHeader[0] !== 0x4d || setupHeader[1] !== 0x5a) {
     throw new Error("Installer setup executable is not a Windows PE image");
+  }
+  const launcherHeader = readFileSync(resolvedSetupLauncher).subarray(0, 2);
+  if (launcherHeader.length !== 2 || launcherHeader[0] !== 0x4d || launcherHeader[1] !== 0x5a) {
+    throw new Error("Installer setup launcher is not a Windows PE image");
   }
   if (!new RegExp(`^${scope}\\r?\\n?$`, "u").test(readFileSync(resolvedMarker, "utf8"))) {
     throw new Error(`scope marker must contain exactly ${scope}`);
   }
   for (const [relative, filename] of runtime.declared) {
-    const existing = sources.get(relative);
-    if (existing) {
-      const existingBytes = readFileSync(existing);
-      const runtimeBytes = readFileSync(filename);
-      if (existingBytes.length !== runtimeBytes.length
-          || !existingBytes.equals(runtimeBytes)) {
-        throw new Error(`Manager and Installer runtime path collision: ${relative}`);
-      }
-      continue;
+    const destination = runtimeDestination(relative);
+    if (sources.has(destination)) {
+      throw new Error(`Installer runtime destination collision: ${destination}`);
     }
-    sources.set(relative, filename);
+    sources.set(destination, filename);
   }
-  sources.set(runtimeManifestDestination, runtime.manifestPath);
-  sources.set(markerRelative, resolvedMarker);
+  for (const [destination, filename] of [
+    [runtimeManifestDestination, runtime.manifestPath],
+    [launcherDestination, resolvedSetupLauncher],
+    [markerRelative, resolvedMarker],
+  ]) {
+    if (sources.has(destination)) {
+      throw new Error(`Installer integration destination collision: ${destination}`);
+    }
+    sources.set(destination, filename);
+  }
   const payloadPaths = [...sources.keys()].sort();
   const components = payloadPaths.map((relative) => renderFileComponent({
     relative,
@@ -352,7 +365,7 @@ export function buildManagerMsi(options) {
 function main() {
   const args = parse(process.argv.slice(2));
   for (const required of [
-    "manager-root", "installer-root", "installer-version", "scope-marker",
+    "manager-root", "installer-root", "installer-version", "setup-launcher", "scope-marker",
     "policy", "version", "scope", "icon", "output",
   ]) {
     if (!args[required]) throw new Error(`missing --${required}`);
@@ -362,6 +375,7 @@ function main() {
     managerVersion: args["manager-version"] ?? args.version,
     installerRoot: args["installer-root"],
     installerVersion: args["installer-version"],
+    setupLauncher: args["setup-launcher"],
     scopeMarker: args["scope-marker"],
     policyPath: args.policy,
     version: args.version,
@@ -372,6 +386,6 @@ function main() {
   }))}\n`);
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\", "/")}`) {
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   main();
 }

@@ -26,6 +26,14 @@ and the machine-only service. The suite-bundle builder consumes that MSI, the
 Installer-owned `arena-setup` runtime, and exact catalog media. Neither builder
 accepts a Manager source or CMake install tree.
 
+Inside the Manager MSI, the complete Installer runtime occupies its own
+policy-declared `libexec` subroot so independently built Manager and Installer
+DLL closures never share file ownership. A small statically linked
+Installer-owned `bin/arena-setup.exe` launcher remains adjacent to Manager CLI,
+forwards arguments and the child exit code to that private runtime, and owns no
+installation policy or lifecycle behavior. Suite-bundle media continues to use
+the complete runtime directly from its own isolated extraction directory.
+
 `diagnostic-review-inputs.mjs` is the private package-source adapter for the
 pre-merge acceptance cycle. Its declarative source set names one exact private
 prerelease and target commit for every composed component. It downloads exactly

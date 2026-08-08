@@ -86,8 +86,10 @@ function fixture() {
   const runtimeDependency = path.join(installerRoot, "bin", "archive.dll");
   const perUserMarker = path.join(integrationRoot, "per-user.txt");
   const perMachineMarker = path.join(integrationRoot, "per-machine.txt");
+  const setupLauncher = path.join(integrationRoot, "arena-setup-launcher.exe");
   writeFileSync(setupExecutable, "MZinstaller-owned-setup");
   writeFileSync(runtimeDependency, "installer-runtime-dependency");
+  writeFileSync(setupLauncher, "MZinstaller-owned-launcher");
   const runtimeFiles = ["bin/arena-setup.exe", "bin/archive.dll"].map((relative) => {
     const filename = path.join(installerRoot, ...relative.split("/"));
     return {
@@ -114,6 +116,7 @@ function fixture() {
     root,
     managerRoot,
     installerRoot,
+    setupLauncher,
     perUserMarker,
     perMachineMarker,
   };
@@ -124,6 +127,7 @@ function options(f, scope) {
     managerRoot: f.managerRoot,
     installerRoot: f.installerRoot,
     installerVersion: "0.1.0",
+    setupLauncher: f.setupLauncher,
     managerVersion: "0.3.8",
     scopeMarker: scope === "per-user" ? f.perUserMarker : f.perMachineMarker,
     policyPath,
@@ -149,6 +153,8 @@ test("Manager MSI source applies fixed-scope integration without source-tree kno
     assert.match(machine, /arena-setup\.exe/u);
     assert.match(machine, /archive\.dll/u);
     assert.match(machine, /installer-runtime\.json/u);
+    assert.match(machine, /Name="libexec"/u);
+    assert.match(machine, /Name="uci-arena-installer"/u);
     assert.match(machine, /install-scope\.txt/u);
     assert.doesNotMatch(machine, /CMakeLists|source checkout|\.\.\\uci-arena-manager/iu);
   } finally {
@@ -156,7 +162,7 @@ test("Manager MSI source applies fixed-scope integration without source-tree kno
   }
 });
 
-test("Manager MSI rejects a mismatched Manager and Installer runtime collision", () => {
+test("Manager MSI isolates differing Manager and Installer runtime files", () => {
   const f = fixture();
   try {
     const managerShared = path.join(f.managerRoot, "bin", "shared.dll");
@@ -183,10 +189,9 @@ test("Manager MSI rejects a mismatched Manager and Installer runtime collision",
     });
     writeFileSync(runtimeManifestPath, `${JSON.stringify(runtimeManifest, null, 2)}\n`);
 
-    assert.throws(
-      () => buildManagerMsiSource(options(f, "per-user")),
-      /runtime path collision: bin\/shared\.dll/u,
-    );
+    const source = buildManagerMsiSource(options(f, "per-user"));
+    assert.equal((source.match(/Name="shared\.dll"/gu) ?? []).length, 2);
+    assert.match(source, /Name="libexec"/u);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

@@ -781,12 +781,18 @@ packaging:
         never inferred from a React value or an untrusted catalog.
       - Installer validates every Manager artifact file against its component
         manifest before generating either MSI. The MSI builder overlays only
-        manifest-bound Installer runtime files and Installer-owned integration
-        payloads, including the fixed-scope marker; it does not infer Manager
-        source-tree layout or package a lone arena-setup executable.
-      - A path present in both Manager and Installer runtime manifests may be
-        deduplicated only when size and SHA-256 are identical. A mismatched
-        collision fails before WiX source or package output is committed.
+        manifest-bound Installer runtime files beneath the policy-declared
+        private Installer subroot and Installer-owned integration payloads,
+        including the fixed-scope marker; it does not infer Manager source-tree
+        layout or package a lone arena-setup executable.
+      - An Installer-owned adjacent arena-setup launcher preserves Manager's
+        stable setup-helper contract while forwarding the exact typed argument
+        vector and exit code to the private Installer runtime. The launcher
+        owns no package, planning, validation, backup, or rollback behavior.
+      - Manager, Installer runtime, launcher, scope-marker, and runtime-manifest
+        destinations must be disjoint. Any destination collision fails before
+        WiX source or package output is committed; independently owned runtime
+        libraries are never silently deduplicated.
       - Per-user MSI generation uses pinned WiX 6 with native per-user package
         scope. Every component installed beneath the user profile has an
         MSI-owned HKCU key path where Windows Installer requires it, and ICE38

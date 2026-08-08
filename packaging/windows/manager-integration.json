@@ -9,7 +9,8 @@
     "desktop": "desktop"
   },
   "scope_marker": "share/uci-arena/install-scope.txt",
-  "installer_runtime_manifest_destination": "share/uci-arena/installer-runtime.json",
+  "installer_runtime_root": "libexec/uci-arena-installer",
+  "setup_launcher_destination": "bin/arena-setup.exe",
   "start_menu": {
     "folder": "UCI Arena",
     "name": "UCI Arena Manager"
