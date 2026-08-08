@@ -28,6 +28,7 @@
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/process_supervisor.hpp"
 #include "arena/ports/asset_search_index.hpp"
+#include "arena/platform/filesystem_path.hpp"
 #include "arena/platform/service_control.hpp"
 #include "arena/platform/workspace_permissions.hpp"
 
@@ -49,7 +50,7 @@ constexpr std::size_t managed_profile_max_files = 16;
 constexpr const char* compiled_tuf_root_sha256 = ARENA_TUF_ROOT_SHA256;
 
 json read_json(const fs::path& path) {
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(platform::filesystem_api_path(path), std::ios::binary);
     if (!input) {
         throw std::runtime_error("cannot read JSON file: " + path.string());
     }
@@ -61,10 +62,11 @@ json read_json(const fs::path& path) {
 }
 
 void write_json_atomic(const fs::path& path, const json& value) {
-    fs::create_directories(path.parent_path());
+    fs::create_directories(platform::filesystem_api_path(path.parent_path()));
     const fs::path temporary = path.string() + ".tmp";
     {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        std::ofstream output(platform::filesystem_api_path(temporary),
+                             std::ios::binary | std::ios::trunc);
         if (!output) {
             throw std::runtime_error("cannot write " + temporary.string());
         }
@@ -75,11 +77,13 @@ void write_json_atomic(const fs::path& path, const json& value) {
         }
     }
     std::error_code error;
-    fs::rename(temporary, path, error);
+    fs::rename(platform::filesystem_api_path(temporary),
+               platform::filesystem_api_path(path), error);
     if (error) {
-        fs::remove(path, error);
+        fs::remove(platform::filesystem_api_path(path), error);
         error.clear();
-        fs::rename(temporary, path, error);
+        fs::rename(platform::filesystem_api_path(temporary),
+                   platform::filesystem_api_path(path), error);
     }
     if (error) {
         throw std::runtime_error("cannot atomically activate " + path.string());
@@ -90,7 +94,7 @@ std::string sha256_file(const fs::path& path) {
     if (sodium_init() < 0) {
         throw std::runtime_error("libsodium initialization failed");
     }
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(platform::filesystem_api_path(path), std::ios::binary);
     if (!input) {
         throw std::runtime_error("cannot hash " + path.string());
     }
@@ -1490,9 +1494,10 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
             throw std::runtime_error("component manifest contains a duplicate path");
         }
         const fs::path path = root / relative;
-        if (!fs::is_regular_file(path) ||
-            fs::file_size(path) != integer_field(file, "size_bytes") ||
-            sha256_file(path) != file.at("sha256").get<std::string>()) {
+        const fs::path api_path = platform::filesystem_api_path(path);
+        if (!fs::is_regular_file(api_path) ||
+            fs::file_size(api_path) != integer_field(file, "size_bytes") ||
+            sha256_file(api_path) != file.at("sha256").get<std::string>()) {
             throw std::runtime_error("component payload verification failed for " +
                                      relative.generic_string());
         }
@@ -5637,26 +5642,30 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
     const std::string component_id = "lichess_profile.import." + fingerprint.substr(0, 16);
     const std::string component_version = "1";
     const fs::path import_root = paths.data_root / "imports" / "lichess_profiles";
-    const fs::path active_root = import_root / fingerprint;
-    const fs::path staging_root = import_root / (".staging-" + fingerprint);
-    const bool active_root_existed = fs::exists(active_root);
-    fs::create_directories(import_root);
+    const fs::path active_root = import_root / fingerprint.substr(0, 32);
+    const fs::path staging_root = import_root / (".s-" + fingerprint.substr(0, 16));
+    const fs::path active_api_root = platform::filesystem_api_path(active_root);
+    const fs::path staging_api_root = platform::filesystem_api_path(staging_root);
+    const bool active_root_existed = fs::exists(active_api_root);
+    fs::create_directories(platform::filesystem_api_path(import_root));
     require_no_symbolic_link(import_root);
 
     std::error_code ignored;
-    fs::remove_all(staging_root, ignored);
-    if (!fs::exists(active_root)) {
-        fs::create_directories(staging_root);
+    fs::remove_all(staging_api_root, ignored);
+    if (!fs::exists(active_api_root)) {
+        fs::create_directories(staging_api_root);
         try {
             for (const auto& file : files) {
                 const fs::path target = staging_root / file.relative;
                 if (!within(staging_root, target)) {
                     throw std::runtime_error("managed Lichess profile path escapes staging");
                 }
-                fs::create_directories(target.parent_path());
-                fs::copy_file(file.source, target, fs::copy_options::overwrite_existing);
-                if (fs::file_size(target) != file.size ||
-                    sha256_file(target) != file.sha256) {
+                const fs::path api_target = platform::filesystem_api_path(target);
+                fs::create_directories(api_target.parent_path());
+                fs::copy_file(platform::filesystem_api_path(file.source), api_target,
+                              fs::copy_options::overwrite_existing);
+                if (fs::file_size(api_target) != file.size ||
+                    sha256_file(api_target) != file.sha256) {
                     throw std::runtime_error(
                         "managed Lichess profile closure verification failed");
                 }
@@ -5673,15 +5682,24 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
                 {"uninstall_policy", "preserve_with_manager_data"},
             };
             write_json_atomic(staging_root / "arena-component.json", manifest);
-            fs::rename(staging_root, active_root);
+            fs::rename(staging_api_root, active_api_root);
         } catch (...) {
-            fs::remove_all(staging_root, ignored);
+            fs::remove_all(staging_api_root, ignored);
             throw;
         }
     }
+    const json active_manifest =
+        validate_component_payload(active_api_root, component_id, component_version).manifest;
+    if (active_manifest.value("files", json::array()) != identity_rows ||
+        active_manifest.value("entrypoints", json::object()).value("profile", "") !=
+            source.filename().generic_string()) {
+        throw std::runtime_error(
+            "managed Lichess profile root does not match its complete content identity");
+    }
     const fs::path managed_profile = active_root / source.filename();
-    if (!fs::is_regular_file(managed_profile) ||
-        sha256_file(managed_profile) != sha256_file(source)) {
+    const fs::path managed_api_profile = platform::filesystem_api_path(managed_profile);
+    if (!fs::is_regular_file(managed_api_profile) ||
+        sha256_file(managed_api_profile) != sha256_file(source)) {
         throw std::runtime_error("managed Lichess profile activation verification failed");
     }
 
@@ -5710,14 +5728,15 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         });
     }
     const fs::path manifest_path = active_root / "arena-component.json";
+    const fs::path manifest_api_path = platform::filesystem_api_path(manifest_path);
     ownership.push_back({
         {"path", manifest_path.string()},
         {"ownership_class", "generated"},
         {"normal_uninstall", "preserve"},
         {"purge", "exact_identity"},
         {"kind", "file"},
-        {"size_bytes", fs::file_size(manifest_path)},
-        {"sha256", sha256_file(manifest_path)},
+        {"size_bytes", fs::file_size(manifest_api_path)},
+        {"sha256", sha256_file(manifest_api_path)},
         {"source", "managed_copy_manifest"},
     });
     ownership.push_back({
@@ -5734,6 +5753,7 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         {"component_id", component_id},
         {"component_version", component_version},
         {"state", "installed_managed"},
+        {"import_mode", "managed_copy"},
         {"active_root", active_root.string()},
         {"artifact_sha256", fingerprint},
         {"installed_at", current_utc_iso()},

@@ -18,6 +18,7 @@
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/installer/setup.hpp"
 #include "arena/domain/uuid.hpp"
+#include "arena/platform/filesystem_path.hpp"
 #include "arena/ports/asset_search_index.hpp"
 
 namespace {
@@ -239,23 +240,29 @@ SetupPaths paths_under(const fs::path& root) {
 fs::path write_lichess_single_profile(const fs::path& root,
                                       const std::string& filename =
                                           "uci_arena_single_game_profile_v1.json") {
-    const fs::path evidence_root = root / "arena" / "results";
+    const fs::path evidence_root = root / "evidence";
     fs::create_directories(evidence_root);
-    std::ofstream(evidence_root / "diagnostic.json", std::ios::binary)
-        << "diagnostic";
-    std::ofstream(evidence_root / "complete-game.json", std::ios::binary)
-        << "complete-game";
+    const fs::path diagnostic_relative =
+        fs::path("evidence") /
+        (std::string(64, 'a') + "-" + std::string(64, 'b') + ".json");
+    const fs::path complete_relative =
+        fs::path("evidence") /
+        (std::string(64, 'c') + "-" + std::string(64, 'd') + ".json");
+    constexpr std::string_view diagnostic_contents = "diagnostic";
+    constexpr std::string_view complete_contents = "complete-game";
+    std::ofstream(root / diagnostic_relative, std::ios::binary)
+        << diagnostic_contents;
+    std::ofstream(root / complete_relative, std::ios::binary)
+        << complete_contents;
     const json diagnostic{
         {"passed", true},
-        {"artifact", "arena/results/diagnostic.json"},
-        {"artifact_sha256",
-         "sha256:5a695eea5b00a31f8aef7dbb89c8f798fab371246ac1549afe84b16420707b99"},
+        {"artifact", diagnostic_relative.generic_string()},
+        {"artifact_sha256", "sha256:" + sha256_text(diagnostic_contents)},
     };
     const json complete{
         {"passed", true},
-        {"artifact", "arena/results/complete-game.json"},
-        {"artifact_sha256",
-         "sha256:405758a289456712858d5ce6161c65529a244312e4ec2c92117cacd26cc60f87"},
+        {"artifact", complete_relative.generic_string()},
+        {"artifact_sha256", "sha256:" + sha256_text(complete_contents)},
     };
     const fs::path profile_path = root / filename;
     std::ofstream(profile_path)
@@ -1870,6 +1877,9 @@ TEST_CASE("Lichess safety profiles preserve qualification and manage the evidenc
             "transport_profile_v2.json",
         },
     };
+    fs::path single_source;
+    fs::path single_managed;
+    std::string single_component_id;
     for (const auto& [kind, schema, filename] : profiles) {
         const fs::path profile_path =
             std::string(kind) == "lichess_single_game_profile"
@@ -1887,11 +1897,20 @@ TEST_CASE("Lichess safety profiles preserve qualification and manage the evidenc
         REQUIRE(imported.at("validation").at("validation") ==
                 "qualified_" + std::string(schema));
         if (std::string(kind) == "lichess_single_game_profile") {
+            single_source = profile_path;
+            single_managed = imported.at("path").get<std::string>();
+            single_component_id =
+                imported.at("receipt").at("component_id").get<std::string>();
             REQUIRE(imported.at("path") != fs::absolute(profile_path).string());
-            REQUIRE(fs::is_regular_file(imported.at("path").get<std::string>()));
+            REQUIRE(fs::is_regular_file(single_managed));
+            REQUIRE(single_managed.parent_path().filename().string().size() == 32);
             REQUIRE(imported.at("validation").at("evidence_files") == 2);
         }
     }
+
+    const json repeated =
+        SetupEngine::import_path(paths, "lichess_single_game_profile", single_source);
+    REQUIRE(repeated.at("path").get<std::string>() == single_managed.string());
 
     const json inventory = SetupEngine::inventory(paths);
     for (const auto& [kind, schema, filename] : profiles) {
@@ -1921,6 +1940,23 @@ TEST_CASE("Lichess safety profiles preserve qualification and manage the evidenc
                .dump(2);
     REQUIRE_THROWS(
         SetupEngine::import_path(paths, "lichess_capacity_profile", legacy));
+
+    const json uninstall_plan =
+        SetupEngine::plan_uninstall(paths, {single_component_id});
+    REQUIRE(uninstall_plan.at("components").at(0).at("remove_active_root") ==
+            false);
+    const json uninstall_result =
+        SetupEngine::uninstall(paths, uninstall_plan, true);
+    REQUIRE(uninstall_result.at("components").at(0).at("data_preserved") ==
+            true);
+    REQUIRE(fs::is_regular_file(
+        arena::platform::filesystem_api_path(single_managed)));
+
+    const json purge_plan = SetupEngine::plan_purge(paths, {single_component_id});
+    REQUIRE(purge_plan.at("blockers").empty());
+    const json purge_result = SetupEngine::purge(paths, purge_plan, true);
+    REQUIRE(purge_result.at("ok") == true);
+    REQUIRE_FALSE(fs::exists(arena::platform::filesystem_api_path(single_managed)));
     fs::remove_all(root);
 }
 
@@ -2018,7 +2054,7 @@ TEST_CASE("Lichess installation is disabled without blocking on onboarding evide
         });
     REQUIRE(still_disabled != ready.at("actions").end());
     REQUIRE(still_disabled->at("enabled") == false);
-    fs::remove_all(root);
+    fs::remove_all(arena::platform::filesystem_api_path(root));
 }
 
 TEST_CASE("managed copy is restricted to small flat opening books") {

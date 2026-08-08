@@ -1,4 +1,5 @@
 #include "arena/application/installer/removal_lifecycle.hpp"
+#include "arena/platform/filesystem_path.hpp"
 
 #include <sodium.h>
 
@@ -31,7 +32,7 @@ namespace fs = std::filesystem;
 bool contains_symbolic_link(const fs::path& value);
 
 json read_json(const fs::path& path) {
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(platform::filesystem_api_path(path), std::ios::binary);
     if (!input) {
         throw std::runtime_error("cannot read JSON file: " + path.string());
     }
@@ -48,14 +49,15 @@ void write_json_atomic(const fs::path& path, const json& value) {
         throw std::runtime_error("atomic JSON parent contains a symbolic link: " +
                                  path.parent_path().string());
     }
-    fs::create_directories(path.parent_path());
+    fs::create_directories(platform::filesystem_api_path(path.parent_path()));
     const fs::path temporary = path.string() + ".tmp";
     if (contains_symbolic_link(temporary)) {
         throw std::runtime_error("atomic JSON staging path contains a symbolic link: " +
                                  temporary.string());
     }
     {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        std::ofstream output(platform::filesystem_api_path(temporary),
+                             std::ios::binary | std::ios::trunc);
         if (!output) {
             throw std::runtime_error("cannot write " + temporary.string());
         }
@@ -66,11 +68,13 @@ void write_json_atomic(const fs::path& path, const json& value) {
         }
     }
     std::error_code error;
-    fs::rename(temporary, path, error);
+    fs::rename(platform::filesystem_api_path(temporary),
+               platform::filesystem_api_path(path), error);
     if (error) {
-        fs::remove(path, error);
+        fs::remove(platform::filesystem_api_path(path), error);
         error.clear();
-        fs::rename(temporary, path, error);
+        fs::rename(platform::filesystem_api_path(temporary),
+                   platform::filesystem_api_path(path), error);
     }
     if (error) {
         throw std::runtime_error("cannot atomically activate " + path.string());
@@ -81,7 +85,7 @@ std::string sha256_file(const fs::path& path) {
     if (sodium_init() < 0) {
         throw std::runtime_error("libsodium initialization failed");
     }
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(platform::filesystem_api_path(path), std::ios::binary);
     if (!input) {
         throw std::runtime_error("cannot hash " + path.string());
     }
@@ -164,7 +168,8 @@ bool contains_symbolic_link(const fs::path& value) {
     std::error_code error;
     for (const auto& part : absolute.relative_path()) {
         current /= part;
-        const fs::file_status status = fs::symlink_status(current, error);
+        const fs::path api_current = platform::filesystem_api_path(current);
+        const fs::file_status status = fs::symlink_status(api_current, error);
         if (error) {
             error.clear();
             continue;
@@ -173,7 +178,7 @@ bool contains_symbolic_link(const fs::path& value) {
             return true;
         }
 #ifdef _WIN32
-        const DWORD attributes = ::GetFileAttributesW(current.c_str());
+        const DWORD attributes = ::GetFileAttributesW(api_current.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES &&
             (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
             return true;
@@ -267,9 +272,10 @@ void remove_managed_component_tree(const fs::path& active_root,
                 component_id);
         }
         std::error_code remove_error;
-        fs::remove_all(active_root, remove_error);
+        fs::remove_all(platform::filesystem_api_path(active_root), remove_error);
         std::error_code exists_error;
-        const bool remains = fs::exists(active_root, exists_error);
+        const bool remains = fs::exists(platform::filesystem_api_path(active_root),
+                                        exists_error);
         if (!remove_error && !exists_error && !remains) {
             return;
         }
@@ -305,7 +311,8 @@ bool protected_lifecycle_path(const SetupPaths& paths, const fs::path& candidate
 
 bool tree_contains_symbolic_link(const fs::path& root) {
     std::error_code error;
-    fs::recursive_directory_iterator iterator(root, error);
+    fs::recursive_directory_iterator iterator(
+        platform::filesystem_api_path(root), error);
     const fs::recursive_directory_iterator end;
     if (error) {
         throw std::runtime_error("cannot inspect purge directory: " +
@@ -635,7 +642,7 @@ json RemovalLifecycle::plan_uninstall(
     for (const auto& id : ordered) {
         const fs::path receipt_path =
             paths.data_root / "receipts" / (id + ".json");
-        if (!fs::is_regular_file(receipt_path)) {
+        if (!fs::is_regular_file(platform::filesystem_api_path(receipt_path))) {
             continue;
         }
         if (contains_symbolic_link(receipt_path)) {
@@ -748,7 +755,7 @@ json RemovalLifecycle::uninstall(const SetupPaths& paths, const json& plan,
             throw std::runtime_error(
                 "uninstall plan receipt path is outside its contract: " + id);
         }
-        if (!fs::is_regular_file(receipt_path)) {
+        if (!fs::is_regular_file(platform::filesystem_api_path(receipt_path))) {
             results.push_back(
                 {{"component_id", id}, {"state", "not_installed"}});
             continue;
@@ -816,9 +823,13 @@ json RemovalLifecycle::uninstall(const SetupPaths& paths, const json& plan,
             std::error_code error;
             if (strictly_within(paths.install_root / "components",
                                 component_directory) &&
-                fs::is_directory(component_directory, error) && !error &&
-                fs::is_empty(component_directory, error) && !error) {
-                fs::remove(component_directory, error);
+                fs::is_directory(platform::filesystem_api_path(component_directory),
+                                 error) &&
+                !error &&
+                fs::is_empty(platform::filesystem_api_path(component_directory),
+                             error) &&
+                !error) {
+                fs::remove(platform::filesystem_api_path(component_directory), error);
             }
             if (error) {
                 throw std::runtime_error(
@@ -829,7 +840,8 @@ json RemovalLifecycle::uninstall(const SetupPaths& paths, const json& plan,
         evidence["uninstalled_at"] = current_utc_iso();
         write_json_atomic(evidence_path, evidence);
         std::error_code receipt_error;
-        if (!fs::remove(receipt_path, receipt_error) || receipt_error) {
+        if (!fs::remove(platform::filesystem_api_path(receipt_path), receipt_error) ||
+            receipt_error) {
             throw std::runtime_error("cannot remove component receipt for " + id);
         }
         json result{{"component_id", id},
@@ -894,7 +906,7 @@ json RemovalLifecycle::plan_purge(
         }
         const fs::path receipt_path =
             paths.data_root / "receipts" / (id + ".json");
-        if (fs::exists(receipt_path)) {
+        if (fs::exists(platform::filesystem_api_path(receipt_path))) {
             blockers.push_back(
                 {{"component_id", id}, {"reason", "component_is_installed"}});
             continue;
@@ -972,7 +984,7 @@ json RemovalLifecycle::plan_purge(
             }
             if ((purge_policy == "explicit_recursive" ||
                  purge_policy == "empty_only") &&
-                fs::is_directory(candidate) &&
+                fs::is_directory(platform::filesystem_api_path(candidate)) &&
                 tree_contains_symbolic_link(candidate)) {
                 invalid_entry = true;
                 break;
@@ -1069,13 +1081,13 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
             component.at("component_id").get<std::string>();
         const fs::path installed_receipt =
             paths.data_root / "receipts" / (id + ".json");
-        if (fs::exists(installed_receipt)) {
+        if (fs::exists(platform::filesystem_api_path(installed_receipt))) {
             throw std::runtime_error("cannot purge an installed component: " + id);
         }
         const fs::path evidence_path = normalized_absolute(
             component.at("evidence_path").get<std::string>());
         if (!strictly_within(preservation_root(paths), evidence_path) ||
-            !fs::is_regular_file(evidence_path) ||
+            !fs::is_regular_file(platform::filesystem_api_path(evidence_path)) ||
             contains_symbolic_link(evidence_path) ||
             sha256_file(evidence_path) !=
                 component.at("evidence_sha256").get<std::string>()) {
@@ -1107,14 +1119,16 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                 const std::string policy =
                     operation.at("purge").get<std::string>();
                 std::error_code error;
-                if (!fs::exists(candidate, error)) {
+                const fs::path api_candidate =
+                    platform::filesystem_api_path(candidate);
+                if (!fs::exists(api_candidate, error)) {
                     if (error) {
                         throw std::runtime_error(
                             "cannot inspect purge target: " + error.message());
                     }
                     result["state"] = "already_absent";
                 } else if (policy == "exact_identity") {
-                    const bool regular_file = fs::is_regular_file(candidate, error);
+                    const bool regular_file = fs::is_regular_file(api_candidate, error);
                     if (error) {
                         throw std::runtime_error(
                             "cannot inspect exact-identity purge target: " +
@@ -1132,7 +1146,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                     } else {
                         const auto expected_size =
                             operation.at("size_bytes").get<std::uint64_t>();
-                        const auto current_size = fs::file_size(candidate, error);
+                        const auto current_size = fs::file_size(api_candidate, error);
                         if (error) {
                             throw std::runtime_error(
                                 "cannot inspect exact-identity purge target size: " +
@@ -1145,7 +1159,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                             result["reason"] =
                                 "current_identity_no_longer_matches_receipt";
                             preserved_file = true;
-                        } else if (!fs::remove(candidate, error) || error) {
+                        } else if (!fs::remove(api_candidate, error) || error) {
                             throw std::runtime_error(
                                 "cannot remove exact-identity purge target");
                         } else {
@@ -1153,7 +1167,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                         }
                     }
                 } else if (policy == "explicit_recursive") {
-                    const bool directory = fs::is_directory(candidate, error);
+                    const bool directory = fs::is_directory(api_candidate, error);
                     if (error) {
                         throw std::runtime_error(
                             "cannot inspect recursive purge target: " +
@@ -1167,7 +1181,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                         throw std::runtime_error(
                             "recursive purge target contains a symbolic link");
                     } else {
-                        fs::remove_all(candidate, error);
+                        fs::remove_all(api_candidate, error);
                         if (error) {
                             throw std::runtime_error(
                                 "cannot remove recursive purge target: " +
@@ -1176,7 +1190,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                         result["state"] = "removed";
                     }
                 } else if (policy == "empty_only") {
-                    const bool directory = fs::is_directory(candidate, error);
+                    const bool directory = fs::is_directory(api_candidate, error);
                     if (error) {
                         throw std::runtime_error(
                             "cannot inspect empty-only purge target: " +
@@ -1188,7 +1202,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                             "current_type_no_longer_matches_receipt";
                         preserved_file = true;
                     } else {
-                        const bool empty = fs::is_empty(candidate, error);
+                        const bool empty = fs::is_empty(api_candidate, error);
                         if (error) {
                             throw std::runtime_error(
                                 "cannot inspect empty-only purge target contents: " +
@@ -1198,7 +1212,7 @@ json RemovalLifecycle::purge(const SetupPaths& paths, const json& plan,
                             result["state"] = "preserved_nonempty";
                             result["reason"] = "directory_is_not_empty";
                             preserved_file = true;
-                        } else if (!fs::remove(candidate, error) || error) {
+                        } else if (!fs::remove(api_candidate, error) || error) {
                             throw std::runtime_error(
                                 "cannot remove empty purge target");
                         } else {

@@ -1263,6 +1263,13 @@ local_import:
       directory and bounded ancestors of the explicitly selected profile; an
       unsafe, ambiguous, missing, oversized, or hash-mismatched closure is
       rejected before activation.
+    - Managed Lichess profile staging and active roots use bounded internal
+      directory identifiers rather than embedding complete digests in path
+      names. Full content identity remains in the manifest and receipt, and an
+      existing shortened root is reused only after its complete manifest and
+      payload identity validate. Valid content-addressed evidence filenames
+      must not fail merely because the Manager data root is a normal Windows
+      path.
     - Lichess capacity and transport profiles remain qualified in-place
       references and are never copied or rewritten. The capacity profile must
       bind the exact selected single-game profile digest.
@@ -1403,6 +1410,12 @@ transaction:
         declared by receipt or preservation evidence. Configured root equality,
         symbolic-link traversal, external ownership, and unknown ownership are
         never deletion authority.
+      - Platform filesystem adapters apply the same supported path semantics to
+        staging, validation, identity checks, uninstall, and purge. Stored plans,
+        receipts, preservation evidence, and logs retain normalized operator paths;
+        platform API prefixes are syscall-only and never become ownership evidence.
+        A path accepted during managed activation must remain inspectable and
+        removable by a later ownership-authorized purge.
       - Digest-owned managed files are removed only when their current size and
         SHA-256 still match ownership evidence. Modified files are preserved and
         reported as modified_managed_file; absence is an idempotent skip.
@@ -1652,9 +1665,14 @@ transaction:
         search-core-specific timing gate passes. An explicit false remains
         false, malformed permissions fail closed, and adaptive-play authority
         is never inferred.
-      - Lichess activation fails closed before credential access when timing,
-        single-game, capacity, or transport evidence is missing, incomplete,
-        or incompatible with the exact installed engine/model identity.
+      - Lichess configuration activation follows the provider-declared required
+        and optional locator bindings. Missing optional timing evidence retains
+        conservative foreground search and disables opponent-turn work; missing,
+        invalid, incompatible, or unqualified transport evidence selects the
+        provider-owned 650 millisecond bootstrap reserve. Provided evidence is
+        never weakened or rewritten, and the provider remains authoritative for
+        the exact qualification required by a selected live-play mode before it
+        accesses credentials.
       - Runtime verification requires opening_book_active and syzygy_active,
         not merely the presence of saved locators.
       - Protected live acceptance requires the selected timing profile to be

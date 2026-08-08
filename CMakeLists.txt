@@ -57,6 +57,7 @@ target_link_libraries(
 if(WIN32)
   target_sources(arena_installer_core PRIVATE
     src/platform/windows/asset_search_index.cpp
+    src/platform/windows/filesystem_path.cpp
     src/platform/windows/process_platform.cpp
     src/platform/windows/service_control.cpp
     src/platform/windows/workspace_permissions.cpp
@@ -66,6 +67,7 @@ if(WIN32)
 else()
   target_sources(arena_installer_core PRIVATE
     src/platform/linux/asset_search_index.cpp
+    src/platform/linux/filesystem_path.cpp
     src/platform/linux/process_platform.cpp
     src/platform/linux/service_control.cpp
     src/platform/linux/workspace_permissions.cpp

@@ -6,6 +6,9 @@ Required scenarios:
 
 - clean and repeated clean install;
 - spaces, Unicode, long paths, trailing separators, and unrelated working directory;
+- managed Lichess evidence with content-addressed filenames beyond the legacy
+  Windows path limit, including staged validation, repeated import, normal
+  uninstall preservation, exact-identity purge, and final directory cleanup;
 - valid upgrade, invalid downgrade, repair, reinstall, replacement, uninstall,
   and separately planned purge;
 - missing or corrupt payload and invalid manifest;
