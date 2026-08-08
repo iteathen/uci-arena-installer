@@ -12,11 +12,43 @@ import test from "node:test";
 
 import {
   cleanBuildArtifactNames,
+  renameWithTransientRetry,
   resolveNpmInvocation,
   selectLockedComponents,
   transactionalOutput,
   validateWindowsLauncherExecutable,
 } from "./clean-build.mjs";
+
+test("clean build retries transient Windows rename contention with bounded backoff", () => {
+  const waits = [];
+  let calls = 0;
+  renameWithTransientRetry("staged", "published", {
+    attempts: 4,
+    rename: () => {
+      calls += 1;
+      if (calls < 3) {
+        const error = new Error("synthetic scanner contention");
+        error.code = "EPERM";
+        throw error;
+      }
+    },
+    wait: (milliseconds) => waits.push(milliseconds),
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(waits, [50, 100]);
+
+  let nonTransientCalls = 0;
+  assert.throws(() => renameWithTransientRetry("staged", "published", {
+    rename: () => {
+      nonTransientCalls += 1;
+      const error = new Error("synthetic invalid target");
+      error.code = "EINVAL";
+      throw error;
+    },
+    wait: () => assert.fail("non-transient errors must not be delayed"),
+  }), /synthetic invalid target/u);
+  assert.equal(nonTransientCalls, 1);
+});
 
 test("clean build invokes npm through Node on Windows without shell parsing", () => {
   const node = String.raw`C:\Program Files\nodejs\node.exe`;

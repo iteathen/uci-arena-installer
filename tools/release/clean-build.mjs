@@ -39,6 +39,28 @@ import { buildSuiteCatalog } from "./suite-catalog.mjs";
 
 const REPOSITORY = "iteathen/uci-arena-installer";
 const repositoryRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const TRANSIENT_RENAME_ERROR_CODES = new Set(["EACCES", "EBUSY", "EPERM"]);
+
+function waitSynchronously(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+export function renameWithTransientRetry(source, destination, {
+  rename = renameSync,
+  wait = waitSynchronously,
+  attempts = 12,
+} = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      rename(source, destination);
+      return;
+    } catch (error) {
+      const retryable = TRANSIENT_RENAME_ERROR_CODES.has(error?.code);
+      if (!retryable || attempt + 1 >= attempts) throw error;
+      wait(Math.min(50 * (2 ** attempt), 500));
+    }
+  }
+}
 
 function readJson(filename, label) {
   try {
@@ -568,13 +590,15 @@ export function transactionalOutput(outputRoot, producer) {
   try {
     const result = producer({ transactionRoot: transaction, publishRoot: publish, workRoot: work });
     const hadPrevious = existsSync(output);
-    if (hadPrevious) renameSync(output, previous);
+    if (hadPrevious) renameWithTransientRetry(output, previous);
     try {
-      renameSync(publish, output);
+      renameWithTransientRetry(publish, output);
       if (hadPrevious) rmSync(previous, { recursive: true, force: true });
     } catch (error) {
       if (existsSync(output)) rmSync(output, { recursive: true, force: true });
-      if (hadPrevious && existsSync(previous)) renameSync(previous, output);
+      if (hadPrevious && existsSync(previous)) {
+        renameWithTransientRetry(previous, output);
+      }
       throw error;
     }
     return result;
