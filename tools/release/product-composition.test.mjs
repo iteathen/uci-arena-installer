@@ -11,13 +11,13 @@ import {
 
 const root = path.resolve(import.meta.dirname, "../..");
 const composition = JSON.parse(readFileSync(
-  path.join(root, "compositions", "complete-arena-0.3.10.json"),
+  path.join(root, "compositions", "complete-arena-0.3.11.json"),
   "utf8",
 ));
 
 test("complete composition declares independently versioned suite bricks", () => {
   const validated = validateProductComposition(composition);
-  assert.equal(validated.product_release, "0.3.10");
+  assert.equal(validated.product_release, "0.3.11");
   assert.equal(validated.installer.repository, "iteathen/uci-arena-installer");
   assert.deepEqual(
     new Set(validated.components.map((component) => component.repository)),

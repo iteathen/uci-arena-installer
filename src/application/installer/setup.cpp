@@ -3614,6 +3614,35 @@ std::optional<fs::path> saved_locator_path(const fs::path& data_root, const std:
     return path;
 }
 
+std::optional<fs::path> provider_locator_path(const SetupPaths& paths,
+                                              const std::string& kind,
+                                              std::optional<json>& discovery_cache) {
+    try {
+        if (const auto saved = saved_locator_path(paths.data_root, kind);
+            saved.has_value()) {
+            return saved;
+        }
+    } catch (const std::exception&) {
+        // Retained locator evidence is not authority. A broken optional
+        // selection remains visible in inventory while a verified managed
+        // knowledge receipt may provide a safe fallback.
+    }
+
+    if (!discovery_cache.has_value()) {
+        discovery_cache = discovery_rows(paths, {}, nullptr);
+    }
+    const json& selected = discovery_cache->at(kind).at("selection");
+    if (selected.value("source", "") != "install_receipt" ||
+        selected.value("state", "") != "installed_managed" ||
+        !selected.contains("path") || !selected.at("path").is_string()) {
+        return std::nullopt;
+    }
+    const fs::path path =
+        normalized_absolute(selected.at("path").get<std::string>());
+    static_cast<void>(validate_import_locator(kind, path));
+    return path;
+}
+
 struct ProviderInstallResult {
     json configuration;
     json generated_documents;
@@ -3661,11 +3690,12 @@ ProviderInstallResult render_provider_installation(
     }
 
     json locators = json::object();
+    std::optional<json> discovery_cache;
     for (const auto& binding : integration.at("locator_bindings")) {
         const std::string name = binding.at("name").get<std::string>();
         const std::string kind = binding.at("kind").get<std::string>();
         try {
-            const auto selected = saved_locator_path(paths.data_root, kind);
+            const auto selected = provider_locator_path(paths, kind, discovery_cache);
             if (selected.has_value()) {
                 locators[name] = selected->string();
             } else if (binding.at("required").get<bool>()) {
@@ -5348,8 +5378,6 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                         journal["actions"].back()["created_knowledge_locators"] =
                             created_locators;
                         write_json_atomic(journal_path, journal);
-                    } else {
-                        static_cast<void>(saved_locator_path(paths.data_root, locator_kind));
                     }
                 }
                 journal["actions"].back()["state"] = "knowledge_activated";

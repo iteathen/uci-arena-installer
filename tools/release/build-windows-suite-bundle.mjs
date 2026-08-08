@@ -228,7 +228,7 @@ export function buildWindowsSuiteBundleSource(options) {
       : `--metadata-dir ${quoted("[WixBundleExecutePackageCacheFolder]release\\tuf")}`,
   ].filter(Boolean).join(" ");
   const transport = options.offline ? " --offline" : "";
-  const install = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].install.json")} apply --yes${transport} ${featureArguments}`;
+  const install = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].install.json")} upgrade --yes${transport} ${featureArguments}`;
   const repair = `${global}${restart} --result-file ${quoted("[WixBundleLog_SuiteComponents].repair.json")} repair --yes${transport} ${featureArguments}`;
   const uninstall = [
     `--install-scope ${options.scope}`,

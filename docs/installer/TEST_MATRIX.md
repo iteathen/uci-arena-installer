@@ -96,21 +96,25 @@ Required scenarios:
   exclusion, and All-users LocalService registration;
 - catalog/policy feature mismatch and secret-bearing suite-media rejection;
 - WiX compilation of both fixed-scope suite bundles with default-on persisted
-  Modify controls, explicit apply/repair operations, and normal uninstall with
-  no purge path;
+  Modify controls, explicit upgrade/repair operations, and normal uninstall
+  with no purge path; the upgrade operation restages and adopts every selected
+  receipt before related-bundle removal;
 - a distinct default-on standard opening-book control and offline-only
-  `--offline` apply/repair arguments with no transport flag on uninstall;
+  `--offline` upgrade/repair arguments with no transport flag on uninstall;
 - Personal delegation without elevation;
 - execution of each final scope-neutral Windows envelope through bounded,
   non-interactive `--validate-envelope` before publication, including complete
   embedded-payload hashing without installed-scope planning, elevation, or use
   of the default thread stack for payload buffers;
 - exact fixed-scope Burn command lines place transport options after their
-  owning apply/repair subcommand and keep uninstall transport-neutral;
+  owning upgrade/repair subcommand and keep uninstall transport-neutral;
 - All-users delegation to the elevation-requiring machine bundle;
 - deterministic online and offline launcher envelopes, exact embedded bundle
   digests, corrupt-envelope rejection, and temporary-child cleanup;
 - installed-scope maintenance and explicit cross-scope block;
+- retained stale optional locators remain visible but cannot block component
+  repair; a validated installer-managed knowledge receipt is the provider
+  fallback until the operator selects another external asset;
 - one startup owner with no duplicate Manager, Book Forge, Evidence, or Lichess daemon;
 - replaceable provider service contracts with independent operation-catalog
   schema names, exact receipt digests, unknown-major rejection, and tamper

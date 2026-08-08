@@ -1097,7 +1097,20 @@ TEST_CASE("inventory reports actionable missing and present knowledge assets") {
 
 TEST_CASE("file-set tablebases verify every file before atomic activation") {
     const fs::path root = temporary_directory();
+    const fs::path retired_syzygy = root / "retired-syzygy";
     SetupPaths paths = paths_under(root);
+    const fs::path locator_path = paths.data_root / "locators" / "syzygy.json";
+    fs::create_directories(locator_path.parent_path());
+    std::ofstream(locator_path)
+        << json{
+               {"schema", "arena_saved_locator_v1"},
+               {"schema_version", 1},
+               {"kind", "syzygy"},
+               {"mode", "in_place_reference"},
+               {"path", retired_syzygy.string()},
+               {"validation", json::object()},
+           }
+               .dump(2);
     paths.bundle_owner = "{11111111-1111-1111-1111-111111111111}";
     constexpr const char* component_id = "replacement.tables";
     const std::string manifest =
@@ -1131,15 +1144,15 @@ TEST_CASE("file-set tablebases verify every file before atomic activation") {
     REQUIRE(inventory.at("knowledge").at("syzygy").at("state") == "installed_managed");
     REQUIRE(inventory.at("knowledge").at("syzygy").at("managed_components") ==
             json::array({component_id}));
+    REQUIRE(inventory.at("discovery").at("syzygy").at("selection").at("source") ==
+            "install_receipt");
     REQUIRE(fs::is_regular_file(paths.knowledge_root / "tablebases" / "KQvK.rtbw"));
     REQUIRE(fs::file_size(paths.knowledge_root / "tablebases" / "KQvK.rtbw") == 11);
-    const fs::path locator_path = paths.data_root / "locators" / "syzygy.json";
     REQUIRE(fs::is_regular_file(locator_path));
     std::ifstream locator_stream(locator_path, std::ios::binary);
     const json locator = json::parse(locator_stream);
     REQUIRE(locator.at("kind") == "syzygy");
-    REQUIRE(fs::path(locator.at("path").get<std::string>()) ==
-            fs::absolute(paths.knowledge_root / "tablebases").lexically_normal());
+    REQUIRE(fs::path(locator.at("path").get<std::string>()) == retired_syzygy);
     locator_stream.close();
     const json verified = SetupEngine::verify(paths);
     INFO(verified.dump(2));
@@ -1196,6 +1209,7 @@ TEST_CASE("later failure restores prior knowledge and removes activation authori
         R"({"schema":"arena_syzygy_file_set_manifest_v1","schema_version":1,"component_id":"replacement.tables","component_version":"1.0.0","total_size_bytes":11,"files":[{"path":"KQvK.rtbw","piece_count":3,"size_bytes":11,"sha256":"b905c2469583111c5d8dc8057dc426fcf74f17ec72adade00d8d7c80443b6d2f","sources":["KQvK.rtbw"]}]})";
     std::ofstream(root / "KQvK.rtbw", std::ios::binary) << "wdl-fixture";
     std::ofstream(root / "syzygy.file-set.json", std::ios::binary) << manifest;
+
     const json plan{
         {"schema", "arena_install_plan_v1"},
         {"blockers", json::array()},
@@ -1742,6 +1756,53 @@ TEST_CASE("explicit saved knowledge selection does not erase installed authority
     fs::remove_all(root);
 }
 
+TEST_CASE("stale optional locator falls back to validated managed knowledge") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path source = root / "managed-book";
+    fs::create_directories(source);
+    std::ofstream(source / "book.bin") << "managed knowledge";
+    const json managed =
+        SetupEngine::import_path(paths, "opening_book", source, true);
+    const fs::path managed_root = managed.at("path").get<std::string>();
+
+    const fs::path locator_path = paths.data_root / "locators" / "opening_book.json";
+    json stale_locator = json::parse(std::ifstream(locator_path));
+    stale_locator["path"] = (root / "retired-book.bin").string();
+    std::ofstream(locator_path, std::ios::binary | std::ios::trunc)
+        << stale_locator.dump(2);
+
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.book.consumer", "opening_book");
+    const json locators{{"selected", managed_root.string()}};
+    std::ofstream(configuration, std::ios::binary | std::ios::trunc)
+        << json{{"schema", "replaceable_provider_configuration_v1"},
+                {"enabled", false},
+                {"bindings", json::object()},
+                {"locators", locators}}
+               .dump(2);
+    const fs::path generated =
+        configuration.parent_path() / "generated" / "context-projection.json";
+    fs::create_directories(generated.parent_path());
+    std::ofstream(generated, std::ios::binary)
+        << json{{"schema", "replaceable_provider_projection_v1"},
+                {"locators", locators}}
+               .dump(2);
+
+    const json verified = SetupEngine::verify(paths);
+    INFO(verified.dump(2));
+    REQUIRE(verified.at("ok") == true);
+    const json inventory = SetupEngine::inventory(paths);
+    REQUIRE(inventory.at("discovery")
+                .at("opening_book")
+                .at("selection")
+                .at("source") == "install_receipt");
+    REQUIRE(fs::is_regular_file(locator_path));
+    REQUIRE(json::parse(std::ifstream(locator_path)).at("path") ==
+            stale_locator.at("path"));
+    fs::remove_all(root);
+}
+
 TEST_CASE("component names do not grant knowledge activation authority") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -2279,6 +2340,10 @@ TEST_CASE("managed copy is restricted to small flat opening books") {
     REQUIRE(inventory.at("knowledge").at("opening_book").at("state") ==
             "installed_managed");
     const fs::path managed_root = imported.at("path").get<std::string>();
+    const fs::path locator_path = paths.data_root / "locators" / "opening_book.json";
+    REQUIRE(fs::is_regular_file(locator_path));
+    REQUIRE(fs::path(json::parse(std::ifstream(locator_path)).at("path").get<std::string>()) ==
+            managed_root);
     const std::string managed_id =
         imported.at("receipt").at("component_id").get<std::string>();
     const json uninstall_plan =

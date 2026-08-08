@@ -119,7 +119,7 @@ test("suite bundle derives default-on Modify features and lifecycle commands fro
     for (const component of features) {
       assert.match(source, new RegExp(`--bundle-feature ${component.replaceAll(".", "\\.")}=\\[Install`, "u"));
     }
-    assert.match(source, /apply --yes/u);
+    assert.match(source, /upgrade --yes/u);
     assert.match(source, /repair --yes/u);
     assert.match(source, /uninstall --all --yes/u);
     assert.doesNotMatch(source, /purge/u);
@@ -133,11 +133,11 @@ test("suite bundle derives default-on Modify features and lifecycle commands fro
       offline: true,
     });
     assert.equal(offline.source.match(/--offline/gu)?.length, 2);
-    assert.match(offline.source, /InstallArguments="[^"]*apply --yes --offline /u);
+    assert.match(offline.source, /InstallArguments="[^"]*upgrade --yes --offline /u);
     assert.match(offline.source, /RepairArguments="[^"]*repair --yes --offline /u);
     assert.doesNotMatch(
       offline.source,
-      /(?:InstallArguments|RepairArguments)="[^"]*--offline[^"]*(?:apply|repair) /u,
+      /(?:InstallArguments|RepairArguments)="[^"]*--offline[^"]*(?:upgrade|repair) /u,
     );
     assert.match(offline.source, /Name="UCI Arena Suite Setup \(Personal\) Offline"/u);
     assert.doesNotMatch(source, /--offline/u);
