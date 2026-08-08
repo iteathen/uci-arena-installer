@@ -4,7 +4,7 @@
   "release_ready": false,
   "composition": {
     "manifest_name": "complete-arena-0.3.9.json",
-    "sha256": "a09e499f3f41411b14bdc17650929d79f768c05cd70684305f4c600263778cb1"
+    "sha256": "35db240755a18eeefdcac0fdad44f0a352c352d6423b73d27dbfa2cb6de1a9ba"
   },
   "providers": {
     "manager": {
