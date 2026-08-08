@@ -1,0 +1,53 @@
+schema: uci_arena_jules_api_task_manifest_v1
+task_id: manager-70-verified-launch-identity
+state: prepared_not_launched
+launch_after:
+  - evidence_20_catalog_integration_terminal_and_reviewed
+transport: jules_rest_api
+source:
+  repository: iteathen/uci-arena-manager
+  branch: agent/bind-verified-uci-launch-identity
+  expected_sha: 683d7ae20a161d0b40d176d82173a87a961c77ea
+  base_branch: agent/bound-uci-probe-wire-framing
+  base_pr: 80
+  issue: 70
+scope:
+  owner: native_process_verified_launch_identity
+  permitted_paths:
+    - include/arena/ports/native_process.hpp
+    - src/platform/linux/process_platform.cpp
+    - src/platform/windows/process_platform.cpp
+    - src/adapters/uci_process.cpp
+    - include/arena/adapters/uci_process.hpp
+    - src/application/engine_onboarding.cpp
+    - include/arena/application/engine_onboarding.hpp
+    - tests/mocks/mock_uci_engine.cpp
+    - tests/integration/*uci*.cpp
+    - tests/integration/*process*.cpp
+    - tests/unit/*uci*.cpp
+    - specs/*uci*.yaml
+    - specs/index.yaml
+    - CMakeLists.txt
+  forbidden:
+    - uci_option_grammar_changes
+    - raw_wire_framing_semantic_changes
+    - storage_or_localauth
+    - installer_or_provider_source_changes
+    - path_hash_then_path_launch_identity_claim
+requirements:
+  - uci_probe_fingerprint_from_exact_launched_object
+  - absolute_bounded_executable_working_directory_arguments_and_timeout
+  - no_follow_ancestor_final_object_admission
+  - linux_descriptor_hash_and_fexecve_or_execveat_same_object
+  - linux_enforceable_mutation_prevention_or_fail_closed_unsupported
+  - linux_working_directory_descriptor_and_child_error_handshake
+  - windows_reparse_safe_file_and_directory_handles
+  - windows_deny_write_delete_share_through_launch
+  - windows_process_image_identity_matches_verified_handle
+  - exact_cleanup_of_handles_descriptors_jobs_pipes_children_and_leases
+  - deterministic_replacement_and_mutation_race_tests
+  - receipt_digest_equality_without_substituting_runtime_identity
+control:
+  require_plan_approval: true
+  automation_mode: AUTO_CREATE_PR
+  task_body: docs/audits/jules-workbenches/manager-70-verified-launch-task.md
