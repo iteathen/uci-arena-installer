@@ -240,19 +240,22 @@ SetupPaths paths_under(const fs::path& root) {
 fs::path write_lichess_single_profile(const fs::path& root,
                                       const std::string& filename =
                                           "uci_arena_single_game_profile_v1.json") {
-    const fs::path evidence_root = root / "evidence";
-    fs::create_directories(evidence_root);
-    const fs::path diagnostic_relative =
+    const fs::path evidence_root =
+        root / "evidence" /
+        (std::string(64, 'a') + "-" + std::string(64, 'b'));
+    fs::create_directories(arena::platform::filesystem_api_path(evidence_root));
+    const fs::path evidence_relative =
         fs::path("evidence") /
-        (std::string(64, 'a') + "-" + std::string(64, 'b') + ".json");
-    const fs::path complete_relative =
-        fs::path("evidence") /
-        (std::string(64, 'c') + "-" + std::string(64, 'd') + ".json");
+        (std::string(64, 'a') + "-" + std::string(64, 'b'));
+    const fs::path diagnostic_relative = evidence_relative / "time-profile.json";
+    const fs::path complete_relative = evidence_relative / "complete-game.json";
     constexpr std::string_view diagnostic_contents = "diagnostic";
     constexpr std::string_view complete_contents = "complete-game";
-    std::ofstream(root / diagnostic_relative, std::ios::binary)
+    std::ofstream(arena::platform::filesystem_api_path(root / diagnostic_relative),
+                  std::ios::binary)
         << diagnostic_contents;
-    std::ofstream(root / complete_relative, std::ios::binary)
+    std::ofstream(arena::platform::filesystem_api_path(root / complete_relative),
+                  std::ios::binary)
         << complete_contents;
     const json diagnostic{
         {"passed", true},
@@ -265,7 +268,7 @@ fs::path write_lichess_single_profile(const fs::path& root,
         {"artifact_sha256", "sha256:" + sha256_text(complete_contents)},
     };
     const fs::path profile_path = root / filename;
-    std::ofstream(profile_path)
+    std::ofstream(arena::platform::filesystem_api_path(profile_path))
         << json{
                {"schema", "uci_arena_single_game_profile_v1"},
                {"qualified", true},
@@ -1957,7 +1960,48 @@ TEST_CASE("Lichess safety profiles preserve qualification and manage the evidenc
     const json purge_result = SetupEngine::purge(paths, purge_plan, true);
     REQUIRE(purge_result.at("ok") == true);
     REQUIRE_FALSE(fs::exists(arena::platform::filesystem_api_path(single_managed)));
-    fs::remove_all(root);
+    fs::remove_all(arena::platform::filesystem_api_path(root));
+}
+
+TEST_CASE("Lichess profile import supports the publisher closure beyond legacy path limits") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root / "UCI Arena Manager");
+    const fs::path source_root = root / std::string(96, 'p');
+    const fs::path profile = write_lichess_single_profile(source_root);
+    const fs::path complete_game =
+        source_root / "evidence" /
+        (std::string(64, 'a') + "-" + std::string(64, 'b')) /
+        "complete-game.json";
+#ifdef _WIN32
+    REQUIRE(complete_game.native().size() > 260);
+#endif
+
+    const json imported =
+        SetupEngine::import_path(paths, "lichess_single_game_profile", profile);
+    REQUIRE(imported.at("mode") == "managed_copy");
+    REQUIRE(imported.at("validation").at("evidence_files") == 2);
+    REQUIRE(imported.at("receipt").at("activated_files").empty());
+    const fs::path managed = imported.at("path").get<std::string>();
+    REQUIRE(fs::is_regular_file(arena::platform::filesystem_api_path(managed)));
+    REQUIRE(SetupEngine::verify(paths).at("ok") == true);
+
+    json conflicting;
+    std::ifstream(arena::platform::filesystem_api_path(profile)) >> conflicting;
+    conflicting["evidence"]["deadline"]["artifact_sha256"] =
+        "sha256:" + std::string(64, '0');
+    const fs::path conflicting_profile = source_root / "conflicting-profile.json";
+    std::ofstream(arena::platform::filesystem_api_path(conflicting_profile))
+        << conflicting.dump(2);
+    REQUIRE_THROWS(SetupEngine::import_path(
+        paths, "lichess_single_game_profile", conflicting_profile));
+    const json inventory = SetupEngine::inventory(paths);
+    REQUIRE(inventory.at("discovery")
+                .at("lichess_single_game_profile")
+                .at("selection")
+                .at("path") == managed.string());
+    REQUIRE(SetupEngine::verify(paths).at("ok") == true);
+
+    fs::remove_all(arena::platform::filesystem_api_path(root));
 }
 
 TEST_CASE("Lichess installation is disabled without blocking on onboarding evidence") {

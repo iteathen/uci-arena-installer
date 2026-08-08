@@ -154,7 +154,8 @@ bool contains_symbolic_link(const fs::path& value) {
     std::error_code error;
     for (const auto& part : absolute.relative_path()) {
         current /= part;
-        const fs::file_status status = fs::symlink_status(current, error);
+        const fs::file_status status =
+            fs::symlink_status(platform::filesystem_api_path(current), error);
         if (error) {
             error.clear();
             continue;
@@ -1530,14 +1531,15 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
     validate_provider_installer_integration(manifest, listed_files);
     validate_component_discovery(manifest, listed_files);
     validate_component_activation(manifest, listed_files);
-    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+    const fs::path api_root = platform::filesystem_api_path(root);
+    for (const auto& entry : fs::recursive_directory_iterator(api_root)) {
         if (entry.is_symlink()) {
             throw std::runtime_error("component payload contains a symbolic link");
         }
         if (!entry.is_regular_file()) {
             continue;
         }
-        const fs::path relative = fs::relative(entry.path(), root).lexically_normal();
+        const fs::path relative = fs::relative(entry.path(), api_root).lexically_normal();
         if (relative != fs::path("arena-component.json") && !listed_files.contains(relative)) {
             throw std::runtime_error("component payload contains an unlisted file: " +
                                      relative.generic_string());
@@ -2352,9 +2354,8 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             const json activated_resources =
                 expected_receipt_knowledge_resources(active_root, manifest, paths, receipt);
             if (receipt.value("activated_resources", json::array()) != activated_resources ||
-                (!activated_resources.empty() &&
-                 receipt.value("activated_files", json::array()) !=
-                     flattened_activated_files(activated_resources))) {
+                receipt.value("activated_files", json::array()) !=
+                    flattened_activated_files(activated_resources)) {
                 throw std::runtime_error(
                     "receipt knowledge activation evidence does not match the manifest");
             }
@@ -3185,13 +3186,15 @@ std::vector<ManagedProfileFile> lichess_single_game_profile_files(const fs::path
     static constexpr std::array<std::string_view, 5> required_evidence{
         "cursor_correctness", "provider_parity", "deadline", "topology", "complete_game"};
     std::vector<ManagedProfileFile> files;
-    const auto profile_size = static_cast<std::uint64_t>(fs::file_size(profile_path));
+    const auto profile_size = static_cast<std::uint64_t>(
+        fs::file_size(platform::filesystem_api_path(profile_path)));
     if (profile_size == 0 || profile_size > managed_profile_max_bytes) {
         throw std::runtime_error("Lichess single-game profile exceeds the managed closure limit");
     }
     files.push_back({profile_path, profile_path.filename(), profile_size,
                      sha256_file(profile_path)});
-    std::set<std::string> relative_paths{profile_path.filename().generic_string()};
+    std::map<std::string, std::string> relative_digests{
+        {profile_path.filename().generic_string(), "sha256:" + files.front().sha256}};
     std::uint64_t total = profile_size;
 
     for (const auto name : required_evidence) {
@@ -3217,19 +3220,44 @@ std::vector<ManagedProfileFile> lichess_single_game_profile_files(const fs::path
             throw std::runtime_error("Lichess single-game profile evidence " +
                                      std::string(name) + " has an invalid digest");
         }
-        if (relative_paths.contains(relative.generic_string())) {
+        const std::string relative_key = relative.generic_string();
+        if (const auto existing = relative_digests.find(relative_key);
+            existing != relative_digests.end()) {
+            if (existing->second != expected) {
+                throw std::runtime_error("Lichess single-game profile evidence " +
+                                         std::string(name) +
+                                         " conflicts with another digest for " +
+                                         relative_key);
+            }
             continue;
         }
 
         std::optional<fs::path> match;
+        std::string last_observation = "candidate_not_found";
         fs::path root = profile_path.parent_path();
         for (int depth = 0; depth < 8 && !root.empty(); ++depth) {
             const fs::path candidate = normalized_absolute(root / relative);
-            if (within(root, candidate) && fs::is_regular_file(candidate) &&
-                !contains_symbolic_link(candidate) &&
-                "sha256:" + sha256_file(candidate) == expected) {
-                match = candidate;
-                break;
+            if (!within(root, candidate)) {
+                last_observation = "candidate_escaped_root";
+            } else {
+                std::error_code file_error;
+                const bool regular = fs::is_regular_file(
+                    platform::filesystem_api_path(candidate), file_error);
+                if (file_error || !regular) {
+                    last_observation = file_error
+                                           ? "candidate_inspection_failed:" +
+                                                 file_error.message()
+                                           : "candidate_not_regular";
+                } else if (contains_symbolic_link(candidate)) {
+                    last_observation = "candidate_contains_symbolic_link";
+                } else {
+                    const std::string observed = "sha256:" + sha256_file(candidate);
+                    if (observed == expected) {
+                        match = candidate;
+                        break;
+                    }
+                    last_observation = "candidate_digest_mismatch:" + observed;
+                }
             }
             const fs::path parent = root.parent_path();
             if (parent == root) {
@@ -3240,16 +3268,18 @@ std::vector<ManagedProfileFile> lichess_single_game_profile_files(const fs::path
         if (!match.has_value()) {
             throw std::runtime_error("Lichess single-game profile evidence " +
                                      std::string(name) +
-                                     " is missing or does not match its declared digest");
+                                     " is missing or does not match its declared digest; " +
+                                     last_observation);
         }
-        const auto size = static_cast<std::uint64_t>(fs::file_size(*match));
+        const auto size = static_cast<std::uint64_t>(
+            fs::file_size(platform::filesystem_api_path(*match)));
         if (files.size() >= managed_profile_max_files ||
             size > managed_profile_max_bytes - total) {
             throw std::runtime_error(
                 "Lichess single-game profile evidence closure exceeds its managed limit");
         }
         files.push_back({*match, relative, size, expected.substr(7)});
-        relative_paths.insert(relative.generic_string());
+        relative_digests.emplace(relative_key, expected);
         total += size;
     }
     return files;
@@ -4607,11 +4637,11 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         } catch (...) {
             std::error_code ignored;
             if (!receipt_existed) {
-                fs::remove(receipt_path, ignored);
+                fs::remove(platform::filesystem_api_path(receipt_path), ignored);
                 ignored.clear();
             }
             if (!active_root_existed) {
-                fs::remove_all(active_root, ignored);
+                fs::remove_all(platform::filesystem_api_path(active_root), ignored);
             }
             throw;
         }
@@ -4637,11 +4667,11 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         } catch (...) {
             std::error_code ignored;
             if (!receipt_existed) {
-                fs::remove(receipt_path, ignored);
+                fs::remove(platform::filesystem_api_path(receipt_path), ignored);
                 ignored.clear();
             }
             if (!active_root_existed) {
-                fs::remove_all(active_root, ignored);
+                fs::remove_all(platform::filesystem_api_path(active_root), ignored);
             }
             throw;
         }
@@ -5527,14 +5557,15 @@ json SetupEngine::verify(const SetupPaths& paths) {
             }
             const json expected_resources = expected_receipt_knowledge_resources(
                 receipt.at("active_root").get<std::string>(), validated.manifest, paths, receipt);
+            const json expected_activated_files =
+                flattened_activated_files(expected_resources);
             if (receipt.value("activated_resources", json::array()) != expected_resources ||
-                (!expected_resources.empty() &&
-                 receipt.value("activated_files", json::array()) !=
-                     flattened_activated_files(expected_resources))) {
+                receipt.value("activated_files", json::array()) !=
+                    expected_activated_files) {
                 throw std::runtime_error(
                     "installed knowledge activation receipt evidence does not match the payload");
             }
-            for (const auto& activated : receipt.value("activated_files", json::array())) {
+            for (const auto& activated : expected_activated_files) {
                 const fs::path path = activated.at("path").get<std::string>();
                 if (!within(paths.knowledge_root, path) || !fs::is_regular_file(path) ||
                     fs::file_size(path) != integer_field(activated, "size_bytes") ||
@@ -5689,7 +5720,7 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         }
     }
     const json active_manifest =
-        validate_component_payload(active_api_root, component_id, component_version).manifest;
+        validate_component_payload(active_root, component_id, component_version).manifest;
     if (active_manifest.value("files", json::array()) != identity_rows ||
         active_manifest.value("entrypoints", json::object()).value("profile", "") !=
             source.filename().generic_string()) {
@@ -5706,16 +5737,10 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
     const fs::path receipt_path =
         paths.data_root / "receipts" / (component_id + ".json");
     const bool receipt_existed = fs::is_regular_file(receipt_path);
-    json activated_files = json::array();
     json ownership = json::array();
     for (const auto& file : identity_rows) {
         const fs::path path =
             active_root / file.at("path").get<std::string>();
-        activated_files.push_back({
-            {"path", path.string()},
-            {"size_bytes", file.at("size_bytes")},
-            {"sha256", file.at("sha256")},
-        });
         ownership.push_back({
             {"path", path.string()},
             {"ownership_class", "generated"},
@@ -5761,7 +5786,7 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         {"data_paths", json::array()},
         {"ownership", std::move(ownership)},
         {"configuration_path", ""},
-        {"activated_files", std::move(activated_files)},
+        {"activated_files", json::array()},
     };
     write_json_atomic(receipt_path, receipt);
     return {
