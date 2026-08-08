@@ -3008,6 +3008,88 @@ json validate_uci_locator(const fs::path& path) {
     };
 }
 
+bool timing_profile_gates_passed(const json& profile) {
+    static constexpr std::array<std::string_view, 10> base_gates{
+        "legal_moves",
+        "nonterminal_null_moves",
+        "controller_disabled",
+        "provider_timing_captured",
+        "provider_service_reserve_valid",
+        "applied_provider_service_reserve_covered",
+        "applied_backup_emit_reserve_covered",
+        "p99_deadline_overshoot_passed",
+        "maximum_deadline_overshoot_passed",
+        "passed",
+    };
+    static constexpr std::array<std::string_view, 10> mcgs_gates{
+        "mcgs_root_coverage_passed",
+        "mcgs_policy_only_fallback_passed",
+        "mcgs_graph_population_passed",
+        "mcgs_async_overlap_passed",
+        "mcgs_single_owner_passed",
+        "mcgs_low_budget_fallback_passed",
+        "mcgs_deterministic_fallback_passed",
+        "mcgs_completion_integrity_passed",
+        "mcgs_temporal_policy_passed",
+        "mcgs_deadline_tail_telemetry_passed",
+    };
+    if (profile.value("schema", "") != "uci_time_profile_v3" ||
+        !profile.value("qualified", false)) {
+        return false;
+    }
+    const json gates = profile.value("gates", json::object());
+    if (!gates.is_object()) {
+        return false;
+    }
+    const auto all_true = [&gates](const auto& required) {
+        return std::ranges::all_of(required, [&gates](const std::string_view name) {
+            const std::string field{name};
+            return gates.contains(field) && gates.at(field).is_boolean() &&
+                   gates.at(field).get<bool>();
+        });
+    };
+    if (!all_true(base_gates)) {
+        return false;
+    }
+    const std::string search_core = profile.value("identity", json::object())
+                                        .value("search", json::object())
+                                        .value("search_core", "");
+    return search_core != "mcgs" || all_true(mcgs_gates);
+}
+
+std::optional<bool> explicit_timing_permission(const json& declared,
+                                               const std::string_view name) {
+    const std::string field{name};
+    if (!declared.contains(field)) {
+        return std::nullopt;
+    }
+    if (!declared.at(field).is_boolean()) {
+        throw std::runtime_error("timing profile permission " + field +
+                                 " must be boolean");
+    }
+    return declared.at(field).get<bool>();
+}
+
+json timing_profile_permissions(const json& profile) {
+    const json declared = profile.contains("permissions") ? profile.at("permissions")
+                                                          : json::object();
+    if (!declared.is_object()) {
+        throw std::runtime_error("timing profile permissions must be an object");
+    }
+    const bool gates_passed = timing_profile_gates_passed(profile);
+    const auto provider =
+        explicit_timing_permission(declared, "provider_safety_qualified");
+    const auto forecast =
+        explicit_timing_permission(declared, "forecast_shadow_qualified");
+    const auto adaptive =
+        explicit_timing_permission(declared, "adaptive_play_qualified");
+    return {
+        {"provider_safety_qualified", gates_passed && provider != false},
+        {"forecast_shadow_qualified", gates_passed && forecast != false},
+        {"adaptive_play_qualified", adaptive == true},
+    };
+}
+
 json validate_timing_profile_locator(const fs::path& path) {
     if (!fs::is_regular_file(path)) {
         throw std::runtime_error("timing profile locator must reference a regular file");
@@ -3023,13 +3105,7 @@ json validate_timing_profile_locator(const fs::path& path) {
         profile.value("gates", json::object()).value("passed", false) != true) {
         throw std::runtime_error("timing profile is not a qualified uci_time_profile_v3");
     }
-    const json permissions = profile.value("permissions", json::object());
-    for (const auto* field :
-         {"provider_safety_qualified", "forecast_shadow_qualified", "adaptive_play_qualified"}) {
-        if (!permissions.contains(field) || !permissions.at(field).is_boolean()) {
-            throw std::runtime_error("timing profile permissions are incomplete");
-        }
-    }
+    const json permissions = timing_profile_permissions(profile);
     if (!permissions.at("provider_safety_qualified").get<bool>()) {
         throw std::runtime_error("timing profile lacks provider-safety qualification");
     }

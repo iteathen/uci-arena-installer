@@ -1765,25 +1765,42 @@ TEST_CASE("provider startup cleanup uses only the declared startup control") {
     fs::remove_all(root);
 }
 
-TEST_CASE("timing profile imports retain qualified build provenance without granting authority") {
+TEST_CASE("timing profile imports derive only additive permissions from complete gates") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const json identity{
         {"engine", {{"executable_sha256", "sha256:" + std::string(64, 'a')}}},
         {"model", {{"model_fingerprint", "42"}, {"model_id", "model-1"}}},
-        {"search", {{"provider_effective", "cpu"}}},
+        {"search", {{"provider_effective", "cpu"}, {"search_core", "mcgs"}}},
+    };
+    const json gates{
+        {"legal_moves", true},
+        {"nonterminal_null_moves", true},
+        {"controller_disabled", true},
+        {"provider_timing_captured", true},
+        {"provider_service_reserve_valid", true},
+        {"applied_provider_service_reserve_covered", true},
+        {"applied_backup_emit_reserve_covered", true},
+        {"p99_deadline_overshoot_passed", true},
+        {"maximum_deadline_overshoot_passed", true},
+        {"passed", true},
+        {"mcgs_root_coverage_passed", true},
+        {"mcgs_policy_only_fallback_passed", true},
+        {"mcgs_graph_population_passed", true},
+        {"mcgs_async_overlap_passed", true},
+        {"mcgs_single_owner_passed", true},
+        {"mcgs_low_budget_fallback_passed", true},
+        {"mcgs_deterministic_fallback_passed", true},
+        {"mcgs_completion_integrity_passed", true},
+        {"mcgs_temporal_policy_passed", true},
+        {"mcgs_deadline_tail_telemetry_passed", true},
     };
     json profile{
         {"schema", "uci_time_profile_v3"},
         {"qualified", true},
-        {"gates", {{"passed", true}}},
-        {"permissions",
-         {{"provider_safety_qualified", true},
-          {"forecast_shadow_qualified", false},
-          {"adaptive_play_qualified", false}}},
+        {"gates", gates},
         {"identity", identity},
-        {"identity_sha256", "sha256:"
-                            "fe440d1087301bf982f8e930212ef84b4809864abd49992c21b960962a91d15d"},
+        {"identity_sha256", "sha256:" + sha256_text(identity.dump())},
     };
     const fs::path profile_path = root / "uci_time_profile_v3.json";
     std::ofstream(profile_path) << profile.dump(2);
@@ -1796,16 +1813,36 @@ TEST_CASE("timing profile imports retain qualified build provenance without gran
     REQUIRE(imported.at("validation").at("qualified_engine_provenance_sha256") ==
             "sha256:" + std::string(64, 'a'));
     REQUIRE_FALSE(imported.at("validation").contains("engine_sha256"));
+    REQUIRE(imported.at("validation").at("permissions").at(
+                "provider_safety_qualified") == true);
+    REQUIRE(imported.at("validation").at("permissions").at(
+                "forecast_shadow_qualified") == true);
+    REQUIRE(imported.at("validation").at("permissions").at(
+                "adaptive_play_qualified") == false);
     const json inventory = SetupEngine::inventory(paths);
     REQUIRE(inventory.at("discovery").at("timing_profile").at("selection").at("source") ==
             "saved_locator");
 
-    profile["permissions"]["provider_safety_qualified"] = false;
+    profile["permissions"] = {{"provider_safety_qualified", false}};
     const fs::path unsafe_profile_path = root / "unsafe-profile.json";
     std::ofstream(unsafe_profile_path) << profile.dump(2);
     REQUIRE_THROWS(SetupEngine::import_path(paths, "timing_profile", unsafe_profile_path));
 
-    profile["permissions"]["provider_safety_qualified"] = true;
+    profile.erase("permissions");
+    profile["gates"]["mcgs_completion_integrity_passed"] = false;
+    const fs::path incomplete_profile_path = root / "incomplete-profile.json";
+    std::ofstream(incomplete_profile_path) << profile.dump(2);
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "timing_profile",
+                                            incomplete_profile_path));
+
+    profile["gates"]["mcgs_completion_integrity_passed"] = true;
+    profile["permissions"] = {{"provider_safety_qualified", "yes"}};
+    const fs::path malformed_profile_path = root / "malformed-profile.json";
+    std::ofstream(malformed_profile_path) << profile.dump(2);
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "timing_profile",
+                                            malformed_profile_path));
+
+    profile.erase("permissions");
     profile["identity_sha256"] = "sha256:" + std::string(64, '0');
     const fs::path drifted_profile_path = root / "drifted-profile.json";
     std::ofstream(drifted_profile_path) << profile.dump(2);
@@ -1921,7 +1958,17 @@ TEST_CASE("Lichess installation is disabled without blocking on onboarding evide
         << json{
                {"schema", "uci_time_profile_v3"},
                {"qualified", true},
-               {"gates", {{"passed", true}}},
+               {"gates",
+                {{"legal_moves", true},
+                 {"nonterminal_null_moves", true},
+                 {"controller_disabled", true},
+                 {"provider_timing_captured", true},
+                 {"provider_service_reserve_valid", true},
+                 {"applied_provider_service_reserve_covered", true},
+                 {"applied_backup_emit_reserve_covered", true},
+                 {"p99_deadline_overshoot_passed", true},
+                 {"maximum_deadline_overshoot_passed", true},
+                 {"passed", true}}},
                {"permissions",
                 {{"provider_safety_qualified", true},
                  {"forecast_shadow_qualified", false},

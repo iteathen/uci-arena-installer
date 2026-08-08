@@ -1645,6 +1645,13 @@ transaction:
         retained as qualified-build provenance and is never substituted for
         the installed executable digest or used as timing authority. It never
         points the service at its own configuration file.
+      - Timing-profile locator admission follows the Engine-owned v3 timing
+        contract. For an otherwise valid older v3 profile that lacks only the
+        additive permissions projection, provider-safety and forecast-shadow
+        qualification are derived only when every required base and
+        search-core-specific timing gate passes. An explicit false remains
+        false, malformed permissions fail closed, and adaptive-play authority
+        is never inferred.
       - Lichess activation fails closed before credential access when timing,
         single-game, capacity, or transport evidence is missing, incomplete,
         or incompatible with the exact installed engine/model identity.
