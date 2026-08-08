@@ -511,6 +511,11 @@ provider_installer_integration:
       arrays, workspace/configuration flags, result envelope, and required
       configuration-match/live evidence. Installer never guesses these values
       from component identity, entrypoint names, or implementation language.
+    - A startup-control workspace relative path of `.` denotes the provider
+      workspace itself; another safe relative path denotes one of its
+      descendants. Installer accepts exactly those two bounded shapes, rejects
+      traversal outside the provider workspace, and rejects symbolic-link or
+      reparse traversal before invoking the provider adapter.
     - Credential-gated startup installation remains provider/operator work;
       Installer does not receive credential contents. Credential-free startup
       removal remains declared so normal uninstall can remove startup authority

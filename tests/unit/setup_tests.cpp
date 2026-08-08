@@ -135,7 +135,8 @@ void write_mock_renderer_runtime(const SetupPaths& paths) {
 
 fs::path write_mock_renderer_consumer(const SetupPaths& paths,
                                       const std::string& component_id,
-                                      const std::string& locator_kind) {
+                                      const std::string& locator_kind,
+                                      const fs::path& startup_workspace_relative = "runtime") {
     write_mock_renderer_runtime(paths);
     const fs::path active_root =
         paths.install_root / "components" / component_id / "1.0.0";
@@ -168,7 +169,9 @@ fs::path write_mock_renderer_consumer(const SetupPaths& paths,
           {"actions",
            {{"install", json::array({"lifecycle", "enable"})},
             {"uninstall", json::array({"lifecycle", "disable"})}}},
-          {"workspace_argument", {{"flag", "--state-root"}, {"relative_path", "runtime"}}},
+           {"workspace_argument",
+            {{"flag", "--state-root"},
+             {"relative_path", startup_workspace_relative.generic_string()}}},
           {"configuration_argument", "--settings"},
           {"result",
            {{"envelope", "root"},
@@ -1766,6 +1769,25 @@ TEST_CASE("provider startup cleanup uses only the declared startup control") {
 
     const json plan = SetupEngine::plan_uninstall(paths, {component_id});
     REQUIRE(plan.at("components").at(0).at("startup_cleanup_required") == true);
+    const json result = SetupEngine::uninstall(paths, plan, true);
+
+    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("installed") ==
+            false);
+    REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id));
+    REQUIRE(fs::is_regular_file(workspace / "valuable-state.json"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("provider startup control accepts the provider workspace root") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "replaceable.root-workspace.consumer";
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile", ".");
+    const fs::path workspace = configuration.parent_path();
+    std::ofstream(workspace / "valuable-state.json") << "{}";
+
+    const json plan = SetupEngine::plan_uninstall(paths, {component_id});
     const json result = SetupEngine::uninstall(paths, plan, true);
 
     REQUIRE(result.at("components").at(0).at("startup_cleanup").at("installed") ==

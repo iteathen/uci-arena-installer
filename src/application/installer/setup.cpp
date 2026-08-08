@@ -218,6 +218,11 @@ bool within(const fs::path& root, const fs::path& candidate) {
     return normalized_candidate != normalized_root;
 }
 
+bool at_or_within(const fs::path& root, const fs::path& candidate) {
+    return normalized_absolute(root) == normalized_absolute(candidate) ||
+           within(root, candidate);
+}
+
 void require_external_token_path(
     const fs::path& manager_data_root,
     const fs::path& token_path) {
@@ -4023,9 +4028,13 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
     const fs::path control_workspace = workspace_relative == fs::path(".")
                                            ? workspace
                                            : normalized_absolute(workspace / workspace_relative);
-    if (!within(workspace, control_workspace) || contains_symbolic_link(control_workspace)) {
+    if (!at_or_within(workspace, control_workspace)) {
         throw std::runtime_error(
             "startup control workspace escapes its provider workspace");
+    }
+    if (contains_symbolic_link(control_workspace)) {
+        throw std::runtime_error(
+            "startup control workspace contains a symbolic-link boundary");
     }
     arguments.push_back(workspace_argument.at("flag").get<std::string>());
     arguments.push_back(control_workspace.string());
