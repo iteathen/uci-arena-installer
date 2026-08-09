@@ -855,6 +855,13 @@ packaging:
         separate artifacts. A configurable-scope bundle is forbidden until a
         separately reviewed toolchain upgrade supports it without weakening
         licensing, provenance, or reproducibility requirements.
+      - Fixed-scope bundle planning is exact-identity idempotent. If the
+        platform reports one related bundle registration more than once, the
+        bootstrapper adapter retains one execute/rollback plan and requests no
+        action for later occurrences of that same bundle code. Detection
+        duplication remains observable in the Burn log; it must never produce
+        duplicate removal authority, a missing-cache launch, or a success-path
+        error dialog.
       - A scope-neutral native launcher may provide one visible Personal or All
         users choice while delegating unchanged to the two fixed-scope bundles.
         It is a launcher brick, not a configurable WiX bundle: it never

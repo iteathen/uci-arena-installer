@@ -99,6 +99,14 @@ Required scenarios:
   Modify controls, explicit upgrade/repair operations, and normal uninstall
   with no purge path; the upgrade operation restages and adopts every selected
   receipt before related-bundle removal;
+- bootstrapper-adapter identity-ledger tests prove case-insensitive exact-bundle
+  deduplication and reset at each new plan; compiled bundles must embed that
+  adapter as the declared WixStdBA BAFunctions payload;
+- the opt-in isolated Personal upgrade cycle installs two synthetic bundle
+  versions, requires exactly one old-bundle removal plan, rejects missing-cache
+  launch evidence, uninstalls the fixture, and removes its test-owned registry
+  state (`$env:ARENA_RUN_WINDOWS_BUNDLE_UPGRADE_TEST=1; node --test
+  tools/release/build-windows-suite-bundle.test.mjs`);
 - a distinct default-on standard opening-book control and offline-only
   `--offline` upgrade/repair arguments with no transport flag on uninstall;
 - Personal delegation without elevation;

@@ -76,15 +76,22 @@ function payloadName(relative) {
   return normalized;
 }
 
-function validateInputs({ mediaRoot, managerMsi, policyPath, version, scope, development }) {
+function validateInputs({
+  mediaRoot, managerMsi, baFunctionsPath, policyPath, version, scope, development,
+}) {
   if (!VERSION_PATTERN.test(version ?? "") || !SCOPES.has(scope)) {
     throw new Error("suite bundle requires a three-field version and fixed scope");
   }
+  if (typeof baFunctionsPath !== "string" || baFunctionsPath.length === 0) {
+    throw new Error("suite bundle requires a bootstrapper lifecycle adapter");
+  }
   const media = path.resolve(mediaRoot);
   const msi = path.resolve(managerMsi);
+  const baFunctions = path.resolve(baFunctionsPath);
   if (!lstatSync(media).isDirectory() || !lstatSync(msi).isFile()
-      || statSync(msi).size === 0) {
-    throw new Error("suite media root or Manager MSI is unavailable");
+      || statSync(msi).size === 0 || !lstatSync(baFunctions).isFile()
+      || statSync(baFunctions).size === 0) {
+    throw new Error("suite media, Manager MSI, or bootstrapper lifecycle adapter is unavailable");
   }
   const setup = path.join(media, "bin", "arena-setup.exe");
   const catalogPath = path.join(media, "release", "catalog.json");
@@ -128,7 +135,9 @@ function validateInputs({ mediaRoot, managerMsi, policyPath, version, scope, dev
         !catalog.components.some((component) => component.id === id))) {
     throw new Error("bundle feature policy does not match the catalog feature-selection contract");
   }
-  return { media, msi, setup, catalogPath, entries, policy, selectedScope, defaults };
+  return {
+    media, msi, baFunctions, setup, catalogPath, entries, policy, selectedScope, defaults,
+  };
 }
 
 export function buildSuiteTheme(features) {
@@ -208,7 +217,7 @@ function quoted(value) {
 export function buildWindowsSuiteBundleSource(options) {
   const validated = validateInputs(options);
   const {
-    media, msi, setup, entries, policy, selectedScope, defaults,
+    media, msi, baFunctions, setup, entries, policy, selectedScope, defaults,
   } = validated;
   const featureArguments = policy.features
     .map((feature) => `--bundle-feature ${feature.component_id}=[${feature.variable}]`)
@@ -255,6 +264,7 @@ export function buildWindowsSuiteBundleSource(options) {
       `  <Bundle Name="${xml(name)}" Manufacturer="${xml(policy.manufacturer)}" Version="${xml(options.version)}" UpgradeCode="${xml(selectedScope.upgrade_code)}" IconSourceFile="${xml(path.resolve(options.iconPath))}">`,
       '    <BootstrapperApplication>',
       `      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" ThemeFile="${xml(path.resolve(options.themePath))}" LocalizationFile="${xml(path.resolve(options.localizationPath))}" LicenseUrl="" SuppressOptionsUI="no" />`,
+      `      <Payload Id="ArenaBundleBAFunctions" SourceFile="${xml(baFunctions)}" bal:BAFunctions="yes" />`,
       '    </BootstrapperApplication>',
       ...variables,
       '    <Chain>',
@@ -329,6 +339,7 @@ function main() {
   process.stdout.write(`${JSON.stringify(buildWindowsSuiteBundle({
     mediaRoot: args["media-root"],
     managerMsi: args["manager-msi"],
+    baFunctionsPath: args["ba-functions"],
     policyPath: args.policy,
     version: args.version,
     scope: args.scope,

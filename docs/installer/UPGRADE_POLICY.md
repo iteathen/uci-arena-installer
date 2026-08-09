@@ -4,6 +4,10 @@ Clean install, upgrade, repair, reinstall, downgrade, replacement, and uninstall
 
 - Clean install requires no conflicting authority and creates new receipts.
 - Upgrade requires a compatible newer suite, carries feature selection forward, restages selected components, migrates idempotently, and adopts receipts before related-bundle removal.
+- The Windows bootstrapper lifecycle adapter claims at most one execute/rollback
+  action for each exact related-bundle identity. Duplicate platform detection
+  remains logged, while later plan occurrences are explicitly set to no action
+  so successful upgrades cannot invoke an already-removed cache entry.
 - Repair revalidates retained media, restages selected current components, regenerates installer-owned configuration, and preserves user data.
 - Reinstall uses explicit same-version development policy; official releases do not treat different bytes under one version as an upgrade.
 - Downgrade is rejected unless an explicit reviewed policy permits it without violating rollback protection.

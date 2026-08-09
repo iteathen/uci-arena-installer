@@ -449,6 +449,9 @@ function buildWindowsOutputs({
   const setupLauncher = path.join(
     nativeBuild.buildRoot, "Release", "arena-setup-launcher.exe",
   );
+  const baFunctionsPath = path.join(
+    nativeBuild.buildRoot, "Release", "arena-bundle-bafunctions.dll",
+  );
   const userMsi = path.join(publishRoot, userMsiName);
   const machineMsi = path.join(publishRoot, machineMsiName);
   for (const [scope, marker, output] of [
@@ -484,6 +487,7 @@ function buildWindowsOutputs({
       buildWindowsSuiteBundle({
         mediaRoot,
         managerMsi,
+        baFunctionsPath,
         policyPath: windowsPolicyPath,
         version: suiteVersion,
         scope,

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -28,6 +30,12 @@ const localizationPath = path.join(
 );
 const wixAvailable = process.platform === "win32"
   && spawnSync("wix", ["--version"], { windowsHide: true }).status === 0;
+const builtBAFunctionsPath = path.join(
+  repositoryRoot, "build/windows-release/Release/arena-bundle-bafunctions.dll",
+);
+const upgradeCycleEnabled = wixAvailable
+  && process.env.ARENA_RUN_WINDOWS_BUNDLE_UPGRADE_TEST === "1"
+  && existsSync(builtBAFunctionsPath);
 
 const features = [
   "uci_arena.engine",
@@ -74,6 +82,9 @@ function options(f, scope, managerMsi = path.join(f.root, "manager.msi")) {
   return {
     mediaRoot: f.mediaRoot,
     managerMsi,
+    baFunctionsPath: process.platform === "win32"
+      ? path.join(process.env.WINDIR ?? "C:\\Windows", "System32", "where.exe")
+      : path.join(f.mediaRoot, "bin", "arena-setup.exe"),
     policyPath,
     version: "0.3.8",
     scope,
@@ -111,11 +122,80 @@ function buildFixtureMsi(root, scope) {
   return output;
 }
 
+function runFixture(executable, args, label) {
+  const result = spawnSync(executable, args, {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 120_000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error([
+      `${label} failed with ${result.status ?? result.error?.message}`,
+      result.stderr,
+      result.stdout,
+    ].filter(Boolean).join("\n"));
+  }
+}
+
+function buildUpgradeFixture(root, version) {
+  const suffix = version.replaceAll(".", "-");
+  const msiSource = path.join(root, `fixture-${suffix}.wxs`);
+  const msi = path.join(root, `fixture-${suffix}.msi`);
+  writeFileSync(msiSource, [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">',
+    `  <Package Name="Arena Bundle Upgrade Fixture" Version="${version}" Manufacturer="UCI Arena tests" UpgradeCode="7FF52046-9320-46D0-8798-AE1B1C1CAEA8" Scope="perUser">`,
+    '    <MediaTemplate EmbedCab="yes" />',
+    '    <StandardDirectory Id="LocalAppDataFolder">',
+    '      <Directory Id="FIXTUREROOT" Name="UCI Arena Bundle Upgrade Fixture">',
+    '        <Component Id="Fixture" Guid="79B13CF1-A1E2-4439-B3DF-22E4BA18ED31">',
+    `          <RegistryValue Root="HKCU" Key="Software\\UCI Arena\\Tests\\BundleUpgradeGuard" Name="Version" Type="string" Value="${version}" KeyPath="yes" />`,
+    '        </Component>',
+    '      </Directory>',
+    '    </StandardDirectory>',
+    '    <Feature Id="Main"><ComponentRef Id="Fixture" /></Feature>',
+    '  </Package>',
+    '</Wix>',
+  ].join("\n"));
+  runFixture("wix", ["build", "-arch", "x64", "-o", msi, msiSource], "fixture MSI build");
+
+  const bundleSource = path.join(root, `bundle-${suffix}.wxs`);
+  const bundle = path.join(root, `bundle-${suffix}.exe`);
+  writeFileSync(bundleSource, [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">',
+    `  <Bundle Name="Arena Bundle Upgrade Fixture" Manufacturer="UCI Arena tests" Version="${version}" UpgradeCode="85A237D1-EE4F-4299-8A77-14F4AA5CA0D5">`,
+    '    <BootstrapperApplication>',
+    '      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="" />',
+    `      <Payload Id="ArenaBundleBAFunctions" SourceFile="${builtBAFunctionsPath}" bal:BAFunctions="yes" />`,
+    '    </BootstrapperApplication>',
+    '    <Chain>',
+    `      <MsiPackage Id="Fixture" SourceFile="${msi}" Visible="no" Vital="yes" />`,
+    '    </Chain>',
+    '  </Bundle>',
+    '</Wix>',
+  ].join("\n"));
+  runFixture("wix", [
+    "build", "-arch", "x64",
+    "-ext", "WixToolset.BootstrapperApplications.wixext",
+    "-o", bundle, bundleSource,
+  ], "fixture bundle build");
+  return bundle;
+}
+
 test("suite bundle derives default-on Modify features and lifecycle commands from contracts", () => {
   const f = fixture();
   try {
     writeFileSync(path.join(f.root, "manager.msi"), "fixture-msi");
     const { source, theme } = buildWindowsSuiteBundleSource(options(f, "per-user"));
+    assert.match(source, /bal:BAFunctions="yes"/u);
+    assert.match(source, /ArenaBundleBAFunctions/u);
+    assert.throws(
+      () => buildWindowsSuiteBundleSource({
+        ...options(f, "per-user"), baFunctionsPath: undefined,
+      }),
+      /requires a bootstrapper lifecycle adapter/u,
+    );
     for (const component of features) {
       assert.match(source, new RegExp(`--bundle-feature ${component.replaceAll(".", "\\.")}=\\[Install`, "u"));
     }
@@ -174,5 +254,45 @@ test("WiX compiles Installer-owned Personal and All users suite bundles", {
     }
   } finally {
     rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("Personal upgrade executes one removal plan per exact related bundle", {
+  skip: !upgradeCycleEnabled,
+  timeout: 180_000,
+}, () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "arena-bundle-upgrade-cycle-"));
+  const firstLog = path.join(root, "first.log");
+  const upgradeLog = path.join(root, "upgrade.log");
+  const cleanupLog = path.join(root, "cleanup.log");
+  let firstBundle;
+  let secondBundle;
+  try {
+    firstBundle = buildUpgradeFixture(root, "1.0.0");
+    secondBundle = buildUpgradeFixture(root, "1.0.1");
+    runFixture(firstBundle, ["-quiet", "-norestart", "-log", firstLog], "fixture install");
+    runFixture(secondBundle, ["-quiet", "-norestart", "-log", upgradeLog], "fixture upgrade");
+
+    const log = readFileSync(upgradeLog, "utf8");
+    const removalPlans = log.match(/i207: Planned related bundle: .*execute: Uninstall/gu) ?? [];
+    assert.equal(removalPlans.length, 1, "one exact prior bundle may receive removal authority");
+    assert.doesNotMatch(log, /CreateProcessW failed|0x80070003/iu);
+  } finally {
+    if (secondBundle && existsSync(secondBundle)) {
+      spawnSync(secondBundle, ["-uninstall", "-quiet", "-norestart", "-log", cleanupLog], {
+        windowsHide: true,
+        timeout: 120_000,
+      });
+    }
+    if (firstBundle && existsSync(firstBundle)) {
+      spawnSync(firstBundle, ["-uninstall", "-quiet", "-norestart"], {
+        windowsHide: true,
+        timeout: 120_000,
+      });
+    }
+    spawnSync("reg.exe", [
+      "delete", "HKCU\\Software\\UCI Arena\\Tests\\BundleUpgradeGuard", "/f",
+    ], { windowsHide: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });

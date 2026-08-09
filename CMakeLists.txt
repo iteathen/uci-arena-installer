@@ -126,6 +126,34 @@ else()
 endif()
 
 if(WIN32)
+  if(NOT CMAKE_VS_MSBUILD_COMMAND)
+    message(FATAL_ERROR "Windows suite bootstrapper build requires Visual Studio MSBuild")
+  endif()
+  set(
+    ARENA_BUNDLE_BAFUNCTIONS_PROJECT
+    "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/bootstrapper/arena-bundle-bafunctions.vcxproj"
+  )
+  set(
+    ARENA_BUNDLE_BAFUNCTIONS_OUTPUT
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/arena-bundle-bafunctions.dll"
+  )
+  add_custom_target(
+    arena_bundle_bafunctions ALL
+    COMMAND
+      "${CMAKE_VS_MSBUILD_COMMAND}"
+      "${ARENA_BUNDLE_BAFUNCTIONS_PROJECT}"
+      /restore
+      /target:Build
+      /property:Configuration=$<CONFIG>
+      /property:Platform=x64
+      /property:OutDir=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/
+      /property:BaseIntermediateOutputPath=${CMAKE_CURRENT_BINARY_DIR}/bafunctions-obj/
+      /property:IntermediateOutputPath=${CMAKE_CURRENT_BINARY_DIR}/bafunctions-obj/$<CONFIG>/
+    BYPRODUCTS "${ARENA_BUNDLE_BAFUNCTIONS_OUTPUT}"
+    COMMENT "Building the WiX bootstrapper lifecycle adapter"
+    VERBATIM
+  )
+
   add_executable(
     arena-setup-launcher
     apps/setup_launcher/main.cpp
@@ -200,6 +228,15 @@ if(ARENA_INSTALLER_BUILD_TESTS)
       unofficial-sodium::sodium
   )
   if(WIN32)
+    add_dependencies(arena_installer_tests arena_bundle_bafunctions)
+    target_sources(
+      arena_installer_tests
+      PRIVATE tests/unit/related_bundle_plan_guard_tests.cpp
+    )
+    target_include_directories(
+      arena_installer_tests
+      PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/bootstrapper
+    )
     target_link_libraries(
       arena_installer_tests PRIVATE arena_windows_installer_launcher)
   endif()
