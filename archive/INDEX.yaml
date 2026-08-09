@@ -1,0 +1,19 @@
+archive_schema: project_evidence_archive_v1
+records:
+  - archived_at: 2026-08-09
+    original_path: AGENTS.md
+    archive_path: archive/2026-08-09/AGENTS.md.archived
+    reason: >-
+      Preserve the pre-unification Installer agent contract after moving reusable
+      operating doctrine into the shared core standard while retaining
+      installer-specific recovery, elevation, provenance, and composition rules
+      in the current overlay.
+    superseded_by:
+      - AGENTS.md
+      - .agents/core-standard.md
+    removed_from_active_authority: >-
+      Root startup now uses the common operating standard plus the compact
+      Installer-specific overlay; the archived file is historical evidence only.
+    source_revision: a70e426f15aec12dcf86c3b7bca2c5a1e8a87a40
+    source_blob: 7eb04800abe83bf1e9967a8ffffcb3f7c42ce9b2
+    change_reference: PR-13
