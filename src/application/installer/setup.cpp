@@ -23,6 +23,7 @@
 #include <system_error>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 #include "arena/adapters/uci_process.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
@@ -4346,7 +4347,8 @@ void rename_managed_component_tree_with_retry(const fs::path& source,
 }
 
 void remove_managed_component_tree_with_retry(const fs::path& target,
-                                               const std::string& component_id) {
+                                               const std::string& component_id,
+                                               const std::string_view operation) {
     constexpr int attempts = 100;
     constexpr auto retry_delay = std::chrono::milliseconds(100);
     std::string failure = "managed component root remains present";
@@ -4364,7 +4366,112 @@ void remove_managed_component_tree_with_retry(const fs::path& target,
         }
     }
     throw std::runtime_error("cannot remove managed component " + component_id +
-                             " during rollback: " + failure);
+                             " during " + std::string(operation) + ": " + failure);
+}
+
+json cleanup_superseded_component_roots(
+    const SetupPaths& paths,
+    const std::function<void(const json&)>& checkpoint) {
+    const fs::path components_root =
+        normalized_absolute(paths.install_root / "components");
+    json cleanup{{"schema", "arena_superseded_component_cleanup_v1"},
+                 {"roots", json::array()}};
+    if (!fs::is_directory(platform::filesystem_api_path(components_root))) {
+        return cleanup;
+    }
+
+    std::map<std::string, fs::path, std::less<>> active_roots;
+    for (const auto& receipt : receipt_rows(paths)) {
+        if (!receipt.contains("component_id") ||
+            !receipt.at("component_id").is_string() ||
+            !receipt.contains("active_root") ||
+            !receipt.at("active_root").is_string()) {
+            continue;
+        }
+        const std::string component_id =
+            receipt.at("component_id").get<std::string>();
+        if (!valid_identifier(component_id)) {
+            continue;
+        }
+        const fs::path active_root = normalized_absolute(
+            receipt.at("active_root").get<std::string>());
+        const fs::path component_root =
+            normalized_absolute(components_root / component_id);
+        if (active_root.parent_path() == component_root &&
+            within(components_root, active_root) && active_root != components_root) {
+            active_roots.emplace(component_id, active_root);
+        }
+    }
+
+    for (const auto& [component_id, active_root] : active_roots) {
+        const fs::path component_root = active_root.parent_path();
+        std::error_code iteration_error;
+        std::vector<fs::path> candidates;
+        fs::directory_iterator iterator(
+            platform::filesystem_api_path(component_root), iteration_error);
+        const fs::directory_iterator end;
+        while (!iteration_error && iterator != end) {
+            const fs::path candidate = normalized_absolute(
+                component_root / iterator->path().filename());
+            if (candidate != active_root) {
+                candidates.push_back(candidate);
+            }
+            iterator.increment(iteration_error);
+        }
+        if (iteration_error) {
+            cleanup["roots"].push_back(
+                {{"component_id", component_id},
+                 {"path", component_root.string()},
+                 {"state", "cleanup_failed"},
+                 {"error", "cannot enumerate component roots: " +
+                               iteration_error.message()}});
+            checkpoint(cleanup);
+            continue;
+        }
+
+        for (const fs::path& candidate : candidates) {
+            json outcome{{"component_id", component_id},
+                         {"path", candidate.string()}};
+            try {
+                if (!within(component_root, candidate) || candidate == component_root ||
+                    contains_symbolic_link(candidate) ||
+                    !fs::is_directory(platform::filesystem_api_path(candidate))) {
+                    throw std::runtime_error(
+                        "candidate is not a bounded regular component directory");
+                }
+                const json manifest = read_json(candidate / "arena-component.json");
+                const std::string version =
+                    manifest.value("component_version", "");
+                if (manifest.value("component_id", "") != component_id ||
+                    !valid_identifier(version)) {
+                    throw std::runtime_error(
+                        "candidate manifest identity does not match its component");
+                }
+                static_cast<void>(
+                    validate_component_payload(candidate, component_id, version));
+            } catch (const std::exception& error) {
+                outcome["state"] = "preserved_modified_or_unrecognized";
+                outcome["error"] = error.what();
+                cleanup["roots"].push_back(std::move(outcome));
+                checkpoint(cleanup);
+                continue;
+            }
+
+            outcome["state"] = "removing";
+            cleanup["roots"].push_back(outcome);
+            checkpoint(cleanup);
+            try {
+                remove_managed_component_tree_with_retry(
+                    candidate, component_id, "post-commit cleanup");
+                cleanup["roots"].back()["state"] = "removed";
+            } catch (const std::exception& error) {
+                cleanup["roots"].back()["state"] = "cleanup_failed";
+                cleanup["roots"].back()["error"] = error.what();
+            }
+            checkpoint(cleanup);
+        }
+    }
+    return cleanup;
 }
 
 bool requires_uninstall_startup(const json& receipt) {
@@ -5314,6 +5421,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     };
     write_json_atomic(journal_path, journal);
     json results = json::array();
+    json superseded_component_cleanup{
+        {"schema", "arena_superseded_component_cleanup_v1"},
+        {"roots", json::array()}};
     try {
         const fs::path catalog_directory = fs::path(plan.value("catalog_directory", "."));
         for (const auto& action : plan.at("actions")) {
@@ -5589,6 +5699,18 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         }
         journal["state"] = "committed";
         write_json_atomic(journal_path, journal);
+        try {
+            superseded_component_cleanup = cleanup_superseded_component_roots(
+                paths, [&](const json& checkpoint) {
+                    journal["superseded_component_cleanup"] = checkpoint;
+                    write_json_atomic(journal_path, journal);
+                });
+        } catch (const std::exception& cleanup_error) {
+            superseded_component_cleanup["error"] = cleanup_error.what();
+            journal["superseded_component_cleanup"] =
+                superseded_component_cleanup;
+            write_json_atomic(journal_path, journal);
+        }
         std::error_code ignored;
         for (const auto& action : journal.at("actions")) {
             if (action.contains("rollback_path")) {
@@ -5718,7 +5840,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 try {
                     remove_managed_component_tree_with_retry(
                         action->at("target").get<std::string>(),
-                        action->value("component_id", "unknown"));
+                        action->value("component_id", "unknown"), "rollback");
                 } catch (const std::exception& component_error) {
                     action_rollback_failed = true;
                     component_rollback_failure +=
@@ -5831,6 +5953,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         {"transaction_id", transaction_id},
         {"state", "committed"},
         {"components", std::move(results)},
+        {"superseded_component_cleanup",
+         std::move(superseded_component_cleanup)},
     };
 }
 

@@ -1820,6 +1820,17 @@ transaction:
     rules:
       - Upgrade restages every selected component so the new bundle atomically
         adopts all selected receipts before Burn removes a related older bundle.
+      - A prior immutable component root remains available until the replacement
+        receipt, generated configuration, startup state, and Manager restart
+        have committed. Post-commit maintenance then considers only sibling
+        roots beneath the same currently receipted component directory.
+      - Superseded roots are removed only after their manifest identity, complete
+        file inventory, sizes, and SHA-256 values still match Installer ownership
+        evidence. Modified, invalid, linked, or unrecognized roots are preserved
+        and reported; they are never treated as installed authority.
+      - Superseded-root cleanup is idempotent and non-authoritative. A cleanup
+        warning cannot roll back a newly committed working installation, and a
+        later repair or upgrade retries the same bounded cleanup safely.
 
 trust:
   metadata: tuf

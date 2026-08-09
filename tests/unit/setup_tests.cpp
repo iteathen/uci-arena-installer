@@ -827,6 +827,98 @@ TEST_CASE("repair plan restages components that are already current") {
     fs::remove_all(root);
 }
 
+TEST_CASE("post-commit cleanup removes only verified superseded component roots") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    constexpr std::string_view component_id = "replaceable.component";
+    const fs::path component_root =
+        paths.install_root / "components" / component_id;
+    const auto write_component = [&](const std::string_view version,
+                                     const bool modified) {
+        const fs::path active_root = component_root / version;
+        fs::create_directories(active_root);
+        constexpr std::string_view payload = "payload";
+        std::ofstream(active_root / "payload", std::ios::binary) << payload;
+        std::ofstream(active_root / "arena-component.json", std::ios::binary)
+            << json{
+                   {"schema", "arena_install_component_v1"},
+                   {"schema_version", 1},
+                   {"component_id", component_id},
+                   {"component_version", version},
+                   {"files",
+                    json::array(
+                        {{{"path", "payload"},
+                          {"size_bytes", payload.size()},
+                          {"sha256", sha256_text(payload)}}})},
+               }
+                   .dump(2);
+        if (modified) {
+            std::ofstream(active_root / "operator-note.txt", std::ios::binary)
+                << "preserve me";
+        }
+        return active_root;
+    };
+
+    const fs::path current = write_component("2.0.0", false);
+    const fs::path removable = write_component("1.0.0", false);
+    const fs::path modified = write_component("0.9.0", true);
+    fs::create_directories(paths.data_root / "receipts");
+    std::ofstream(paths.data_root / "receipts" /
+                  (std::string(component_id) + ".json"),
+                  std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", component_id},
+               {"component_version", "2.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", current.string()},
+               {"dependencies", json::array()},
+               {"data_paths", json::array()},
+               {"configuration_path", ""},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"actions",
+         json::array({{{"action", "keep"},
+                       {"component_id", component_id},
+                       {"version", "2.0.0"}}})},
+    };
+
+    const json applied =
+        SetupEngine::apply(json::object(), plan, paths, true, false);
+    const json& cleanup = applied.at("superseded_component_cleanup");
+    INFO(cleanup.dump(2));
+    REQUIRE(cleanup.at("schema") ==
+            "arena_superseded_component_cleanup_v1");
+    REQUIRE_FALSE(fs::exists(removable));
+    REQUIRE(fs::is_regular_file(modified / "operator-note.txt"));
+    REQUIRE(fs::is_regular_file(current / "payload"));
+    REQUIRE(std::ranges::any_of(cleanup.at("roots"), [&](const json& outcome) {
+        return outcome.value("path", "") == removable.string() &&
+               outcome.value("state", "") == "removed";
+    }));
+    REQUIRE(std::ranges::any_of(cleanup.at("roots"), [&](const json& outcome) {
+        return outcome.value("path", "") == modified.string() &&
+               outcome.value("state", "") ==
+                   "preserved_modified_or_unrecognized";
+    }));
+
+    const json repeated =
+        SetupEngine::apply(json::object(), plan, paths, true, false);
+    REQUIRE(repeated.at("superseded_component_cleanup").at("roots").size() ==
+            1);
+    REQUIRE(repeated.at("superseded_component_cleanup")
+                .at("roots")
+                .at(0)
+                .value("state", "") ==
+            "preserved_modified_or_unrecognized");
+    fs::remove_all(root);
+}
+
 TEST_CASE("clean plan classifies an unreceipted component root before mutation") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);

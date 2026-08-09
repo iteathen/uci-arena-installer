@@ -23,6 +23,14 @@ The planner decides; execution adapters perform. Major decisions may not be disc
 
 Every side effect is journaled before execution. Provider startup changes occur before an immutable root is replaced, and prior startup/configuration state is restored during rollback. Original failure and rollback failure are always reported separately.
 
+After replacement receipts, provider state, and the Manager restart have
+committed, the deployment adapter performs bounded superseded-root maintenance.
+It examines only siblings of the active root for a currently receipted component
+and removes a sibling only when its manifest and complete payload still match
+Installer ownership evidence. Modified, invalid, linked, and unrecognized roots
+are preserved and reported. This maintenance is idempotent and cannot roll back
+the newly committed installation; a later repair or upgrade retries it.
+
 Release-media policy is decided before any process, component, receipt,
 workspace, or service mutation. Retention revalidates identity at the point of
 copy to defend against media changes between preflight and commit.
