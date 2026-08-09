@@ -82,6 +82,16 @@ share exact accepted component bytes, while only offline apply and repair pass
 
 Package content, entrypoints, dependencies, health checks, preservation, and uninstall ownership belong to `arena_install_catalog_v1` and `arena_install_component_v1`. Policy belongs to the installation contract and versioned configuration. Mechanism belongs to installer components.
 
+The installer-integration renderer is deliberately capability-neutral. A
+service may render its daemon configuration; a UCI engine may render an
+`arena_uci_engine_launch_profile_v1`. In both cases Installer supplies only the
+manifest-declared dependency and locator paths, writes the returned JSON inside
+the component's preserved workspace, journals the mutation, and verifies it by
+rerendering. Search topology, timing evidence, model semantics, UCI option
+names, book sidecars, and tablebase behavior remain inside the Engine-owned
+renderer. Routine Engine changes therefore update the Engine artifact and
+manifest rather than Installer control flow.
+
 Large external chess assets deliberately use a different compatibility rule
 from executable components. Discovery and preservation are version-permissive:
 standalone books, partial Syzygy collections, and parseable timing evidence stay

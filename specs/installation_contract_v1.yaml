@@ -535,6 +535,15 @@ provider_installer_integration:
       trusted merely because it exists.
     - Adding or changing provider configuration normally changes only the
       provider renderer and manifest bindings, not Installer control flow.
+    - The contract is capability-neutral: an Engine component may use the same
+      renderer boundary to publish arena_uci_engine_launch_profile_v1. Engine
+      owns translation of timing, search, model, and knowledge contracts into
+      UCI options; Installer supplies only declared receipt and locator paths,
+      writes the result transactionally, and records its preserved workspace.
+    - Adding or changing an Engine launch option, default topology, timing
+      calibration field, or knowledge binding changes the Engine artifact and
+      manifest data. It must not introduce an Engine-id or UCI-option branch in
+      Installer planning, deployment, verification, repair, or rollback.
     - A startup-capable provider declares arena_provider_startup_control_v1
       beside its renderer: exact entrypoint, fixed install/uninstall argument
       arrays, workspace/configuration flags, result envelope, and required

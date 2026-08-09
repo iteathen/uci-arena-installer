@@ -27,6 +27,10 @@ mandatory_boundaries:
     are forbidden inputs.
   - Product or model names never select installer mechanism behavior. Package
     knowledge belongs to component manifests and composition data.
+  - Engine-owned managed launch profiles use the same declared
+    installer-integration contract as any other component configuration.
+    Installer resolves typed paths and persists results but never interprets
+    UCI, timing, model, book, or tablebase semantics.
   - A new installable component changes its provider manifest and product
     composition, not installer orchestration control flow.
   - Cross-repository calls use versioned project-owned contracts and typed
