@@ -18,7 +18,7 @@
     {
       "role": "engine",
       "component_id": "uci_arena.engine",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "repository": "iteathen/UCI_Arena",
       "required": true,
       "default_enabled": true,
