@@ -114,6 +114,32 @@ test("resolved provider dependencies cannot be omitted by composition", () => {
   );
 });
 
+test("installer-integration workspace drift is rejected before catalog generation", () => {
+  const available = availableWithManifests();
+  const engine = available.find(
+    (component) => component.component_id === "uci_arena.engine",
+  ).manifest;
+  engine.workspace_name = "UCI-Arena-Engine";
+  engine.installer_integration = {
+    schema: "arena_provider_installer_integration_v1",
+    schema_version: 1,
+    workspace_name: "UCI-Arena-Engine",
+  };
+  assert.equal(validateCompositionManifests(composition, available).length, composition.components.length);
+
+  delete engine.workspace_name;
+  assert.throws(
+    () => validateCompositionManifests(composition, available),
+    /installer-integration workspace is invalid or inconsistent for uci_arena\.engine/u,
+  );
+
+  engine.workspace_name = "different-workspace";
+  assert.throws(
+    () => validateCompositionManifests(composition, available),
+    /installer-integration workspace is invalid or inconsistent for uci_arena\.engine/u,
+  );
+});
+
 test("composition may add explicit suite wiring without rewriting provider manifests", () => {
   const expanded = structuredClone(composition);
   expanded.components.find(

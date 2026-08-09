@@ -509,6 +509,10 @@ provider_installer_integration:
     - The provider manifest names one digest-verified renderer entrypoint and
       its declared dependency runtime; Installer never selects an interpreter
       from a suffix, source layout, or provider id.
+    - A manifest that declares installer integration also declares the same
+      workspace_name at the component root. Release assembly rejects a missing
+      or divergent projection before catalog generation, and runtime payload
+      validation independently enforces the same invariant before mutation.
     - Dependency inputs are explicit receipt-verified active roots,
       entrypoints, or safe component-relative paths. Required bindings fail
       closed; unavailable optional bindings are omitted.
@@ -1047,6 +1051,10 @@ components:
       declared by arena-component.json must appear in that component's
       composition dependency edges. Composition may add explicit suite wiring,
       but it may never omit or weaken a provider-declared runtime dependency.
+    - Release assembly rejects an installer-integration workspace declaration
+      that is absent from or differs from the component manifest's top-level
+      workspace_name. A clean suite build cannot defer that provider contract
+      contradiction to the installed setup transaction.
     - Every platform release lock records the exact product-composition file
       name and SHA-256. Lock validation resolves component identity,
       repository, version, and dependency edges from that composition rather

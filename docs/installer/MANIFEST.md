@@ -156,6 +156,12 @@ suite default without Installer learning provider semantics. The field is
 optional for existing v1 manifests; omission preserves the original
 saved-locator-then-install-receipt selection behavior.
 
+When `installer_integration` is present, the component manifest also carries a
+top-level `workspace_name` with exactly the same value. Provider release tooling
+should project both fields from one provider-owned workspace authority. Suite
+assembly rejects a missing or divergent projection before catalog generation,
+and setup validates it again before installation mutation.
+
 Installer passes one `arena_provider_install_context_v1` document. The context
 contains only receipt-verified roots or entrypoints and validated locator paths;
 it never contains credential contents. The provider returns one closed

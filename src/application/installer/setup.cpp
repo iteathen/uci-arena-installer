@@ -1172,7 +1172,9 @@ void validate_provider_installer_integration(const json& manifest,
         !integration.contains("locator_bindings") ||
         !integration.at("locator_bindings").is_array() ||
         integration.at("locator_bindings").size() > 32) {
-        throw std::runtime_error("provider installer-integration contract is invalid");
+        throw std::runtime_error(
+            "provider installer-integration contract is invalid: " +
+            manifest.value("component_id", "unknown"));
     }
     const std::string integration_entrypoint =
         integration.at("entrypoint").get<std::string>();

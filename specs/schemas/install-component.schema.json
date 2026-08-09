@@ -5,6 +5,9 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "schema_version", "component_id", "component_version", "files"],
+  "dependentRequired": {
+    "installer_integration": ["workspace_name"]
+  },
   "properties": {
     "schema": {"const": "arena_install_component_v1"},
     "schema_version": {"const": 1},
