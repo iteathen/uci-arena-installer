@@ -22,7 +22,7 @@
       "repository": "iteathen/UCI_Arena",
       "required": true,
       "default_enabled": true,
-      "requires": []
+      "requires": ["node_runtime.private"]
     },
     {
       "role": "evidence_runtime",
