@@ -1,55 +1,58 @@
-# AGENTS.md
+# UCI Arena Installer Agent Contract
 
-This repository owns the UCI Arena installation and release-assembly product.
-It does not own Manager Core, UCI Arena Engine, Book Forge, Evidence Service,
-or Lichess adapter behavior.
+This repository owns UCI Arena suite composition, installation, upgrade/repair/uninstall, release assembly, staging, validation, recovery, and operator-facing deployment results. It does not own Engine, Manager, Lichess Bot, Book Forge, or Evidence Service behavior.
 
-## Required architecture
+## Required start
 
-- Read `specs/suite_lego_boundaries_v1.yaml` and the authoritative
-  `docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md` before changing
-  repository ownership, component contracts, composition, or cross-repository
-  dependencies.
-- Read `specs/00_READ_FIRST.yaml` and `docs/installer/ARCHITECTURE.md` before
-  substantive work.
-- Run `node tools/spec-preflight.mjs --task "<task>" --changed-files <paths>`
-  before planning, inspection, implementation, or validation.
-- Read every spec returned by preflight. Rerun it if touched paths change.
-- Update the governing spec before public behavior.
-- Components enter only as immutable release artifacts plus versioned manifests
-  and provenance. Source-tree paths and provider-private APIs are forbidden.
-- Mechanism, configuration, package data, and policy have separate owners.
-- Build an explicit plan before mutation. Stage and validate before commit.
-- Preserve a working installation and report rollback failure separately.
-- The Windows scope launcher delegates to fixed-scope bundles. Personal is
-  non-elevated; All users truthfully requires elevation.
-- Do not create automatic pull-request or push CI. Local validation is the
-  default; release automation must be manual.
+1. Read `.agents/core-standard.md`.
+2. Before substantive planning, inspection, implementation, or validation run:
 
-## Mandatory suite boundaries
-
-- This repository owns composition and deployment, not provider behavior.
-- Consume only immutable provider artifacts plus versioned manifests and
-  provenance; provider source and build trees are forbidden inputs.
-- Put product knowledge in manifests/compositions. Product names must not
-  select installer mechanism behavior.
-- A new conforming component must require composition data and tests, not a
-  rewrite of installer control flow.
-
-## Mandatory validation
-
-For launcher or release-envelope changes:
-
-```powershell
-node tools/spec-check.mjs
-node --test tools/release/*.test.mjs
-cmake --preset windows-release
-cmake --build --preset windows-release
-ctest --preset windows-release --output-on-failure
+```text
+node tools/spec-preflight.mjs --task "<task>" --changed-files <likely paths>
 ```
 
-Installer lifecycle changes additionally require the focused `[setup]` native
-tests and the synthetic matrix in `docs/installer/TEST_MATRIX.md`.
+3. Read every active spec returned by preflight; rerun when touched paths change materially.
+4. For repository ownership, component contracts, composition, or cross-repository dependencies, also read `docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md` and `specs/suite_lego_boundaries_v1.yaml`.
 
-Commit real code on an off-main branch, push it, and open a draft pull request.
-Do not leave dirty worktrees, obsolete build trees, or merged branches.
+Do not preload historical release notes, retired installer approaches, provider implementation docs, or unrelated specs.
+
+## Authority and ownership
+
+`specs/00_READ_FIRST.yaml` is the installer foundation. The complete suite LEGO architecture owns cross-repository product boundaries. Current installer/component contracts own deployment semantics. Historical plans and provider source layouts are not installation authority.
+
+Installer consumes independently released components only through immutable artifacts, versioned manifests/contracts, checksums/provenance, and declared compatibility. Provider source trees, build trees, private APIs, and product-name-based mechanism branches are forbidden inputs.
+
+Before adding a new installation mechanism, package rule, compatibility path, validator, state store, or recovery flow, search the current installer owner/contracts first. A new conforming component should require composition data and focused tests, not control-flow rewrites.
+
+## Installation safeguards
+
+Installation lifecycle changes are high-consequence operations. Preserve these rules:
+
+- inspect and validate identity/compatibility before mutation;
+- create an explicit install plan before filesystem/service mutation;
+- stage and validate before replacement;
+- preserve user-owned/pre-existing data and the last working installation;
+- make rollback and rollback failure visible;
+- keep repeated execution idempotent and partial state understandable;
+- keep mechanism, configuration, package data, and product policy separately owned;
+- Personal scope remains non-elevated; All users truthfully requires legitimate Windows elevation;
+- never leave two Manager/provider daemon authorities active for one installation scope;
+- never read, print, copy, hash, package, log, or place credential contents in arguments/receipts.
+
+A small reversible documentation-only change does not require release-grade lifecycle ceremony; use the proportionality rules in `.agents/core-standard.md`.
+
+## Validation and release
+
+Validate locally first. Use the preflight-selected owner/contract checks plus the applicable installer matrix. Launcher/release-envelope work uses the documented native/release checks; lifecycle changes additionally require the focused setup tests and synthetic lifecycle matrix.
+
+Automatic pull-request/push CI remains disabled. Release activity is explicit. CI is confirmation, not an editor or exploratory debugger.
+
+## Execution and integration
+
+For code changes, modify tracked source on an off-main branch, include proportionate tests/evidence, inspect actual effects, commit, push, and open a draft PR. Do not leave dirty worktrees, obsolete build trees, or ambiguous staged state.
+
+Before merge, review the complete diff, freeze the intended head, revalidate the exact head/target/checks, use an expected-head guard where supported, and verify target integration.
+
+## Completion
+
+Complete when the requested deployment outcome is evidenced, component ownership remains clean, a working/recoverable installation is preserved where applicable, triggered safeguards pass, and no material invalid partial state remains.
