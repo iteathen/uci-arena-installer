@@ -139,6 +139,39 @@ compatibility:
 
 Contracts use project-owned schemas and types. Third-party SDK objects, private storage records, raw shell command strings, and provider-internal paths cannot cross a repository boundary.
 
+### 3.1 Future Lichess game archive and training-data boundary
+
+Status: architecture reserved; no current runtime or installation authority.
+
+Lichess Bot is the sole capture and export owner for games it plays. A future implementation should persist one provider-owned canonical game record and derive both Manager history/replay projections and optional training exports from that record. Manager and training consumers must not read the provider's SQLite database, logs, or private runtime files, and the provider must not emit CCR or import Restaurant internals.
+
+The reserved portable export is an immutable, content-addressed, Zstandard-compressed bundle:
+
+```text
+manifest.json
+games.pgn.zst
+positions.jsonl.zst
+```
+
+`games.pgn.zst` carries complete terminal games for replay and interoperability. `positions.jsonl.zst` carries one UTF-8 JSON object per pre-move position and deliberately follows the Lichess evaluation-database envelope: a four-field top-level `fen`, optional genuine Lichess-compatible `evals`, and an additive versioned `arena` namespace. The namespace retains the full six-field FEN, remote game id, ply, played UCI move, actor, clocks when available, result, termination, immutable engine/runtime provenance, and optional typed search evidence. MCGS simulations, WDL, proof state, or sparse legal-move policy remain Arena extensions and never masquerade as Lichess depth, knodes, centipawn, mate, or PV fields.
+
+The bundle manifest binds the schema major, provider and export-policy identity, source range, counts, byte sizes, and member digests. Bundles are append-only segments: publication is atomic, retries deduplicate by remote game identity plus content identity, and a partial or invalid bundle never advances the provider-owned cursor. Training exports remove or pseudonymize usernames by default and never contain credentials, token paths, chat, headers, IP data, or raw logs. Any later training reuse has a separate explicit policy gate for applicable terms, licensing, privacy, retention, deletion, and redistribution; this architecture grants no automatic reuse authority.
+
+An external training system such as Restaurant consumes this artifact through its own registered source adapter:
+
+```text
+Lichess Bot canonical game archive
+        -> immutable PGN.zst + JSONL.zst export
+        -> Restaurant source adapter / optional offline reanalysis
+        -> delivery and preparation
+        -> model-declared CCR materialization
+        -> training
+```
+
+Restaurant owns source eligibility, sampling, weighting, reanalysis, feature and target semantics, CCR selection, and dataset lineage. Raw game outcomes, played moves, and provider search evidence are provenance-bearing observations, not automatically valid value or policy targets. If the active Restaurant contract requires engine evaluations, an offline Restaurant-owned derivation may add genuine `evals` in a new immutable derived stream; it must never overwrite the provider's raw export or relabel game outcomes or MCGS statistics as Stockfish-style evaluation evidence.
+
+Future Manager Live Games, Game History, and Replay surfaces use bounded typed provider projections over the same canonical game identity. UI-specific records cannot become a second game archive, and Installer only preserves declared provider data paths and wires declared contract locations. Installer never interprets games, evaluations, model semantics, training eligibility, or CCR.
+
 ## 4. Engine source topology
 
 ```text
