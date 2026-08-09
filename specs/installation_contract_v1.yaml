@@ -512,9 +512,16 @@ provider_installer_integration:
     - Dependency inputs are explicit receipt-verified active roots,
       entrypoints, or safe component-relative paths. Required bindings fail
       closed; unavailable optional bindings are omitted.
-    - Locator subscriptions are named and typed. Saving a locator refreshes
-      only installed consumers that declare that kind, without provider-id
-      branches.
+    - Locator subscriptions are named and typed. Each binding may declare the
+      accepted authority sources saved_locator and install_receipt. An omitted
+      source declaration preserves the v1 saved-then-receipt behavior for
+      existing manifests. Saving a locator refreshes only installed consumers
+      that declare that kind, without provider-id branches.
+    - Installer supplies a locator only from a source accepted by that binding.
+      In particular, a receipt-owned suite default is not presented through a
+      saved-locator-only override binding merely because both use the same
+      discovery kind. Selection remains data-driven and never branches on a
+      provider or component identity.
     - Context contains component identity, immutable active root, provider
       workspace, enablement, declared bindings, and validated locator paths.
       Credential contents never enter context, argv, logs, receipts, or output.
@@ -1768,13 +1775,14 @@ transaction:
         false, malformed permissions fail closed, and adaptive-play authority
         is never inferred.
       - Lichess configuration activation follows the provider-declared required
-        and optional locator bindings. Missing optional timing evidence retains
-        conservative foreground search and disables opponent-turn work; missing,
-        invalid, incompatible, or unqualified transport evidence selects the
-        provider-owned 650 millisecond bootstrap reserve. Provided evidence is
-        never weakened or rewritten, and the provider remains authoritative for
-        the exact qualification required by a selected live-play mode before it
-        accesses credentials.
+        and optional locator bindings, including each binding's accepted
+        locator-authority sources. Missing optional timing evidence retains
+        conservative foreground search and disables opponent-turn work;
+        missing, invalid, incompatible, or unqualified transport evidence
+        selects the provider-owned 650 millisecond bootstrap reserve. Provided
+        evidence is never weakened or rewritten, and the provider remains
+        authoritative for the exact qualification required by a selected
+        live-play mode before it accesses credentials.
       - Runtime verification requires opening_book_active and syzygy_active,
         not merely the presence of saved locators.
       - Protected live acceptance requires the selected timing profile to be

@@ -136,7 +136,8 @@ void write_mock_renderer_runtime(const SetupPaths& paths) {
 fs::path write_mock_renderer_consumer(const SetupPaths& paths,
                                       const std::string& component_id,
                                       const std::string& locator_kind,
-                                      const fs::path& startup_workspace_relative = "runtime") {
+                                      const fs::path& startup_workspace_relative = "runtime",
+                                      const std::vector<std::string>& accepted_sources = {}) {
     write_mock_renderer_runtime(paths);
     const fs::path active_root =
         paths.install_root / "components" / component_id / "1.0.0";
@@ -146,6 +147,12 @@ fs::path write_mock_renderer_consumer(const SetupPaths& paths,
     fs::create_directories(active_root);
     fs::create_directories(workspace);
     std::ofstream(renderer, std::ios::binary) << "renderer";
+    json locator_binding{{"name", "selected"},
+                         {"kind", locator_kind},
+                         {"required", false}};
+    if (!accepted_sources.empty()) {
+        locator_binding["accepted_sources"] = accepted_sources;
+    }
     const json integration{
         {"schema", "arena_provider_installer_integration_v1"},
         {"schema_version", 1},
@@ -158,10 +165,7 @@ fs::path write_mock_renderer_consumer(const SetupPaths& paths,
         {"workspace_name", component_id},
         {"configure_when_disabled", true},
         {"dependency_bindings", json::array()},
-        {"locator_bindings",
-         json::array({{{"name", "selected"},
-                       {"kind", locator_kind},
-                       {"required", false}}})},
+        {"locator_bindings", json::array({locator_binding})},
         {"startup_control",
          {{"schema", "arena_provider_startup_control_v1"},
           {"schema_version", 1},
@@ -1800,6 +1804,56 @@ TEST_CASE("stale optional locator falls back to validated managed knowledge") {
     REQUIRE(fs::is_regular_file(locator_path));
     REQUIRE(json::parse(std::ifstream(locator_path)).at("path") ==
             stale_locator.at("path"));
+    fs::remove_all(root);
+}
+
+TEST_CASE("provider locator source policy keeps managed receipts out of saved overrides") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path managed_source = root / "managed-book";
+    fs::create_directories(managed_source);
+    std::ofstream(managed_source / "book.bin") << "managed knowledge";
+    static_cast<void>(
+        SetupEngine::import_path(paths, "opening_book", managed_source, true));
+
+    const fs::path locator_path = paths.data_root / "locators" / "opening_book.json";
+    json stale_locator = json::parse(std::ifstream(locator_path));
+    stale_locator["path"] = (root / "retired-book.bin").string();
+    std::ofstream(locator_path, std::ios::binary | std::ios::trunc)
+        << stale_locator.dump(2);
+
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.saved-only.consumer", "opening_book", "runtime",
+        {"saved_locator"});
+    const json empty_locators = json::object();
+    std::ofstream(configuration, std::ios::binary | std::ios::trunc)
+        << json{{"schema", "replaceable_provider_configuration_v1"},
+                {"enabled", false},
+                {"bindings", json::object()},
+                {"locators", empty_locators}}
+               .dump(2);
+    const fs::path projection =
+        configuration.parent_path() / "generated" / "context-projection.json";
+    fs::create_directories(projection.parent_path());
+    std::ofstream(projection, std::ios::binary)
+        << json{{"schema", "replaceable_provider_projection_v1"},
+                {"locators", empty_locators}}
+               .dump(2);
+
+    const json verified = SetupEngine::verify(paths);
+    INFO(verified.dump(2));
+    REQUIRE(verified.at("ok") == true);
+
+    const fs::path operator_selected = root / "operator-selected.bin";
+    std::ofstream(operator_selected) << "explicit operator selection";
+    const json imported =
+        SetupEngine::import_path(paths, "opening_book", operator_selected, false);
+    REQUIRE(imported.at("refreshed_consumers") ==
+            json::array({"replaceable.saved-only.consumer"}));
+    REQUIRE(json::parse(std::ifstream(configuration))
+                .at("locators")
+                .at("selected") ==
+            fs::absolute(operator_selected).lexically_normal().string());
     fs::remove_all(root);
 }
 

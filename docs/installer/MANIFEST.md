@@ -149,7 +149,12 @@ An installable provider that needs generated configuration declares one
 `arena_provider_installer_integration_v1` object. It names a payload-owned
 renderer entrypoint, the exact dependency runtime used to invoke it, its
 workspace, whether disabled installation still produces safe configuration,
-and bounded dependency and saved-locator bindings.
+and bounded dependency and locator bindings. A locator binding may declare
+`accepted_sources` containing `saved_locator`, `install_receipt`, or both. This
+lets a provider distinguish an operator-selected override from a compatible
+suite default without Installer learning provider semantics. The field is
+optional for existing v1 manifests; omission preserves the original
+saved-locator-then-install-receipt selection behavior.
 
 Installer passes one `arena_provider_install_context_v1` document. The context
 contains only receipt-verified roots or entrypoints and validated locator paths;

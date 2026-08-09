@@ -1142,6 +1142,10 @@ bool valid_knowledge_activation_kind(const std::string_view kind) {
     return kind == "opening_book" || kind == "syzygy";
 }
 
+bool valid_provider_locator_source(const std::string_view source) {
+    return source == "saved_locator" || source == "install_receipt";
+}
+
 void validate_provider_installer_integration(const json& manifest,
                                              const std::set<fs::path>& listed_files) {
     if (!manifest.contains("installer_integration")) {
@@ -1245,7 +1249,8 @@ void validate_provider_installer_integration(const json& manifest,
     std::set<std::string> locator_names;
     std::set<std::string> locator_kinds;
     for (const auto& binding : integration.at("locator_bindings")) {
-        if (!binding.is_object() || binding.size() != 3 ||
+        if (!binding.is_object() || (binding.size() != 3 && binding.size() != 4) ||
+            (binding.size() == 4 && !binding.contains("accepted_sources")) ||
             !binding.contains("name") || !binding.at("name").is_string() ||
             !valid_identifier(binding.at("name").get<std::string>()) ||
             !locator_names.insert(binding.at("name").get<std::string>()).second ||
@@ -1254,6 +1259,23 @@ void validate_provider_installer_integration(const json& manifest,
             !locator_kinds.insert(binding.at("kind").get<std::string>()).second ||
             !binding.contains("required") || !binding.at("required").is_boolean()) {
             throw std::runtime_error("provider installer locator binding is invalid");
+        }
+        if (binding.contains("accepted_sources")) {
+            const json& accepted_sources = binding.at("accepted_sources");
+            std::set<std::string> unique_sources;
+            if (!accepted_sources.is_array() || accepted_sources.empty() ||
+                accepted_sources.size() > 2) {
+                throw std::runtime_error(
+                    "provider installer locator sources are invalid");
+            }
+            for (const auto& source : accepted_sources) {
+                if (!source.is_string() ||
+                    !valid_provider_locator_source(source.get<std::string>()) ||
+                    !unique_sources.insert(source.get<std::string>()).second) {
+                    throw std::runtime_error(
+                        "provider installer locator sources are invalid");
+                }
+            }
         }
     }
     bool declares_startup = false;
@@ -3616,29 +3638,57 @@ std::optional<fs::path> saved_locator_path(const fs::path& data_root, const std:
 
 std::optional<fs::path> provider_locator_path(const SetupPaths& paths,
                                               const std::string& kind,
+                                              const json& binding,
                                               std::optional<json>& discovery_cache) {
-    try {
-        if (const auto saved = saved_locator_path(paths.data_root, kind);
-            saved.has_value()) {
-            return saved;
+    const auto accepts = [&binding](const std::string_view source) {
+        if (!binding.contains("accepted_sources")) {
+            return true;
         }
-    } catch (const std::exception&) {
-        // Retained locator evidence is not authority. A broken optional
-        // selection remains visible in inventory while a verified managed
-        // knowledge receipt may provide a safe fallback.
+        return std::ranges::any_of(
+            binding.at("accepted_sources"), [source](const json& candidate) {
+                return candidate.get<std::string>() == source;
+            });
+    };
+
+    if (accepts("saved_locator")) {
+        try {
+            if (const auto saved = saved_locator_path(paths.data_root, kind);
+                saved.has_value()) {
+                return saved;
+            }
+        } catch (const std::exception&) {
+            // Retained locator evidence is not authority. A broken optional
+            // selection may still use a verified receipt when the provider
+            // explicitly accepts that source.
+        }
+    }
+    if (!accepts("install_receipt")) {
+        return std::nullopt;
     }
 
     if (!discovery_cache.has_value()) {
         discovery_cache = discovery_rows(paths, {}, nullptr);
     }
-    const json& selected = discovery_cache->at(kind).at("selection");
-    if (selected.value("source", "") != "install_receipt" ||
-        selected.value("state", "") != "installed_managed" ||
-        !selected.contains("path") || !selected.at("path").is_string()) {
+    const json* selected = nullptr;
+    for (const auto& candidate : discovery_cache->at(kind).at("candidates")) {
+        if (candidate.value("source", "") != "install_receipt" ||
+            candidate.value("state", "") != "installed_managed" ||
+            !candidate.contains("path") || !candidate.at("path").is_string()) {
+            continue;
+        }
+        if (selected == nullptr ||
+            discovery_quality_score(candidate) > discovery_quality_score(*selected) ||
+            (discovery_quality_score(candidate) == discovery_quality_score(*selected) &&
+             candidate.at("path").get<std::string>() <
+                 selected->at("path").get<std::string>())) {
+            selected = &candidate;
+        }
+    }
+    if (selected == nullptr) {
         return std::nullopt;
     }
     const fs::path path =
-        normalized_absolute(selected.at("path").get<std::string>());
+        normalized_absolute(selected->at("path").get<std::string>());
     static_cast<void>(validate_import_locator(kind, path));
     return path;
 }
@@ -3695,7 +3745,8 @@ ProviderInstallResult render_provider_installation(
         const std::string name = binding.at("name").get<std::string>();
         const std::string kind = binding.at("kind").get<std::string>();
         try {
-            const auto selected = provider_locator_path(paths, kind, discovery_cache);
+            const auto selected =
+                provider_locator_path(paths, kind, binding, discovery_cache);
             if (selected.has_value()) {
                 locators[name] = selected->string();
             } else if (binding.at("required").get<bool>()) {
