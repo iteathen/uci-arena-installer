@@ -11,13 +11,13 @@ import {
 
 const root = path.resolve(import.meta.dirname, "../..");
 const composition = JSON.parse(readFileSync(
-  path.join(root, "compositions", "complete-arena-0.3.16.json"),
+  path.join(root, "compositions", "complete-arena-0.3.17.json"),
   "utf8",
 ));
 
 test("complete composition declares independently versioned suite bricks", () => {
   const validated = validateProductComposition(composition);
-  assert.equal(validated.product_release, "0.3.16");
+  assert.equal(validated.product_release, "0.3.17");
   assert.equal(validated.installer.repository, "iteathen/uci-arena-installer");
   assert.deepEqual(
     new Set(validated.components.map((component) => component.repository)),
@@ -36,7 +36,7 @@ test("complete composition declares independently versioned suite bricks", () =>
       component.version,
     ])),
     {
-      "manager.core": "0.3.15",
+      "manager.core": "0.3.16",
       "uci_arena.engine": "0.1.8",
       "uci_arena_evidence.runtime": "0.3.4",
       "lichess.adapter": "1.0.9",
