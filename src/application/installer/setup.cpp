@@ -23,12 +23,13 @@
 #include <system_error>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 #include "arena/adapters/uci_process.hpp"
-#include "arena/application/installer/credential_recovery.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/process_supervisor.hpp"
 #include "arena/ports/asset_search_index.hpp"
+#include "arena/platform/filesystem_path.hpp"
 #include "arena/platform/service_control.hpp"
 #include "arena/platform/workspace_permissions.hpp"
 
@@ -50,7 +51,7 @@ constexpr std::size_t managed_profile_max_files = 16;
 constexpr const char* compiled_tuf_root_sha256 = ARENA_TUF_ROOT_SHA256;
 
 json read_json(const fs::path& path) {
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(platform::filesystem_api_path(path), std::ios::binary);
     if (!input) {
         throw std::runtime_error("cannot read JSON file: " + path.string());
     }
@@ -62,10 +63,11 @@ json read_json(const fs::path& path) {
 }
 
 void write_json_atomic(const fs::path& path, const json& value) {
-    fs::create_directories(path.parent_path());
+    fs::create_directories(platform::filesystem_api_path(path.parent_path()));
     const fs::path temporary = path.string() + ".tmp";
     {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        std::ofstream output(platform::filesystem_api_path(temporary),
+                             std::ios::binary | std::ios::trunc);
         if (!output) {
             throw std::runtime_error("cannot write " + temporary.string());
         }
@@ -76,11 +78,13 @@ void write_json_atomic(const fs::path& path, const json& value) {
         }
     }
     std::error_code error;
-    fs::rename(temporary, path, error);
+    fs::rename(platform::filesystem_api_path(temporary),
+               platform::filesystem_api_path(path), error);
     if (error) {
-        fs::remove(path, error);
+        fs::remove(platform::filesystem_api_path(path), error);
         error.clear();
-        fs::rename(temporary, path, error);
+        fs::rename(platform::filesystem_api_path(temporary),
+                   platform::filesystem_api_path(path), error);
     }
     if (error) {
         throw std::runtime_error("cannot atomically activate " + path.string());
@@ -91,7 +95,7 @@ std::string sha256_file(const fs::path& path) {
     if (sodium_init() < 0) {
         throw std::runtime_error("libsodium initialization failed");
     }
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(platform::filesystem_api_path(path), std::ios::binary);
     if (!input) {
         throw std::runtime_error("cannot hash " + path.string());
     }
@@ -133,67 +137,6 @@ bool valid_identifier(const std::string& value) {
            });
 }
 
-std::optional<std::array<std::uint64_t, 3>> semantic_version(const std::string_view value) {
-    std::array<std::uint64_t, 3> parts{};
-    std::size_t part = 0;
-    bool has_digit = false;
-    for (const unsigned char character : value) {
-        if (character == '.') {
-            if (!has_digit || part >= parts.size() - 1) {
-                return std::nullopt;
-            }
-            part += 1;
-            has_digit = false;
-            continue;
-        }
-        if (std::isdigit(character) == 0) {
-            return std::nullopt;
-        }
-        const std::uint64_t digit = character - '0';
-        if (parts[part] >
-            ((std::numeric_limits<std::uint64_t>::max)() - digit) / 10) {
-            return std::nullopt;
-        }
-        parts[part] = parts[part] * 10 + digit;
-        has_digit = true;
-    }
-    if (!has_digit || part != parts.size() - 1) {
-        return std::nullopt;
-    }
-    return parts;
-}
-
-bool standalone_service_component(const std::string_view component_id) {
-    return component_id == "book_forge.service" ||
-           component_id == "uci_arena_evidence.service";
-}
-
-bool standalone_service_contract_required(const std::string& component_id,
-                                          const std::string& component_version) {
-    if (!standalone_service_component(component_id)) {
-        return false;
-    }
-    const auto parsed = semantic_version(component_version);
-    if (!parsed.has_value()) {
-        throw std::runtime_error(
-            "standalone service component version is not semantic: " + component_version);
-    }
-    return parsed->at(0) > 0 || parsed->at(1) >= 2;
-}
-
-bool manager_service_api_required(const std::string& component_id,
-                                  const std::string& component_version) {
-    if (!standalone_service_component(component_id)) {
-        return false;
-    }
-    const auto parsed = semantic_version(component_version);
-    if (!parsed.has_value()) {
-        throw std::runtime_error(
-            "standalone service component version is not semantic: " + component_version);
-    }
-    return parsed->at(0) > 0 || parsed->at(1) >= 3;
-}
-
 bool valid_bundle_owner(const std::string& value) {
     return !value.empty() && value.size() <= 128 &&
            std::all_of(value.begin(), value.end(), [](const unsigned char character) {
@@ -212,7 +155,8 @@ bool contains_symbolic_link(const fs::path& value) {
     std::error_code error;
     for (const auto& part : absolute.relative_path()) {
         current /= part;
-        const fs::file_status status = fs::symlink_status(current, error);
+        const fs::file_status status =
+            fs::symlink_status(platform::filesystem_api_path(current), error);
         if (error) {
             error.clear();
             continue;
@@ -273,6 +217,11 @@ bool within(const fs::path& root, const fs::path& candidate) {
         }
     }
     return normalized_candidate != normalized_root;
+}
+
+bool at_or_within(const fs::path& root, const fs::path& candidate) {
+    return normalized_absolute(root) == normalized_absolute(candidate) ||
+           within(root, candidate);
 }
 
 void require_external_token_path(
@@ -627,7 +576,7 @@ json stage_file_set(const fs::path& manifest_path, const json& catalog_artifact,
             !within(stage, stage / relative)) {
             throw std::runtime_error("file-set manifest contains an unsafe or duplicate path");
         }
-        if (component_id.rfind("syzygy.", 0) == 0) {
+        if (provider_syzygy) {
             const auto generic = relative.generic_string();
             const auto extension = relative.extension().string();
             if (!generic.starts_with("tablebases/") ||
@@ -676,18 +625,35 @@ json stage_file_set(const fs::path& manifest_path, const json& catalog_artifact,
         throw std::runtime_error("file-set manifest bytes differ from signed catalog");
     }
 
-    const json component_manifest{
+    json component_manifest{
         {"schema", "arena_install_component_v1"},
         {"schema_version", 1},
         {"component_id", component_id},
         {"component_version", component_version},
         {"target_triple", "any"},
         {"entrypoints", json::object()},
-        {"capabilities", json::array({"syzygy"})},
+        {"capabilities",
+         provider_syzygy ? json::array({"syzygy"})
+                          : file_set.value("capabilities", json::array())},
         {"startup", json::object()},
         {"data_paths", json::array()},
         {"files", installed_files},
     };
+    if (provider_syzygy) {
+        component_manifest["discovery"] = json::array(
+            {{{"kind", "syzygy"},
+              {"locator", {{"source", "component_path"}, {"path", "tablebases"}}}}});
+        component_manifest["activation"] = json::array(
+            {{{"kind", "syzygy"},
+              {"source_path", "tablebases"},
+              {"destination_root", "knowledge_root"},
+              {"destination_path", "tablebases"}}});
+    } else if (file_set.contains("discovery")) {
+        component_manifest["discovery"] = file_set.at("discovery");
+    }
+    if (!provider_syzygy && file_set.contains("activation")) {
+        component_manifest["activation"] = file_set.at("activation");
+    }
     write_json_atomic(stage / "arena-component.json", component_manifest);
     return component_manifest;
 }
@@ -1045,9 +1011,9 @@ std::optional<json> validate_standalone_service_contract(
     const std::string component_id = manifest.at("component_id").get<std::string>();
     const std::string component_version = manifest.at("component_version").get<std::string>();
     if (!manifest.contains("contract_manifest")) {
-        if (standalone_service_contract_required(component_id, component_version)) {
+        if (manifest.contains("manager_integration_api")) {
             throw std::runtime_error(
-                "standalone service component is missing its contract manifest");
+                "integrated provider component is missing its contract manifest");
         }
         return std::nullopt;
     }
@@ -1134,8 +1100,6 @@ std::optional<json> validate_standalone_service_contract(
             "standalone service contract does not preserve persistent service data");
     }
     std::optional<json> manager_integration_api;
-    const bool manager_api_required =
-        manager_service_api_required(component_id, component_version);
     if (manifest.contains("manager_integration_api") ||
         contract.contains("manager_integration_api")) {
         if (!manifest.contains("manager_integration_api") ||
@@ -1147,9 +1111,6 @@ std::optional<json> validate_standalone_service_contract(
         }
         manager_integration_api = validate_manager_service_api(
             manifest.at("manager_integration_api"), manifest);
-    } else if (manager_api_required) {
-        throw std::runtime_error(
-            "standalone service component is missing its Manager API declaration");
     }
     json projection{
         {"schema", "uci_arena_standalone_service_contract_v1"},
@@ -1170,6 +1131,397 @@ struct ValidatedComponentPayload {
     std::optional<json> service_contract;
 };
 
+bool valid_discovery_kind(std::string_view kind);
+json validate_book_locator(const fs::path& path);
+json validate_syzygy_locator(const fs::path& path);
+json inspect_timing_evidence_candidate(const fs::path& path);
+json inspect_lichess_profile_candidate(const fs::path& path,
+                                       std::string_view schema_prefix,
+                                       std::string_view current_schema);
+
+bool valid_knowledge_activation_kind(const std::string_view kind) {
+    return kind == "opening_book" || kind == "syzygy";
+}
+
+bool valid_provider_locator_source(const std::string_view source) {
+    return source == "saved_locator" || source == "install_receipt";
+}
+
+void validate_provider_installer_integration(const json& manifest,
+                                             const std::set<fs::path>& listed_files) {
+    if (!manifest.contains("installer_integration")) {
+        return;
+    }
+    const json& integration = manifest.at("installer_integration");
+    if (!integration.is_object() || integration.size() < 9 || integration.size() > 11 ||
+        integration.value("schema", "") != "arena_provider_installer_integration_v1" ||
+        integration.value("schema_version", 0) != 1 ||
+        !integration.contains("entrypoint") ||
+        !integration.at("entrypoint").is_string() ||
+        !valid_identifier(integration.at("entrypoint").get<std::string>()) ||
+        integration.value("arguments", json::array()) != json::array({"--context"}) ||
+        !integration.contains("workspace_name") ||
+        !integration.at("workspace_name").is_string() ||
+        !valid_identifier(integration.at("workspace_name").get<std::string>()) ||
+        integration.value("workspace_name", "") != manifest.value("workspace_name", "") ||
+        (integration.value("workspace_placement", "workspace_root") != "workspace_root" &&
+         integration.value("workspace_placement", "workspace_root") != "product_data") ||
+        !integration.contains("configure_when_disabled") ||
+        !integration.at("configure_when_disabled").is_boolean() ||
+        !integration.contains("dependency_bindings") ||
+        !integration.at("dependency_bindings").is_array() ||
+        integration.at("dependency_bindings").size() > 32 ||
+        !integration.contains("locator_bindings") ||
+        !integration.at("locator_bindings").is_array() ||
+        integration.at("locator_bindings").size() > 32) {
+        throw std::runtime_error(
+            "provider installer-integration contract is invalid: " +
+            manifest.value("component_id", "unknown"));
+    }
+    const std::string integration_entrypoint =
+        integration.at("entrypoint").get<std::string>();
+    if (!manifest.contains("entrypoints") ||
+        !manifest.at("entrypoints").contains(integration_entrypoint) ||
+        !manifest.at("entrypoints").at(integration_entrypoint).is_string()) {
+        throw std::runtime_error("provider installer-integration entrypoint is unavailable");
+    }
+    const fs::path integration_relative = fs::path(
+        manifest.at("entrypoints").at(integration_entrypoint).get<std::string>())
+                                               .lexically_normal();
+    if (!safe_relative_path(integration_relative) ||
+        !listed_files.contains(integration_relative)) {
+        throw std::runtime_error("provider installer-integration entrypoint is unlisted");
+    }
+    if (!manifest.contains("dependencies") || !manifest.at("dependencies").is_array()) {
+        throw std::runtime_error("provider installer-integration dependencies are unavailable");
+    }
+    std::set<std::string> dependencies;
+    for (const auto& dependency : manifest.at("dependencies")) {
+        if (!dependency.is_string() ||
+            !valid_identifier(dependency.get_ref<const std::string&>()) ||
+            !dependencies.insert(dependency.get<std::string>()).second) {
+            throw std::runtime_error("component dependency declaration is invalid");
+        }
+    }
+    const json& invocation = integration.at("invocation");
+    if (!invocation.is_object() || invocation.size() != 3 ||
+        invocation.value("kind", "") != "dependency_runtime" ||
+        !invocation.contains("runtime_component_id") ||
+        !invocation.at("runtime_component_id").is_string() ||
+        !invocation.contains("runtime_entrypoint") ||
+        !invocation.at("runtime_entrypoint").is_string() ||
+        !valid_identifier(invocation.at("runtime_component_id").get<std::string>()) ||
+        !valid_identifier(invocation.at("runtime_entrypoint").get<std::string>()) ||
+        !dependencies.contains(invocation.at("runtime_component_id").get<std::string>())) {
+        throw std::runtime_error("provider installer-integration invocation is invalid");
+    }
+    std::set<std::string> binding_names;
+    for (const auto& binding : integration.at("dependency_bindings")) {
+        if (!binding.is_object() || !binding.contains("name") ||
+            !binding.at("name").is_string() ||
+            !valid_identifier(binding.at("name").get<std::string>()) ||
+            !binding_names.insert(binding.at("name").get<std::string>()).second ||
+            !binding.contains("component_id") ||
+            !binding.at("component_id").is_string() ||
+            !valid_identifier(binding.at("component_id").get<std::string>()) ||
+            !binding.contains("required") || !binding.at("required").is_boolean()) {
+            throw std::runtime_error("provider installer dependency binding is invalid");
+        }
+        const std::string source = binding.value("source", "");
+        if (source == "entrypoint") {
+            if (binding.size() != 5 || !binding.contains("entrypoint") ||
+                !binding.at("entrypoint").is_string() ||
+                !valid_identifier(binding.at("entrypoint").get<std::string>())) {
+                throw std::runtime_error(
+                    "provider installer entrypoint binding is invalid");
+            }
+        } else if (source == "component_path") {
+            if (binding.size() != 5 || !binding.contains("path") ||
+                !binding.at("path").is_string() ||
+                !safe_relative_path(binding.at("path").get<std::string>())) {
+                throw std::runtime_error("provider installer path binding is invalid");
+            }
+        } else if (source != "active_root" || binding.size() != 4) {
+            throw std::runtime_error("provider installer dependency source is invalid");
+        }
+        if (binding.at("required").get<bool>() &&
+            !dependencies.contains(binding.at("component_id").get<std::string>())) {
+            throw std::runtime_error(
+                "required provider installer binding is not a component dependency");
+        }
+    }
+    std::set<std::string> locator_names;
+    std::set<std::string> locator_kinds;
+    for (const auto& binding : integration.at("locator_bindings")) {
+        if (!binding.is_object() || (binding.size() != 3 && binding.size() != 4) ||
+            (binding.size() == 4 && !binding.contains("accepted_sources")) ||
+            !binding.contains("name") || !binding.at("name").is_string() ||
+            !valid_identifier(binding.at("name").get<std::string>()) ||
+            !locator_names.insert(binding.at("name").get<std::string>()).second ||
+            !binding.contains("kind") || !binding.at("kind").is_string() ||
+            !valid_discovery_kind(binding.at("kind").get<std::string>()) ||
+            !locator_kinds.insert(binding.at("kind").get<std::string>()).second ||
+            !binding.contains("required") || !binding.at("required").is_boolean()) {
+            throw std::runtime_error("provider installer locator binding is invalid");
+        }
+        if (binding.contains("accepted_sources")) {
+            const json& accepted_sources = binding.at("accepted_sources");
+            std::set<std::string> unique_sources;
+            if (!accepted_sources.is_array() || accepted_sources.empty() ||
+                accepted_sources.size() > 2) {
+                throw std::runtime_error(
+                    "provider installer locator sources are invalid");
+            }
+            for (const auto& source : accepted_sources) {
+                if (!source.is_string() ||
+                    !valid_provider_locator_source(source.get<std::string>()) ||
+                    !unique_sources.insert(source.get<std::string>()).second) {
+                    throw std::runtime_error(
+                        "provider installer locator sources are invalid");
+                }
+            }
+        }
+    }
+    bool declares_startup = false;
+    const json capabilities = manifest.value("capabilities", json::array());
+    if (!capabilities.is_array()) {
+        throw std::runtime_error("component capabilities are not an array");
+    }
+    for (const auto& capability : capabilities) {
+        if (!capability.is_string() ||
+            !valid_identifier(capability.get_ref<const std::string&>())) {
+            throw std::runtime_error("component capability declaration is invalid");
+        }
+        declares_startup = declares_startup ||
+                           capability == "startup_install" ||
+                           capability == "startup_uninstall";
+    }
+    if (declares_startup != integration.contains("startup_control")) {
+        throw std::runtime_error(
+            "provider startup capability and installer control contract disagree");
+    }
+    if (!declares_startup) {
+        return;
+    }
+    const json& startup = integration.at("startup_control");
+    if (!startup.is_object() || startup.size() != 7 ||
+        startup.value("schema", "") != "arena_provider_startup_control_v1" ||
+        startup.value("schema_version", 0) != 1 ||
+        !startup.contains("entrypoint") || !startup.at("entrypoint").is_string() ||
+        !valid_identifier(startup.at("entrypoint").get<std::string>()) ||
+        !manifest.at("entrypoints").contains(
+            startup.at("entrypoint").get<std::string>()) ||
+        !startup.contains("actions") || !startup.at("actions").is_object() ||
+        startup.at("actions").size() != 2 ||
+        !startup.contains("workspace_argument") ||
+        !startup.at("workspace_argument").is_object() ||
+        startup.at("workspace_argument").size() != 2 ||
+        !startup.contains("configuration_argument") ||
+        !startup.at("configuration_argument").is_string() ||
+        !startup.contains("result") || !startup.at("result").is_object() ||
+        startup.at("result").size() != 3) {
+        throw std::runtime_error("provider startup control contract is invalid");
+    }
+    for (const auto action : {"install", "uninstall"}) {
+        if (!startup.at("actions").contains(action) ||
+            !startup.at("actions").at(action).is_array() ||
+            startup.at("actions").at(action).empty() ||
+            startup.at("actions").at(action).size() > 8) {
+            throw std::runtime_error("provider startup action is invalid");
+        }
+        for (const auto& argument : startup.at("actions").at(action)) {
+            if (!argument.is_string() ||
+                !valid_identifier(argument.get_ref<const std::string&>())) {
+                throw std::runtime_error("provider startup action argument is invalid");
+            }
+        }
+    }
+    const json& workspace_argument = startup.at("workspace_argument");
+    const std::string workspace_flag = workspace_argument.value("flag", "");
+    const fs::path workspace_relative = fs::path(
+        workspace_argument.value("relative_path", "")).lexically_normal();
+    const std::string configuration_flag =
+        startup.at("configuration_argument").get<std::string>();
+    const auto valid_flag = [](const std::string& flag) {
+        return flag.starts_with("--") && flag.size() > 2 &&
+               valid_identifier(flag.substr(2));
+    };
+    const json& result = startup.at("result");
+    const std::string envelope = result.value("envelope", "");
+    if (!valid_flag(workspace_flag) ||
+        (workspace_relative != fs::path(".") &&
+         !safe_relative_path(workspace_relative)) ||
+        !valid_flag(configuration_flag) ||
+        (envelope != "root" && envelope != "startup") ||
+        !result.contains("require_configuration_match_on_install") ||
+        !result.at("require_configuration_match_on_install").is_boolean() ||
+        !result.contains("require_live_on_install") ||
+        !result.at("require_live_on_install").is_boolean()) {
+        throw std::runtime_error("provider startup control values are invalid");
+    }
+}
+
+fs::path provider_workspace(const SetupPaths& paths, const json& integration) {
+    const std::string workspace_name =
+        integration.at("workspace_name").get<std::string>();
+    const std::string placement =
+        integration.value("workspace_placement", "workspace_root");
+    const fs::path root = placement == "product_data"
+                              ? paths.data_root / "provider-data"
+                              : paths.workspace_root;
+    const fs::path workspace = normalized_absolute(root / workspace_name);
+    if (!within(root, workspace)) {
+        throw std::runtime_error("provider workspace escapes its declared placement");
+    }
+    return workspace;
+}
+
+void validate_component_discovery(const json& manifest,
+                                  const std::set<fs::path>& listed_files) {
+    if (!manifest.contains("discovery")) {
+        return;
+    }
+    const json& declarations = manifest.at("discovery");
+    if (!declarations.is_array() || declarations.empty() || declarations.size() > 16) {
+        throw std::runtime_error("component discovery declaration is invalid");
+    }
+    std::set<std::string> kinds;
+    for (const auto& declaration : declarations) {
+        if (!declaration.is_object() || declaration.size() != 2 ||
+            !declaration.contains("kind") || !declaration.at("kind").is_string() ||
+            !valid_discovery_kind(declaration.at("kind").get<std::string>()) ||
+            !kinds.insert(declaration.at("kind").get<std::string>()).second ||
+            !declaration.contains("locator") || !declaration.at("locator").is_object()) {
+            throw std::runtime_error("component discovery entry is invalid");
+        }
+        const json& locator = declaration.at("locator");
+        const std::string source = locator.value("source", "");
+        if (source == "active_root") {
+            if (locator.size() != 1) {
+                throw std::runtime_error("active-root discovery locator is invalid");
+            }
+            continue;
+        }
+        if (source == "entrypoint") {
+            if (locator.size() != 2 || !locator.contains("entrypoint") ||
+                !locator.at("entrypoint").is_string() ||
+                !valid_identifier(locator.at("entrypoint").get<std::string>()) ||
+                !manifest.contains("entrypoints") ||
+                !manifest.at("entrypoints").is_object() ||
+                !manifest.at("entrypoints").contains(
+                    locator.at("entrypoint").get<std::string>())) {
+                throw std::runtime_error("entrypoint discovery locator is invalid");
+            }
+            continue;
+        }
+        if (source == "component_path") {
+            if (locator.size() != 2 || !locator.contains("path") ||
+                !locator.at("path").is_string()) {
+                throw std::runtime_error("component-path discovery locator is invalid");
+            }
+            const fs::path relative =
+                fs::path(locator.at("path").get<std::string>()).lexically_normal();
+            if (!safe_relative_path(relative)) {
+                throw std::runtime_error("component-path discovery locator is unsafe");
+            }
+            const std::string prefix = relative.generic_string() + "/";
+            const bool listed = std::ranges::any_of(listed_files, [&](const fs::path& file) {
+                const std::string path = file.generic_string();
+                return file == relative || path.starts_with(prefix);
+            });
+            if (!listed) {
+                throw std::runtime_error("component-path discovery locator is unlisted");
+            }
+            continue;
+        }
+        throw std::runtime_error("component discovery locator source is invalid");
+    }
+}
+
+void validate_component_activation(const json& manifest,
+                                    const std::set<fs::path>& listed_files) {
+    if (!manifest.contains("activation")) {
+        return;
+    }
+    const json& declarations = manifest.at("activation");
+    if (!declarations.is_array() || declarations.empty() || declarations.size() > 4) {
+        throw std::runtime_error("component activation declaration is invalid");
+    }
+    const auto overlaps = [](const fs::path& left, const fs::path& right) {
+        const fs::path normalized_left = left.lexically_normal();
+        const fs::path normalized_right = right.lexically_normal();
+        const auto is_prefix = [](const fs::path& prefix, const fs::path& candidate) {
+            auto prefix_it = prefix.begin();
+            auto candidate_it = candidate.begin();
+            for (; prefix_it != prefix.end(); ++prefix_it, ++candidate_it) {
+                if (candidate_it == candidate.end() || *prefix_it != *candidate_it) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        return is_prefix(normalized_left, normalized_right) ||
+               is_prefix(normalized_right, normalized_left);
+    };
+    std::set<std::string> kinds;
+    std::vector<fs::path> sources;
+    std::vector<fs::path> destinations;
+    for (const auto& declaration : declarations) {
+        if (!declaration.is_object() || declaration.size() != 4 ||
+            !declaration.contains("kind") || !declaration.at("kind").is_string() ||
+            !valid_knowledge_activation_kind(declaration.at("kind").get<std::string>()) ||
+            !kinds.insert(declaration.at("kind").get<std::string>()).second ||
+            !declaration.contains("source_path") ||
+            !declaration.at("source_path").is_string() ||
+            declaration.value("destination_root", "") != "knowledge_root" ||
+            !declaration.contains("destination_path") ||
+            !declaration.at("destination_path").is_string()) {
+            throw std::runtime_error("component activation entry is invalid");
+        }
+        const fs::path source =
+            fs::path(declaration.at("source_path").get<std::string>()).lexically_normal();
+        const fs::path destination =
+            fs::path(declaration.at("destination_path").get<std::string>()).lexically_normal();
+        if (!safe_relative_path(source) || !safe_relative_path(destination)) {
+            throw std::runtime_error("component activation path is unsafe");
+        }
+        const std::string source_prefix = source.generic_string() + "/";
+        if (!std::ranges::any_of(listed_files, [&](const fs::path& file) {
+                return file.generic_string().starts_with(source_prefix);
+            })) {
+            throw std::runtime_error("component activation source has no listed payload");
+        }
+        if (std::ranges::any_of(sources, [&](const fs::path& existing) {
+                return overlaps(existing, source);
+            }) ||
+            std::ranges::any_of(destinations, [&](const fs::path& existing) {
+                return overlaps(existing, destination);
+            })) {
+            throw std::runtime_error("component activation paths overlap");
+        }
+        const bool matching_discovery =
+            manifest.contains("discovery") && manifest.at("discovery").is_array() &&
+            std::ranges::any_of(manifest.at("discovery"), [&](const json& discovery) {
+                if (!discovery.is_object() ||
+                    discovery.value("kind", "") != declaration.at("kind").get<std::string>() ||
+                    !discovery.contains("locator") ||
+                    !discovery.at("locator").is_object()) {
+                    return false;
+                }
+                const json& locator = discovery.at("locator");
+                return locator.value("source", "") == "component_path" &&
+                       locator.contains("path") && locator.at("path").is_string() &&
+                       fs::path(locator.at("path").get<std::string>()).lexically_normal() == source;
+            });
+        if (!matching_discovery) {
+            throw std::runtime_error(
+                "component activation has no matching discovery declaration");
+        }
+        sources.push_back(source);
+        destinations.push_back(destination);
+    }
+}
+
 ValidatedComponentPayload validate_component_payload(const fs::path& root,
                                                      const std::string& expected_id,
                                                      const std::string& expected_version) {
@@ -1189,9 +1541,10 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
             throw std::runtime_error("component manifest contains a duplicate path");
         }
         const fs::path path = root / relative;
-        if (!fs::is_regular_file(path) ||
-            fs::file_size(path) != integer_field(file, "size_bytes") ||
-            sha256_file(path) != file.at("sha256").get<std::string>()) {
+        const fs::path api_path = platform::filesystem_api_path(path);
+        if (!fs::is_regular_file(api_path) ||
+            fs::file_size(api_path) != integer_field(file, "size_bytes") ||
+            sha256_file(api_path) != file.at("sha256").get<std::string>()) {
             throw std::runtime_error("component payload verification failed for " +
                                      relative.generic_string());
         }
@@ -1221,14 +1574,18 @@ ValidatedComponentPayload validate_component_payload(const fs::path& root,
                 "component configuration template is unsafe or unlisted");
         }
     }
-    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+    validate_provider_installer_integration(manifest, listed_files);
+    validate_component_discovery(manifest, listed_files);
+    validate_component_activation(manifest, listed_files);
+    const fs::path api_root = platform::filesystem_api_path(root);
+    for (const auto& entry : fs::recursive_directory_iterator(api_root)) {
         if (entry.is_symlink()) {
             throw std::runtime_error("component payload contains a symbolic link");
         }
         if (!entry.is_regular_file()) {
             continue;
         }
-        const fs::path relative = fs::relative(entry.path(), root).lexically_normal();
+        const fs::path relative = fs::relative(entry.path(), api_root).lexically_normal();
         if (relative != fs::path("arena-component.json") && !listed_files.contains(relative)) {
             throw std::runtime_error("component payload contains an unlisted file: " +
                                      relative.generic_string());
@@ -1266,68 +1623,177 @@ void copy_directory_contents(const fs::path& source, const fs::path& destination
     }
 }
 
-json activate_knowledge(const fs::path& component_root, const json& manifest,
-                        const SetupPaths& paths, const std::string& transaction_id,
-                        const std::string& component_id) {
-    std::optional<std::pair<fs::path, fs::path>> mapping;
-    if (component_id.rfind("opening_book.", 0) == 0) {
-        mapping =
-            std::pair{component_root / "opening_books", paths.knowledge_root / "opening_books"};
-    } else if (component_id.rfind("syzygy.", 0) == 0) {
-        mapping = std::pair{component_root / "tablebases", paths.knowledge_root / "tablebases"};
+json declared_knowledge_resources(const fs::path& component_root, const json& manifest,
+                                  const SetupPaths& paths) {
+    json resources = json::array();
+    for (const auto& declaration : manifest.value("activation", json::array())) {
+        const fs::path source_relative =
+            fs::path(declaration.at("source_path").get<std::string>()).lexically_normal();
+        const fs::path destination_relative =
+            fs::path(declaration.at("destination_path").get<std::string>()).lexically_normal();
+        const fs::path source = normalized_absolute(component_root / source_relative);
+        const fs::path destination = normalized_absolute(paths.knowledge_root / destination_relative);
+        if (!within(component_root, source) || !within(paths.knowledge_root, destination)) {
+            throw std::runtime_error("knowledge activation path escapes its declared root");
+        }
+        json activated_files = json::array();
+        const std::string source_prefix = source_relative.generic_string() + "/";
+        for (const auto& file : manifest.at("files")) {
+            const fs::path relative =
+                fs::path(file.at("path").get<std::string>()).lexically_normal();
+            if (!relative.generic_string().starts_with(source_prefix)) {
+                continue;
+            }
+            const fs::path resource_relative = relative.lexically_relative(source_relative);
+            activated_files.push_back({
+                {"path", normalized_absolute(destination / resource_relative).string()},
+                {"sha256", file.at("sha256")},
+                {"size_bytes", file.at("size_bytes")},
+            });
+        }
+        resources.push_back({
+            {"kind", declaration.at("kind")},
+            {"source_path", source.string()},
+            {"path", destination.string()},
+            {"activated_files", std::move(activated_files)},
+        });
     }
-    if (!mapping.has_value()) {
-        return json::object();
-    }
+    return resources;
+}
 
-    const auto& [source, destination] = *mapping;
-    fs::create_directories(destination.parent_path());
-    const fs::path candidate =
-        destination.parent_path() /
-        (destination.filename().string() + ".staging-" + transaction_id + "-" + component_id);
-    const fs::path backup =
-        destination.parent_path() /
-        (destination.filename().string() + ".rollback-" + transaction_id + "-" + component_id);
-    std::error_code ignored;
-    fs::remove_all(candidate, ignored);
-    fs::remove_all(backup, ignored);
-    std::vector<fs::path> copied_files;
-    if (fs::exists(destination)) {
-        copy_directory_contents(destination, candidate, copied_files);
-        copied_files.clear();
+json plan_knowledge_activation(const fs::path& component_root, const json& manifest,
+                               const SetupPaths& paths, const std::string& transaction_id,
+                               const std::string& component_id) {
+    json plan = declared_knowledge_resources(component_root, manifest, paths);
+    for (auto& activation : plan) {
+        const fs::path source = activation.at("source_path").get<std::string>();
+        const fs::path destination = activation.at("path").get<std::string>();
+        if (!fs::is_directory(source) || contains_symbolic_link(source)) {
+            throw std::runtime_error("knowledge activation source is unavailable or unsafe");
+        }
+        fs::create_directories(destination.parent_path());
+        if (contains_symbolic_link(destination.parent_path()) ||
+            (fs::exists(destination) &&
+             (!fs::is_directory(destination) || contains_symbolic_link(destination)))) {
+            throw std::runtime_error("knowledge activation destination is unsafe");
+        }
+        const std::string suffix = transaction_id + "-" + component_id + "-" +
+                                   activation.at("kind").get<std::string>();
+        activation["candidate_path"] =
+            (destination.parent_path() /
+             (destination.filename().string() + ".staging-" + suffix))
+                .string();
+        activation["backup_path"] =
+            (destination.parent_path() /
+             (destination.filename().string() + ".rollback-" + suffix))
+                .string();
+        activation["had_existing"] = fs::exists(destination);
+        activation["state"] = "planned";
     }
-    copy_directory_contents(source, candidate, copied_files);
-    const bool had_existing = fs::exists(destination);
-    if (had_existing) {
-        fs::rename(destination, backup);
-    }
-    try {
+    return plan;
+}
+
+void apply_knowledge_activation(
+    json& plan, const std::function<void(const json&)>& checkpoint) {
+    for (auto& activation : plan) {
+        const fs::path source = activation.at("source_path").get<std::string>();
+        const fs::path destination = activation.at("path").get<std::string>();
+        const fs::path candidate = activation.at("candidate_path").get<std::string>();
+        const fs::path backup = activation.at("backup_path").get<std::string>();
+        const bool had_existing = activation.at("had_existing").get<bool>();
+        if (fs::exists(destination) != had_existing) {
+            throw std::runtime_error(
+                "knowledge activation destination changed after planning");
+        }
+        std::error_code error;
+        fs::remove_all(candidate, error);
+        if (error) {
+            throw std::runtime_error("cannot clear knowledge activation candidate: " +
+                                     error.message());
+        }
+        fs::remove_all(backup, error);
+        if (error) {
+            throw std::runtime_error("cannot clear knowledge activation rollback path: " +
+                                     error.message());
+        }
+        std::vector<fs::path> copied_files;
+        if (had_existing) {
+            copy_directory_contents(destination, candidate, copied_files);
+            copied_files.clear();
+        }
+        copy_directory_contents(source, candidate, copied_files);
+        activation["state"] = "prepared";
+        checkpoint(plan);
+        if (had_existing) {
+            fs::rename(destination, backup);
+            activation["state"] = "prior_saved";
+            checkpoint(plan);
+        }
         fs::rename(candidate, destination);
-    } catch (...) {
-        if (had_existing && fs::exists(backup) && !fs::exists(destination)) {
-            fs::rename(backup, destination);
-        }
-        throw;
+        activation["state"] = "activated";
+        checkpoint(plan);
     }
+}
 
-    json activated_files = json::array();
-    const std::string manifest_prefix = source.filename().generic_string() + "/";
-    for (const auto& file : manifest.at("files")) {
-        const std::string relative = file.at("path").get<std::string>();
-        if (relative.rfind(manifest_prefix, 0) != 0) {
-            continue;
-        }
-        activated_files.push_back(
-            {{"path", (destination / fs::path(relative.substr(manifest_prefix.size()))).string()},
-             {"sha256", file.at("sha256")},
-             {"size_bytes", file.at("size_bytes")}});
+json receipt_activated_resources(const json& plan) {
+    json resources = json::array();
+    for (const auto& activation : plan) {
+        resources.push_back({
+            {"kind", activation.at("kind")},
+            {"path", activation.at("path")},
+            {"activated_files", activation.at("activated_files")},
+        });
     }
-    return {
-        {"path", destination.string()},
-        {"backup_path", had_existing ? backup.string() : ""},
-        {"had_existing", had_existing},
+    return resources;
+}
+
+json flattened_activated_files(const json& resources) {
+    json files = json::array();
+    for (const auto& resource : resources) {
+        for (const auto& file : resource.at("activated_files")) {
+            files.push_back(file);
+        }
+    }
+    return files;
+}
+
+json expected_receipt_knowledge_resources(const fs::path& active_root, const json& manifest,
+                                          const SetupPaths& paths, const json& receipt) {
+    json declared = declared_knowledge_resources(active_root, manifest, paths);
+    if (!declared.empty()) {
+        return receipt_activated_resources(declared);
+    }
+    json resources = json::array();
+    if (receipt.value("import_mode", "") != "managed_copy") {
+        return resources;
+    }
+    const json declarations = manifest.value("discovery", json::array());
+    const auto discovery = std::ranges::find_if(
+        declarations, [](const json& declaration) {
+            return declaration.is_object() &&
+                   valid_knowledge_activation_kind(declaration.value("kind", "")) &&
+                   declaration.contains("locator") && declaration.at("locator").is_object() &&
+                   declaration.at("locator").value("source", "") == "active_root";
+        });
+    if (discovery == declarations.end() || !within(paths.knowledge_root, active_root)) {
+        return resources;
+    }
+    json activated_files = json::array();
+    for (const auto& file : manifest.at("files")) {
+        const fs::path relative =
+            fs::path(file.at("path").get<std::string>()).lexically_normal();
+        activated_files.push_back({
+            {"path", normalized_absolute(active_root / relative).string()},
+            {"sha256", file.at("sha256")},
+            {"size_bytes", file.at("size_bytes")},
+        });
+    }
+    resources.push_back({
+        {"kind", discovery->at("kind")},
+        {"path", normalized_absolute(active_root).string()},
         {"activated_files", std::move(activated_files)},
-    };
+    });
+    return resources;
 }
 
 std::vector<std::string> selected_ids(const json& catalog, const std::string& preset,
@@ -1396,16 +1862,23 @@ json receipt_rows(const SetupPaths& paths) {
     if (!fs::is_directory(directory) || contains_symbolic_link(directory)) {
         return rows;
     }
+    std::vector<fs::path> receipt_paths;
     for (const auto& entry : fs::directory_iterator(directory)) {
         if (entry.is_regular_file() && !entry.is_symlink() && entry.path().extension() == ".json") {
-            try {
-                rows.push_back(read_json(entry.path()));
-            } catch (const std::exception& error) {
-                rows.push_back({{"schema", "arena_install_receipt_v1"},
-                                {"state", "broken"},
-                                {"receipt", entry.path().string()},
-                                {"error", error.what()}});
-            }
+            receipt_paths.push_back(entry.path());
+        }
+    }
+    std::ranges::sort(receipt_paths, {}, [](const fs::path& path) {
+        return path.filename().generic_string();
+    });
+    for (const auto& receipt_path : receipt_paths) {
+        try {
+            rows.push_back(read_json(receipt_path));
+        } catch (const std::exception& error) {
+            rows.push_back({{"schema", "arena_install_receipt_v1"},
+                            {"state", "broken"},
+                            {"receipt", receipt_path.string()},
+                            {"error", error.what()}});
         }
     }
     return rows;
@@ -1504,10 +1977,10 @@ json browse_contract(const std::string_view kind) {
     } else if (kind == "lichess_capacity_profile") {
         result["filters"].push_back(
             {{"label", "Qualified Lichess capacity profile"},
-             {"patterns", {"uci_arena_lichess_capacity_profile_v1.json", "*.json"}}});
+             {"patterns", {"uci_arena_lichess_capacity_profile_v2.json", "*.json"}}});
         result["hints"] = {
-            "Select the qualified capacity profile that matches the single-game profile and "
-            "configured concurrency.",
+            "Select the qualified v2 capacity profile that matches the timing authority, "
+            "single-game profile, and configured concurrency.",
             "The profile remains in place and is never rewritten.",
         };
     } else if (kind == "lichess_transport_profile") {
@@ -1536,43 +2009,41 @@ json browse_contract(const std::string_view kind) {
     return result;
 }
 
-std::optional<std::string> discovery_kind_for_component(const std::string& component_id) {
-    if (component_id.rfind("opening_book.", 0) == 0) {
-        return "opening_book";
+std::set<fs::path> manifest_listed_files(const json& manifest) {
+    if (!manifest.contains("files") || !manifest.at("files").is_array()) {
+        throw std::runtime_error("component manifest file inventory is unavailable");
     }
-    if (component_id.rfind("syzygy.", 0) == 0) {
-        return "syzygy";
+    std::set<fs::path> listed_files;
+    for (const auto& file : manifest.at("files")) {
+        if (!file.is_object() || !file.contains("path") || !file.at("path").is_string()) {
+            throw std::runtime_error("component manifest file inventory is invalid");
+        }
+        const fs::path relative =
+            fs::path(file.at("path").get<std::string>()).lexically_normal();
+        if (!safe_relative_path(relative) || !listed_files.insert(relative).second) {
+            throw std::runtime_error("component manifest file inventory is unsafe");
+        }
     }
-    if (component_id == "book_forge.service") {
-        return "book_forge";
-    }
-    if (component_id == "uci_arena_evidence.service") {
-        return "evidence_service";
-    }
-    if (component_id == "restaurant.training_system") {
-        return "restaurant";
-    }
-    if (component_id == "uci_arena.engine" || component_id == "stockfish.engine" ||
-        component_id == "lc0.engine" || component_id.ends_with(".uci_engine")) {
-        return "uci_engine";
-    }
-    return std::nullopt;
+    return listed_files;
 }
 
-fs::path receipt_locator(const json& receipt) {
-    if (receipt.contains("locator_path") && receipt.at("locator_path").is_string()) {
-        return receipt.at("locator_path").get<std::string>();
+fs::path component_discovery_locator(const fs::path& root, const json& manifest,
+                                     const json& declaration) {
+    const json& locator = declaration.at("locator");
+    const std::string source = locator.at("source").get<std::string>();
+    fs::path selected = root;
+    if (source == "entrypoint") {
+        const std::string entrypoint = locator.at("entrypoint").get<std::string>();
+        selected /= manifest.at("entrypoints").at(entrypoint).get<std::string>();
+    } else if (source == "component_path") {
+        selected /= locator.at("path").get<std::string>();
     }
-    if (receipt.contains("active_root") && receipt.at("active_root").is_string()) {
-        return receipt.at("active_root").get<std::string>();
+    selected = normalized_absolute(selected);
+    const fs::path normalized_root = normalized_absolute(root);
+    if (selected != normalized_root && !within(normalized_root, selected)) {
+        throw std::runtime_error("component discovery locator escapes its root");
     }
-    if (receipt.contains("activated_files") && receipt.at("activated_files").is_array() &&
-        !receipt.at("activated_files").empty() &&
-        receipt.at("activated_files").at(0).contains("path")) {
-        return fs::path(receipt.at("activated_files").at(0).at("path").get<std::string>())
-            .parent_path();
-    }
-    return {};
+    return selected;
 }
 
 void append_discovery_candidate(json& rows, std::map<std::string, std::set<std::string>>& seen,
@@ -1596,8 +2067,83 @@ void append_discovery_candidate(json& rows, std::map<std::string, std::set<std::
         candidate["details"] = details;
     }
     rows.at(kind).at("candidates").push_back(candidate);
-    if (rows.at(kind).at("selection").is_null()) {
-        rows.at(kind)["selection"] = std::move(candidate);
+}
+
+int discovery_source_rank(const std::string_view source) noexcept {
+    if (source == "saved_locator") {
+        return 0;
+    }
+    if (source == "install_receipt") {
+        return 1;
+    }
+    if (source == "provider_manifest") {
+        return 2;
+    }
+    if (source == "indexed") {
+        return 3;
+    }
+    if (source == "discovered") {
+        return 4;
+    }
+    return 5;
+}
+
+std::uint64_t discovery_quality_score(const json& candidate) noexcept {
+    try {
+        const json& details = candidate.at("details");
+        const json& validation = details.at("validation");
+        if (validation.contains("quality_score") &&
+            validation.at("quality_score").is_number_unsigned()) {
+            return validation.at("quality_score").get<std::uint64_t>();
+        }
+    } catch (const std::exception&) {
+    }
+    return 0;
+}
+
+void select_discovery_candidates(json& rows) {
+    for (const auto kind : discovery_kinds) {
+        const json* best = nullptr;
+        for (const auto& candidate : rows.at(std::string(kind)).at("candidates")) {
+            const std::string state = candidate.value("state", "");
+            if (state == "broken" || state == "unresolved") {
+                continue;
+            }
+            if (best == nullptr) {
+                best = &candidate;
+                continue;
+            }
+            const int rank = discovery_source_rank(candidate.value("source", ""));
+            const int best_rank = discovery_source_rank(best->value("source", ""));
+            const std::uint64_t quality = discovery_quality_score(candidate);
+            const std::uint64_t best_quality = discovery_quality_score(*best);
+            const std::string path = candidate.value("path", "");
+            const std::string best_path = best->value("path", "");
+            const std::string source = candidate.value("source", "");
+            const std::string best_source = best->value("source", "");
+            const bool same_managed_resource =
+                path == best_path &&
+                ((source == "install_receipt" && best_source == "saved_locator") ||
+                 (source == "saved_locator" && best_source == "install_receipt"));
+            const bool better_by_precedence =
+                rank < best_rank ||
+                (rank == best_rank &&
+                 (quality > best_quality ||
+                  (quality == best_quality && path < best_path)));
+            if ((same_managed_resource && source == "install_receipt") ||
+                (!same_managed_resource && better_by_precedence)) {
+                best = &candidate;
+            }
+        }
+        if (best != nullptr) {
+            rows.at(std::string(kind))["selection"] = *best;
+        } else {
+            rows.at(std::string(kind))["selection"] = {
+                {"source", "unresolved"},
+                {"state", "unresolved"},
+                {"path", nullptr},
+            };
+        }
     }
 }
 
@@ -1618,15 +2164,19 @@ void inspect_provider_root(json& rows, std::map<std::string, std::set<std::strin
         if (manifest.value("schema", "") != "arena_install_component_v1") {
             return;
         }
+        const auto listed_files = manifest_listed_files(manifest);
+        validate_component_discovery(manifest, listed_files);
         const std::string component_id = manifest.value("component_id", "");
-        const auto kind = discovery_kind_for_component(component_id);
-        if (!kind) {
-            return;
+        for (const auto& declaration : manifest.value("discovery", json::array())) {
+            const std::string kind = declaration.at("kind").get<std::string>();
+            const fs::path locator = component_discovery_locator(root, manifest, declaration);
+            const bool healthy = fs::exists(locator) && !contains_symbolic_link(locator);
+            append_discovery_candidate(
+                rows, seen, kind, "provider_manifest", locator,
+                healthy ? "detected_unmanaged" : "broken",
+                {{"component_id", component_id},
+                 {"component_version", manifest.value("component_version", "")}});
         }
-        append_discovery_candidate(
-            rows, seen, *kind, "provider_manifest", root, "detected_unmanaged",
-            {{"component_id", component_id},
-             {"component_version", manifest.value("component_version", "")}});
     } catch (const std::exception&) {
     }
 }
@@ -1708,7 +2258,70 @@ bool directory_has_extension(const fs::path& root, const std::set<std::string>& 
 json validate_book_locator(const fs::path& path);
 json inspect_indexed_book_candidate(const fs::path& path);
 json validate_syzygy_locator(const fs::path& path);
-json inspect_timing_evidence_candidate(const fs::path& path);
+struct InspectedIndexedCandidate {
+    fs::path path;
+    json validation;
+};
+
+InspectedIndexedCandidate inspect_indexed_asset_candidate(
+    const ports::IndexedAssetCandidate& candidate) {
+    fs::path selected = candidate.path;
+    if (candidate.kind == ports::IndexedAssetKind::opening_book) {
+        return {selected, inspect_indexed_book_candidate(selected)};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::syzygy) {
+        if (fs::is_regular_file(selected)) {
+            selected = selected.parent_path();
+        }
+        return {selected, validate_syzygy_locator(selected)};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::timing_profile) {
+        return {selected, inspect_timing_evidence_candidate(selected)};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::lichess_single_game_profile) {
+        return {selected,
+                inspect_lichess_profile_candidate(
+                    selected, "uci_arena_single_game_profile_v",
+                    "uci_arena_single_game_profile_v1")};
+    }
+    if (candidate.kind == ports::IndexedAssetKind::lichess_capacity_profile) {
+        return {selected,
+                inspect_lichess_profile_candidate(
+                    selected, "uci_arena_lichess_capacity_profile_v",
+                    "uci_arena_lichess_capacity_profile_v2")};
+    }
+    return {selected,
+            inspect_lichess_profile_candidate(
+                selected, "uci_arena_lichess_transport_profile_v",
+                "uci_arena_lichess_transport_profile_v2")};
+}
+
+ports::IndexedAssetQuery indexed_asset_query() {
+    return {
+        256,
+        std::chrono::milliseconds(2000),
+        {
+            {ports::IndexedAssetKind::opening_book, {".book", ".bin"}, {}},
+            {ports::IndexedAssetKind::syzygy, {".rtbw", ".rtbz"}, {}},
+            {ports::IndexedAssetKind::timing_profile,
+             {},
+             {"uci_time_profile_v*.json", "*timing*profile*.json",
+              "*time*profile*.json"}},
+            {ports::IndexedAssetKind::lichess_single_game_profile,
+             {},
+             {"uci_arena_single_game_profile_v*.json",
+              "*single*game*profile*.json"}},
+            {ports::IndexedAssetKind::lichess_capacity_profile,
+             {},
+             {"uci_arena_lichess_capacity_profile_v*.json",
+              "*lichess*capacity*profile*.json"}},
+            {ports::IndexedAssetKind::lichess_transport_profile,
+             {},
+             {"transport_profile_v*.json",
+              "*lichess*transport*profile*.json"}},
+        },
+    };
+}
 
 json indexed_search_projection(const ports::IndexedAssetSearchResult& result,
                                const std::string_view kind,
@@ -1745,7 +2358,8 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             {"schema_version", 1},
             {"kind", kind},
             {"precedence",
-             {"install_receipt", "saved_locator", "provider_manifest", "discovered", "unresolved"}},
+             {"saved_locator", "install_receipt", "provider_manifest", "indexed",
+              "discovered", "unresolved"}},
             {"selection", nullptr},
             {"candidates", json::array()},
             {"browse", browse_contract(kind)},
@@ -1759,18 +2373,74 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
     std::map<std::string, std::set<std::string>> seen;
 
     for (const auto& receipt : receipt_rows(paths)) {
-        const auto kind = discovery_kind_for_component(receipt.value("component_id", ""));
-        if (!kind || (receipt.value("state", "") != "installed_managed" &&
-                      receipt.value("state", "") != "installed_disabled")) {
+        const std::string state = receipt.value("state", "");
+        if ((state != "installed_managed" && state != "installed_disabled") ||
+            !receipt.contains("active_root") || !receipt.at("active_root").is_string()) {
             continue;
         }
-        const fs::path locator = receipt_locator(receipt);
-        const bool healthy =
-            !locator.empty() && fs::exists(locator) && !contains_symbolic_link(locator);
-        append_discovery_candidate(rows, seen, *kind, "install_receipt", locator,
-                                   healthy ? receipt.value("state", "installed_managed") : "broken",
-                                   {{"component_id", receipt.value("component_id", "")},
-                                    {"component_version", receipt.value("component_version", "")}});
+        try {
+            const fs::path active_root =
+                normalized_absolute(receipt.at("active_root").get<std::string>());
+            const bool managed_component_root = within(paths.install_root, active_root);
+            const bool managed_knowledge_root = within(paths.knowledge_root, active_root);
+            if ((!managed_component_root && !managed_knowledge_root) ||
+                contains_symbolic_link(active_root)) {
+                continue;
+            }
+            const json manifest = read_json(active_root / "arena-component.json");
+            if (manifest.value("schema", "") != "arena_install_component_v1" ||
+                manifest.value("component_id", "") != receipt.value("component_id", "") ||
+                manifest.value("component_version", "") !=
+                    receipt.value("component_version", "")) {
+                continue;
+            }
+            const auto listed_files = manifest_listed_files(manifest);
+            validate_component_discovery(manifest, listed_files);
+            validate_component_activation(manifest, listed_files);
+            const json activated_resources =
+                expected_receipt_knowledge_resources(active_root, manifest, paths, receipt);
+            if (receipt.value("activated_resources", json::array()) != activated_resources ||
+                receipt.value("activated_files", json::array()) !=
+                    flattened_activated_files(activated_resources)) {
+                throw std::runtime_error(
+                    "receipt knowledge activation evidence does not match the manifest");
+            }
+            std::set<std::string> activated_kinds;
+            for (const auto& resource : activated_resources) {
+                const std::string kind = resource.at("kind").get<std::string>();
+                const fs::path resource_path = resource.at("path").get<std::string>();
+                bool healthy = within(paths.knowledge_root, resource_path) &&
+                               fs::is_directory(resource_path) &&
+                               !contains_symbolic_link(resource_path);
+                for (const auto& file : resource.at("activated_files")) {
+                    const fs::path path = file.at("path").get<std::string>();
+                    healthy = healthy && within(resource_path, path) && fs::is_regular_file(path) &&
+                              !fs::is_symlink(path) &&
+                              fs::file_size(path) == integer_field(file, "size_bytes");
+                }
+                append_discovery_candidate(
+                    rows, seen, kind, "install_receipt", resource_path,
+                    healthy ? state : "broken",
+                    {{"component_id", receipt.value("component_id", "")},
+                     {"component_version", receipt.value("component_version", "")}});
+                activated_kinds.insert(kind);
+            }
+            for (const auto& declaration : manifest.value("discovery", json::array())) {
+                const std::string kind = declaration.at("kind").get<std::string>();
+                if (activated_kinds.contains(kind)) {
+                    continue;
+                }
+                const fs::path locator =
+                    component_discovery_locator(active_root, manifest, declaration);
+                const bool healthy = fs::exists(locator) && !contains_symbolic_link(locator);
+                append_discovery_candidate(
+                    rows, seen, kind, "install_receipt", locator,
+                    healthy ? state : "broken",
+                    {{"component_id", receipt.value("component_id", "")},
+                     {"component_version", receipt.value("component_version", "")}});
+            }
+        } catch (const std::exception&) {
+        }
     }
 
     const fs::path locator_root = paths.data_root / "locators";
@@ -1788,10 +2458,43 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
                     continue;
                 }
                 const fs::path selected = locator.at("path").get<std::string>();
-                const bool healthy = fs::exists(selected) && !contains_symbolic_link(selected);
+                bool healthy = fs::exists(selected) && !contains_symbolic_link(selected);
+                json details{{"mode", locator.value("mode", "in_place_reference")}};
+                if (healthy) {
+                    try {
+                        if (kind == "opening_book") {
+                            details["validation"] = validate_book_locator(selected);
+                        } else if (kind == "syzygy") {
+                            details["validation"] = validate_syzygy_locator(selected);
+                        } else if (kind == "timing_profile") {
+                            details["validation"] = inspect_timing_evidence_candidate(selected);
+                        } else if (kind == "lichess_single_game_profile") {
+                            details["validation"] = inspect_lichess_profile_candidate(
+                                selected, "uci_arena_single_game_profile_v",
+                                "uci_arena_single_game_profile_v1");
+                        } else if (kind == "lichess_capacity_profile") {
+                            details["validation"] = inspect_lichess_profile_candidate(
+                                selected, "uci_arena_lichess_capacity_profile_v",
+                                "uci_arena_lichess_capacity_profile_v2");
+                        } else if (kind == "lichess_transport_profile") {
+                            details["validation"] = inspect_lichess_profile_candidate(
+                                selected, "uci_arena_lichess_transport_profile_v",
+                                "uci_arena_lichess_transport_profile_v2");
+                        } else if (locator.contains("validation") &&
+                                   locator.at("validation").is_object()) {
+                            details["validation"] = locator.at("validation");
+                        }
+                    } catch (const std::exception&) {
+                        healthy = false;
+                        details["validation"] = {
+                            {"classification", "unreadable_or_invalid"},
+                            {"activation", "requires_explicit_reselection"},
+                        };
+                    }
+                }
                 append_discovery_candidate(rows, seen, std::string(kind), "saved_locator", selected,
-                                           healthy ? "saved" : "broken",
-                                           {{"mode", locator.value("mode", "in_place_reference")}});
+                                            healthy ? "saved" : "broken",
+                                            details);
             } catch (const std::exception&) {
             }
         }
@@ -1800,44 +2503,38 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
     std::vector<fs::path> bounded_roots{
         paths.install_root,
         paths.workspace_root,
+        paths.data_root / "provider-data",
         paths.knowledge_root,
     };
     bounded_roots.insert(bounded_roots.end(), extra_roots.begin(), extra_roots.end());
     inspect_provider_roots(rows, seen, bounded_roots);
 
     if (search_index != nullptr) {
-        const ports::IndexedAssetSearchResult indexed = search_index->search(
-            ports::IndexedAssetQuery{256, std::chrono::milliseconds(2000)});
+        const ports::IndexedAssetSearchResult indexed =
+            search_index->search(indexed_asset_query());
         std::map<std::string, std::size_t> accepted;
         std::map<std::string, std::size_t> rejected;
         for (const auto& candidate : indexed.candidates) {
             const std::string kind(
                 ports::indexed_asset_kind_name(candidate.kind));
             try {
-                fs::path selected = candidate.path;
-                json validation;
-                if (candidate.kind == ports::IndexedAssetKind::opening_book) {
-                    validation = inspect_indexed_book_candidate(selected);
-                } else if (candidate.kind == ports::IndexedAssetKind::syzygy) {
-                    if (fs::is_regular_file(selected)) {
-                        selected = selected.parent_path();
-                    }
-                    validation = validate_syzygy_locator(selected);
-                } else {
-                    validation = inspect_timing_evidence_candidate(selected);
-                }
+                InspectedIndexedCandidate inspected =
+                    inspect_indexed_asset_candidate(candidate);
                 append_discovery_candidate(
-                    rows, seen, kind, "indexed", selected,
+                    rows, seen, kind, "indexed", inspected.path,
                     "detected_unmanaged",
                     {{"adapter", indexed.adapter},
                      {"ownership", "external_dependency"},
-                     {"validation", std::move(validation)}});
+                     {"validation", std::move(inspected.validation)}});
                 ++accepted[kind];
             } catch (const std::exception&) {
                 ++rejected[kind];
             }
         }
-        for (const auto kind : {"opening_book", "syzygy", "timing_profile"}) {
+        for (const auto kind : {"opening_book", "syzygy", "timing_profile",
+                                "lichess_single_game_profile",
+                                "lichess_capacity_profile",
+                                "lichess_transport_profile"}) {
             rows.at(kind)["indexed_search"] = indexed_search_projection(
                 indexed, kind, accepted[kind], rejected[kind]);
         }
@@ -1845,13 +2542,18 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
 
     const fs::path book_root = paths.knowledge_root / "opening_books";
     if (directory_has_extension(book_root, {".bin", ".book"})) {
-        append_discovery_candidate(rows, seen, "opening_book", "discovered", book_root,
-                                   "detected_unmanaged");
+        try {
+            append_discovery_candidate(rows, seen, "opening_book", "discovered", book_root,
+                                       "detected_unmanaged",
+                                       {{"validation", validate_book_locator(book_root)}});
+        } catch (const std::exception&) {
+        }
     }
     const fs::path tablebase_root = paths.knowledge_root / "tablebases";
     if (directory_has_extension(tablebase_root, {".rtbw", ".rtbz"})) {
         append_discovery_candidate(rows, seen, "syzygy", "discovered", tablebase_root,
-                                   "detected_unmanaged");
+                                   "detected_unmanaged",
+                                   {{"validation", validate_syzygy_locator(tablebase_root)}});
     }
 
     const auto selected_roots = bounded_root_candidates(extra_roots);
@@ -1863,17 +2565,74 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
             });
             if (extension == ".bin" || extension == ".book") {
                 append_discovery_candidate(rows, seen, "opening_book", "discovered", selected,
-                                           "detected_unmanaged");
+                                           "detected_unmanaged",
+                                           {{"validation", validate_book_locator(selected)}});
             }
             continue;
         }
         if (directory_has_extension(selected, {".bin", ".book"})) {
-            append_discovery_candidate(rows, seen, "opening_book", "discovered", selected,
-                                       "detected_unmanaged");
+            try {
+                append_discovery_candidate(rows, seen, "opening_book", "discovered", selected,
+                                           "detected_unmanaged",
+                                           {{"validation", validate_book_locator(selected)}});
+            } catch (const std::exception&) {
+            }
         }
         if (directory_has_extension(selected, {".rtbw", ".rtbz"})) {
             append_discovery_candidate(rows, seen, "syzygy", "discovered", selected,
-                                       "detected_unmanaged");
+                                       "detected_unmanaged",
+                                       {{"validation", validate_syzygy_locator(selected)}});
+        }
+    }
+
+    const ports::IndexedAssetQuery asset_query = indexed_asset_query();
+    std::map<std::string, fs::path> bounded_files;
+    for (const auto& candidate_root : extra_roots) {
+        if (candidate_root.empty()) {
+            continue;
+        }
+        const fs::path root = normalized_absolute(candidate_root);
+        if (contains_symbolic_link(root)) {
+            continue;
+        }
+        if (fs::is_regular_file(root) && !fs::is_symlink(root)) {
+            bounded_files.emplace(root.string(), root);
+            continue;
+        }
+        if (!fs::is_directory(root)) {
+            continue;
+        }
+        std::error_code error;
+        for (fs::directory_iterator
+                 iterator(root, fs::directory_options::skip_permission_denied, error),
+             end;
+             iterator != end && !error; iterator.increment(error)) {
+            if (iterator->is_regular_file(error) && !error &&
+                !iterator->is_symlink(error) && !error) {
+                const fs::path child = normalized_absolute(iterator->path());
+                bounded_files.emplace(child.string(), child);
+            }
+            error.clear();
+        }
+    }
+    for (const auto& [key, file] : bounded_files) {
+        (void)key;
+        for (const auto& rule : asset_query.rules) {
+            if (rule.kind == ports::IndexedAssetKind::syzygy ||
+                !ports::indexed_asset_rule_matches(rule, file)) {
+                continue;
+            }
+            try {
+                const ports::IndexedAssetCandidate candidate{rule.kind, file};
+                InspectedIndexedCandidate inspected =
+                    inspect_indexed_asset_candidate(candidate);
+                append_discovery_candidate(
+                    rows, seen, std::string(ports::indexed_asset_kind_name(rule.kind)),
+                    "discovered", inspected.path, "detected_unmanaged",
+                    {{"ownership", "external_dependency"},
+                     {"validation", std::move(inspected.validation)}});
+            } catch (const std::exception&) {
+            }
         }
     }
 
@@ -1943,19 +2702,11 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
                                    {{"hint", hint}});
     }
 
-    for (const auto kind : discovery_kinds) {
-        if (rows.at(std::string(kind)).at("selection").is_null()) {
-            rows.at(std::string(kind))["selection"] = {
-                {"source", "unresolved"},
-                {"state", "unresolved"},
-                {"path", nullptr},
-            };
-        }
-    }
+    select_discovery_candidates(rows);
     return rows;
 }
 
-json validate_provider_locator(const fs::path& path, const std::string& expected_component_id) {
+json validate_provider_locator(const fs::path& path, const std::string& expected_kind) {
     if (fs::is_regular_file(path)) {
         return {
             {"validation", "entrypoint_present"},
@@ -1976,28 +2727,49 @@ json validate_provider_locator(const fs::path& path, const std::string& expected
         throw std::runtime_error("provider manifest exceeds the bounded size");
     }
     const json manifest = read_json(manifest_path);
-    if (manifest.value("schema", "") != "arena_install_component_v1" ||
-        manifest.value("component_id", "") != expected_component_id) {
-        throw std::runtime_error("provider manifest has an incompatible component identity");
+    if (manifest.value("schema", "") != "arena_install_component_v1") {
+        throw std::runtime_error("provider manifest has an incompatible schema");
+    }
+    const auto listed_files = manifest_listed_files(manifest);
+    validate_component_discovery(manifest, listed_files);
+    if (!manifest.contains("discovery")) {
+        throw std::runtime_error("provider manifest has no discovery declaration");
+    }
+    const json& declarations = manifest.at("discovery");
+    const auto declaration = std::ranges::find_if(
+        declarations, [&](const json& candidate) {
+            return candidate.value("kind", "") == expected_kind;
+        });
+    if (declaration == declarations.end()) {
+        throw std::runtime_error("provider manifest does not declare the requested resource kind");
+    }
+    const fs::path locator = component_discovery_locator(path, manifest, *declaration);
+    if (!fs::exists(locator) || contains_symbolic_link(locator)) {
+        throw std::runtime_error("provider manifest discovery locator is unavailable");
     }
     return {
         {"validation", "provider_manifest"},
-        {"component_id", expected_component_id},
+        {"component_id", manifest.value("component_id", "")},
         {"component_version", manifest.value("component_version", "")},
+        {"locator", locator.string()},
     };
 }
 
 json validate_book_locator(const fs::path& path) {
     if (fs::is_regular_file(path)) {
+        const std::uint64_t bytes = fs::file_size(path);
         return {
             {"validation", "regular_file"},
             {"file_name", path.filename().string()},
+            {"book_bytes", bytes},
+            {"quality_score", bytes},
         };
     }
     if (!fs::is_directory(path)) {
         throw std::runtime_error("opening book locator must be a regular file or flat directory");
     }
     std::uint64_t file_count = 0;
+    std::uint64_t book_bytes = 0;
     bool has_book = false;
     for (const auto& entry : fs::directory_iterator(path)) {
         if (entry.is_symlink()) {
@@ -2012,7 +2784,15 @@ json validate_book_locator(const fs::path& path) {
         std::ranges::transform(extension, extension.begin(), [](const unsigned char character) {
             return static_cast<char>(std::tolower(character));
         });
-        has_book = has_book || extension == ".bin" || extension == ".book";
+        const bool supported_book = extension == ".bin" || extension == ".book";
+        has_book = has_book || supported_book;
+        if (supported_book) {
+            const std::uint64_t bytes = entry.file_size();
+            if (bytes > (std::numeric_limits<std::uint64_t>::max)() - book_bytes) {
+                throw std::runtime_error("opening book size exceeds the supported range");
+            }
+            book_bytes += bytes;
+        }
     }
     if (file_count == 0 || !has_book) {
         throw std::runtime_error("opening book directory contains no supported book file");
@@ -2020,6 +2800,8 @@ json validate_book_locator(const fs::path& path) {
     return {
         {"validation", "flat_directory"},
         {"file_count", file_count},
+        {"book_bytes", book_bytes},
+        {"quality_score", book_bytes},
     };
 }
 
@@ -2048,7 +2830,11 @@ json validate_syzygy_locator(const fs::path& path) {
         } else {
             continue;
         }
-        bytes += entry.file_size();
+        const auto file_bytes = static_cast<std::uint64_t>(entry.file_size());
+        if (file_bytes > (std::numeric_limits<std::uint64_t>::max)() - bytes) {
+            throw std::runtime_error("Syzygy collection size exceeds the supported range");
+        }
+        bytes += file_bytes;
     }
     if (wdl_files == 0 && dtz_files == 0) {
         throw std::runtime_error("Syzygy directory contains no .rtbw or .rtbz files");
@@ -2058,6 +2844,10 @@ json validate_syzygy_locator(const fs::path& path) {
         {"wdl_files", wdl_files},
         {"dtz_files", dtz_files},
         {"bytes", bytes},
+        {"quality_score", std::min<std::uint64_t>(
+                              bytes, (std::numeric_limits<std::uint64_t>::max)() -
+                                         (wdl_files + dtz_files)) +
+                              wdl_files + dtz_files},
     };
 }
 
@@ -2076,6 +2866,7 @@ json inspect_indexed_book_candidate(const fs::path& path) {
             {"validation", "opaque_book_file"},
             {"classification", "extension_candidate"},
             {"bytes", bytes},
+            {"quality_score", bytes},
         };
     }
     if (extension != ".bin" || bytes < 16 || bytes % 16 != 0) {
@@ -2114,6 +2905,7 @@ json inspect_indexed_book_candidate(const fs::path& path) {
         {"classification", "polyglot_framed"},
         {"bytes", bytes},
         {"sampled_records", inspected},
+        {"quality_score", bytes},
     };
 }
 
@@ -2151,6 +2943,16 @@ json inspect_timing_evidence_candidate(const fs::path& path) {
             ? "legacy_parseable"
             : qualified && identity_valid ? "qualified_identity"
                                           : "parseable_incomplete";
+    const std::uint64_t sample_count =
+        profile.value("samples", json::array()).is_array()
+            ? profile.value("samples", json::array()).size()
+            : 0;
+    const std::uint64_t quality_score =
+        (classification == "qualified_identity"
+             ? 3'000'000'000ULL
+             : classification == "parseable_incomplete" ? 2'000'000'000ULL
+                                                          : 1'000'000'000ULL) +
+        std::min<std::uint64_t>(sample_count, 999'999'999ULL);
     return {
         {"validation", "timing_evidence_inspection"},
         {"schema", schema},
@@ -2158,10 +2960,86 @@ json inspect_timing_evidence_candidate(const fs::path& path) {
         {"classification", classification},
         {"identity_valid", identity_valid},
         {"qualified", qualified},
+        {"sample_count", sample_count},
+        {"quality_score", quality_score},
         {"activation", qualified && identity_valid
-                           ? "requires_runtime_identity_match"
+                           ? "requires_semantic_timing_authority_match"
                            : "catalog_only_until_migrated_or_requalified"},
     };
+}
+
+json inspect_lichess_profile_candidate(const fs::path& path,
+                                       const std::string_view schema_prefix,
+                                       const std::string_view current_schema) {
+    std::error_code error;
+    if (!fs::is_regular_file(path) ||
+        fs::is_symlink(fs::symlink_status(path, error)) || error) {
+        throw std::runtime_error(
+            "Lichess evidence candidate must reference a safe regular file");
+    }
+    const auto size = fs::file_size(path, error);
+    if (error || size == 0 || size > 16ULL * 1024ULL * 1024ULL) {
+        throw std::runtime_error(
+            "Lichess evidence candidate must be non-empty and no larger than 16 MiB");
+    }
+    const json profile = read_json(path);
+    if (!profile.is_object()) {
+        throw std::runtime_error("Lichess evidence candidate must be a JSON object");
+    }
+    const std::string schema = profile.value("schema", "");
+    if (!schema.starts_with(schema_prefix)) {
+        throw std::runtime_error("JSON candidate is not the requested Lichess evidence kind");
+    }
+    const bool current = schema == current_schema;
+    const bool qualified = profile.value("qualified", false);
+    const std::string classification =
+        current ? qualified ? "qualified_declared" : "parseable_incomplete"
+                : "legacy_parseable";
+    std::uint64_t evidence_count = 0;
+    if (profile.contains("evidence") && profile.at("evidence").is_object()) {
+        evidence_count = profile.at("evidence").size();
+    }
+    std::uint64_t measurement_count = 0;
+    if (profile.contains("samples") && profile.at("samples").is_array()) {
+        measurement_count = profile.at("samples").size();
+    }
+    if (profile.contains("sample_count") &&
+        profile.at("sample_count").is_number_unsigned()) {
+        measurement_count = (std::max)(
+            measurement_count,
+            profile.at("sample_count").get<std::uint64_t>());
+    }
+    const std::uint64_t quality_score =
+        (current && qualified ? 3'000'000'000ULL
+                             : current ? 2'000'000'000ULL
+                                       : 1'000'000'000ULL) +
+        std::min<std::uint64_t>(evidence_count * 1'000'000ULL,
+                                500'000'000ULL) +
+        std::min<std::uint64_t>(measurement_count, 499'999'999ULL);
+    json result{
+        {"validation", "lichess_evidence_inspection"},
+        {"schema", schema},
+        {"sha256", sha256_file(path)},
+        {"classification", classification},
+        {"qualified", qualified},
+        {"evidence_count", evidence_count},
+        {"measurement_count", measurement_count},
+        {"quality_score", quality_score},
+        {"activation", current && qualified
+                           ? "requires_exact_import_and_runtime_validation"
+                           : "catalog_only_until_migrated_or_requalified"},
+    };
+    if (profile.contains("published_at") && profile.at("published_at").is_string()) {
+        result["published_at"] = profile.at("published_at");
+    }
+    if (profile.contains("generated_at") && profile.at("generated_at").is_string()) {
+        result["generated_at"] = profile.at("generated_at");
+    }
+    if (profile.contains("maximum_concurrency") &&
+        profile.at("maximum_concurrency").is_number_unsigned()) {
+        result["maximum_concurrency"] = profile.at("maximum_concurrency");
+    }
+    return result;
 }
 
 json validate_uci_locator(const fs::path& path) {
@@ -2183,6 +3061,88 @@ json validate_uci_locator(const fs::path& path) {
     };
 }
 
+bool timing_profile_gates_passed(const json& profile) {
+    static constexpr std::array<std::string_view, 10> base_gates{
+        "legal_moves",
+        "nonterminal_null_moves",
+        "controller_disabled",
+        "provider_timing_captured",
+        "provider_service_reserve_valid",
+        "applied_provider_service_reserve_covered",
+        "applied_backup_emit_reserve_covered",
+        "p99_deadline_overshoot_passed",
+        "maximum_deadline_overshoot_passed",
+        "passed",
+    };
+    static constexpr std::array<std::string_view, 10> mcgs_gates{
+        "mcgs_root_coverage_passed",
+        "mcgs_policy_only_fallback_passed",
+        "mcgs_graph_population_passed",
+        "mcgs_async_overlap_passed",
+        "mcgs_single_owner_passed",
+        "mcgs_low_budget_fallback_passed",
+        "mcgs_deterministic_fallback_passed",
+        "mcgs_completion_integrity_passed",
+        "mcgs_temporal_policy_passed",
+        "mcgs_deadline_tail_telemetry_passed",
+    };
+    if (profile.value("schema", "") != "uci_time_profile_v3" ||
+        !profile.value("qualified", false)) {
+        return false;
+    }
+    const json gates = profile.value("gates", json::object());
+    if (!gates.is_object()) {
+        return false;
+    }
+    const auto all_true = [&gates](const auto& required) {
+        return std::ranges::all_of(required, [&gates](const std::string_view name) {
+            const std::string field{name};
+            return gates.contains(field) && gates.at(field).is_boolean() &&
+                   gates.at(field).get<bool>();
+        });
+    };
+    if (!all_true(base_gates)) {
+        return false;
+    }
+    const std::string search_core = profile.value("identity", json::object())
+                                        .value("search", json::object())
+                                        .value("search_core", "");
+    return search_core != "mcgs" || all_true(mcgs_gates);
+}
+
+std::optional<bool> explicit_timing_permission(const json& declared,
+                                               const std::string_view name) {
+    const std::string field{name};
+    if (!declared.contains(field)) {
+        return std::nullopt;
+    }
+    if (!declared.at(field).is_boolean()) {
+        throw std::runtime_error("timing profile permission " + field +
+                                 " must be boolean");
+    }
+    return declared.at(field).get<bool>();
+}
+
+json timing_profile_permissions(const json& profile) {
+    const json declared = profile.contains("permissions") ? profile.at("permissions")
+                                                          : json::object();
+    if (!declared.is_object()) {
+        throw std::runtime_error("timing profile permissions must be an object");
+    }
+    const bool gates_passed = timing_profile_gates_passed(profile);
+    const auto provider =
+        explicit_timing_permission(declared, "provider_safety_qualified");
+    const auto forecast =
+        explicit_timing_permission(declared, "forecast_shadow_qualified");
+    const auto adaptive =
+        explicit_timing_permission(declared, "adaptive_play_qualified");
+    return {
+        {"provider_safety_qualified", gates_passed && provider != false},
+        {"forecast_shadow_qualified", gates_passed && forecast != false},
+        {"adaptive_play_qualified", adaptive == true},
+    };
+}
+
 json validate_timing_profile_locator(const fs::path& path) {
     if (!fs::is_regular_file(path)) {
         throw std::runtime_error("timing profile locator must reference a regular file");
@@ -2198,13 +3158,7 @@ json validate_timing_profile_locator(const fs::path& path) {
         profile.value("gates", json::object()).value("passed", false) != true) {
         throw std::runtime_error("timing profile is not a qualified uci_time_profile_v3");
     }
-    const json permissions = profile.value("permissions", json::object());
-    for (const auto* field :
-         {"provider_safety_qualified", "forecast_shadow_qualified", "adaptive_play_qualified"}) {
-        if (!permissions.contains(field) || !permissions.at(field).is_boolean()) {
-            throw std::runtime_error("timing profile permissions are incomplete");
-        }
-    }
+    const json permissions = timing_profile_permissions(profile);
     if (!permissions.at("provider_safety_qualified").get<bool>()) {
         throw std::runtime_error("timing profile lacks provider-safety qualification");
     }
@@ -2217,13 +3171,15 @@ json validate_timing_profile_locator(const fs::path& path) {
     const std::string model_id = identity.value("model", json::object()).value("model_id", "");
     const std::string model_fingerprint =
         identity.value("model", json::object()).value("model_fingerprint", "");
-    const std::string engine_sha256 =
+    const std::string qualified_engine_provenance_sha256 =
         identity.value("engine", json::object()).value("executable_sha256", "");
     const std::string provider =
         identity.value("search", json::object()).value("provider_effective", "");
-    if (!valid_identifier(model_id) || model_fingerprint.empty() || engine_sha256.size() != 71 ||
-        !engine_sha256.starts_with("sha256:") || provider.empty()) {
-        throw std::runtime_error("timing profile exact runtime identity is incomplete");
+    if (!valid_identifier(model_id) || model_fingerprint.empty() ||
+        qualified_engine_provenance_sha256.size() != 71 ||
+        !qualified_engine_provenance_sha256.starts_with("sha256:") || provider.empty()) {
+        throw std::runtime_error(
+            "timing profile provenance, model, or provider identity is incomplete");
     }
     return {
         {"validation", "qualified_uci_time_profile_v3"},
@@ -2231,7 +3187,7 @@ json validate_timing_profile_locator(const fs::path& path) {
         {"identity_sha256", identity_sha256},
         {"model_id", model_id},
         {"model_fingerprint", model_fingerprint},
-        {"engine_sha256", engine_sha256},
+        {"qualified_engine_provenance_sha256", qualified_engine_provenance_sha256},
         {"provider", provider},
         {"permissions", permissions},
     };
@@ -2277,13 +3233,15 @@ std::vector<ManagedProfileFile> lichess_single_game_profile_files(const fs::path
     static constexpr std::array<std::string_view, 5> required_evidence{
         "cursor_correctness", "provider_parity", "deadline", "topology", "complete_game"};
     std::vector<ManagedProfileFile> files;
-    const auto profile_size = static_cast<std::uint64_t>(fs::file_size(profile_path));
+    const auto profile_size = static_cast<std::uint64_t>(
+        fs::file_size(platform::filesystem_api_path(profile_path)));
     if (profile_size == 0 || profile_size > managed_profile_max_bytes) {
         throw std::runtime_error("Lichess single-game profile exceeds the managed closure limit");
     }
     files.push_back({profile_path, profile_path.filename(), profile_size,
                      sha256_file(profile_path)});
-    std::set<std::string> relative_paths{profile_path.filename().generic_string()};
+    std::map<std::string, std::string> relative_digests{
+        {profile_path.filename().generic_string(), "sha256:" + files.front().sha256}};
     std::uint64_t total = profile_size;
 
     for (const auto name : required_evidence) {
@@ -2309,19 +3267,44 @@ std::vector<ManagedProfileFile> lichess_single_game_profile_files(const fs::path
             throw std::runtime_error("Lichess single-game profile evidence " +
                                      std::string(name) + " has an invalid digest");
         }
-        if (relative_paths.contains(relative.generic_string())) {
+        const std::string relative_key = relative.generic_string();
+        if (const auto existing = relative_digests.find(relative_key);
+            existing != relative_digests.end()) {
+            if (existing->second != expected) {
+                throw std::runtime_error("Lichess single-game profile evidence " +
+                                         std::string(name) +
+                                         " conflicts with another digest for " +
+                                         relative_key);
+            }
             continue;
         }
 
         std::optional<fs::path> match;
+        std::string last_observation = "candidate_not_found";
         fs::path root = profile_path.parent_path();
         for (int depth = 0; depth < 8 && !root.empty(); ++depth) {
             const fs::path candidate = normalized_absolute(root / relative);
-            if (within(root, candidate) && fs::is_regular_file(candidate) &&
-                !contains_symbolic_link(candidate) &&
-                "sha256:" + sha256_file(candidate) == expected) {
-                match = candidate;
-                break;
+            if (!within(root, candidate)) {
+                last_observation = "candidate_escaped_root";
+            } else {
+                std::error_code file_error;
+                const bool regular = fs::is_regular_file(
+                    platform::filesystem_api_path(candidate), file_error);
+                if (file_error || !regular) {
+                    last_observation = file_error
+                                           ? "candidate_inspection_failed:" +
+                                                 file_error.message()
+                                           : "candidate_not_regular";
+                } else if (contains_symbolic_link(candidate)) {
+                    last_observation = "candidate_contains_symbolic_link";
+                } else {
+                    const std::string observed = "sha256:" + sha256_file(candidate);
+                    if (observed == expected) {
+                        match = candidate;
+                        break;
+                    }
+                    last_observation = "candidate_digest_mismatch:" + observed;
+                }
             }
             const fs::path parent = root.parent_path();
             if (parent == root) {
@@ -2332,16 +3315,18 @@ std::vector<ManagedProfileFile> lichess_single_game_profile_files(const fs::path
         if (!match.has_value()) {
             throw std::runtime_error("Lichess single-game profile evidence " +
                                      std::string(name) +
-                                     " is missing or does not match its declared digest");
+                                     " is missing or does not match its declared digest; " +
+                                     last_observation);
         }
-        const auto size = static_cast<std::uint64_t>(fs::file_size(*match));
+        const auto size = static_cast<std::uint64_t>(
+            fs::file_size(platform::filesystem_api_path(*match)));
         if (files.size() >= managed_profile_max_files ||
             size > managed_profile_max_bytes - total) {
             throw std::runtime_error(
                 "Lichess single-game profile evidence closure exceeds its managed limit");
         }
         files.push_back({*match, relative, size, expected.substr(7)});
-        relative_paths.insert(relative.generic_string());
+        relative_digests.emplace(relative_key, expected);
         total += size;
     }
     return files;
@@ -2368,10 +3353,10 @@ json validate_import_locator(const std::string& kind, const fs::path& path) {
         return validate_uci_locator(path);
     }
     if (kind == "book_forge") {
-        return validate_provider_locator(path, "book_forge.service");
+        return validate_provider_locator(path, kind);
     }
     if (kind == "evidence_service") {
-        return validate_provider_locator(path, "uci_arena_evidence.service");
+        return validate_provider_locator(path, kind);
     }
     if (kind == "timing_profile") {
         return validate_timing_profile_locator(path);
@@ -2391,7 +3376,7 @@ json validate_import_locator(const std::string& kind, const fs::path& path) {
     }
     if (kind == "lichess_capacity_profile") {
         return validate_qualified_profile_locator(
-            path, "uci_arena_lichess_capacity_profile_v1", "Lichess capacity profile");
+            path, "uci_arena_lichess_capacity_profile_v2", "Lichess capacity profile");
     }
     if (kind == "lichess_transport_profile") {
         return validate_qualified_profile_locator(
@@ -2472,6 +3457,8 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
     const fs::path active_root = import_root / fingerprint;
     const fs::path staging_root = import_root / (".staging-" + fingerprint);
     const bool active_root_existed = fs::exists(active_root);
+    const json discovery = json::array(
+        {{{"kind", "opening_book"}, {"locator", {{"source", "active_root"}}}}});
     fs::create_directories(import_root);
     require_no_symbolic_link(import_root);
 
@@ -2495,6 +3482,7 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
                 {"schema_version", 1},
                 {"component_id", component_id},
                 {"component_version", component_version},
+                {"discovery", discovery},
                 {"files", identity_rows},
             };
             write_json_atomic(staging_root / "arena-component.json", manifest);
@@ -2505,7 +3493,16 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
         }
     } else {
         require_no_symbolic_link(active_root);
-        validate_component_payload(active_root, component_id, component_version);
+        json manifest =
+            validate_component_payload(active_root, component_id, component_version).manifest;
+        if (manifest.contains("discovery") && manifest.at("discovery") != discovery) {
+            throw std::runtime_error(
+                "managed opening-book discovery declaration does not match its content role");
+        }
+        if (!manifest.contains("discovery")) {
+            manifest["discovery"] = discovery;
+            write_json_atomic(active_root / "arena-component.json", manifest);
+        }
     }
 
     json activated_files = json::array();
@@ -2551,6 +3548,10 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
         {"state", "installed_managed"},         {"active_root", active_root.string()},
         {"locator_path", active_root.string()}, {"artifact_sha256", fingerprint},
         {"import_mode", "managed_copy"},        {"activated_files", activated_files},
+        {"activated_resources",
+         json::array({{{"kind", "opening_book"},
+                       {"path", normalized_absolute(active_root).string()},
+                       {"activated_files", activated_files}}})},
         {"ownership", std::move(ownership)},
         {"installed_at", current_utc_iso()},
     };
@@ -2569,40 +3570,6 @@ json copy_managed_book(const SetupPaths& paths, const fs::path& source, const js
         {"_active_root_existed", active_root_existed},
         {"_receipt_existed", receipt_existed},
     };
-}
-
-json managed_knowledge_components(const SetupPaths& paths,
-                                  const std::string_view component_prefix) {
-    json components = json::array();
-    for (const auto& receipt : receipt_rows(paths)) {
-        const std::string component_id = receipt.value("component_id", "");
-        if (receipt.value("schema", "") != "arena_install_receipt_v1" ||
-            receipt.value("state", "") != "installed_managed" ||
-            component_id.rfind(component_prefix, 0) != 0 || !receipt.contains("activated_files") ||
-            !receipt.at("activated_files").is_array() || receipt.at("activated_files").empty()) {
-            continue;
-        }
-        bool present = true;
-        for (const auto& activated : receipt.at("activated_files")) {
-            if (!activated.contains("path") || !activated.at("path").is_string() ||
-                !activated.contains("size_bytes") ||
-                !activated.at("size_bytes").is_number_unsigned()) {
-                present = false;
-                break;
-            }
-            const fs::path path = activated.at("path").get<std::string>();
-            if (!within(paths.knowledge_root, path) || !fs::is_regular_file(path) ||
-                fs::is_symlink(path) ||
-                fs::file_size(path) != integer_field(activated, "size_bytes")) {
-                present = false;
-                break;
-            }
-        }
-        if (present) {
-            components.push_back(component_id);
-        }
-    }
-    return components;
 }
 
 fs::path installed_entrypoint(const fs::path& receipts_root, const std::string& component_id,
@@ -2689,313 +3656,207 @@ std::optional<fs::path> saved_locator_path(const fs::path& data_root, const std:
     return path;
 }
 
-json timing_profile_uci_options(const json& profile) {
-    const json search = profile.at("identity").at("search");
-    json options = search.value("extra_engine_options", json::object());
-    if (!options.is_object()) {
-        throw std::runtime_error("timing profile extra engine options are invalid");
-    }
-    options["SearchCore"] = search.at("search_core");
-    options["Threads"] = search.at("threads");
-    options["RootWorkers"] = search.at("root_workers");
-    options["V2SplitDepth"] = search.at("split_depth");
-    options["BackgroundSearch"] = search.at("background_search");
-    options["NNSpeculation"] = search.at("nn_speculation");
-    options["NNBatchSize"] = search.at("batch_size_effective");
-    options["NNBatchWaitUs"] = search.at("batch_wait_us_effective");
-    options["OnnxProvider"] = search.at("provider_effective");
-    return options;
-}
+std::optional<fs::path> provider_locator_path(const SetupPaths& paths,
+                                              const std::string& kind,
+                                              const json& binding,
+                                              std::optional<json>& discovery_cache) {
+    const auto accepts = [&binding](const std::string_view source) {
+        if (!binding.contains("accepted_sources")) {
+            return true;
+        }
+        return std::ranges::any_of(
+            binding.at("accepted_sources"), [source](const json& candidate) {
+                return candidate.get<std::string>() == source;
+            });
+    };
 
-std::string installed_engine_sha256(const fs::path& engine) {
-    if (!fs::is_regular_file(engine) || contains_symbolic_link(engine)) {
-        throw std::runtime_error("installed UCI Arena engine is unavailable");
-    }
-    return "sha256:" + sha256_file(engine);
-}
-
-json installed_checkpoint_identity(const fs::path& model_root) {
-    const fs::path manifest_path = model_root / "checkpoint_manifest.json";
-    if (!fs::is_regular_file(manifest_path) || contains_symbolic_link(manifest_path)) {
-        throw std::runtime_error("installed UCI Arena checkpoint manifest is unavailable");
-    }
-    const json manifest = read_json(manifest_path);
-    const std::string model_id =
-        manifest.value("model_id", manifest.value("active_model_id", ""));
-    const std::string checkpoint_hash = manifest.value("checkpoint_hash", "");
-    if (!valid_identifier(model_id) || checkpoint_hash.size() != 64) {
-        throw std::runtime_error("installed UCI Arena checkpoint identity is incomplete");
-    }
-    return {{"model_id", model_id}, {"checkpoint_hash", checkpoint_hash}};
-}
-
-void require_exact_timing_profile(const json& profile, const std::string& engine_sha256,
-                                  const json& checkpoint) {
-    const json identity = profile.value("identity", json::object());
-    if (profile.value("schema", "") != "uci_time_profile_v3" ||
-        !profile.value("qualified", false) ||
-        identity.value("engine", json::object()).value("executable_sha256", "") !=
-            engine_sha256 ||
-        identity.value("model", json::object()).value("model_id", "") !=
-            checkpoint.at("model_id").get<std::string>()) {
-        throw std::runtime_error(
-            "selected timing profile does not match the exact installed engine and model");
-    }
-}
-
-void require_exact_lichess_profiles(const fs::path& timing_path,
-                                    const fs::path& single_path,
-                                    const fs::path& capacity_path,
-                                    const std::string& engine_sha256,
-                                    const json& checkpoint,
-                                    const std::uint64_t configured_capacity) {
-    const json timing = read_json(timing_path);
-    require_exact_timing_profile(timing, engine_sha256, checkpoint);
-    const json single = read_json(single_path);
-    if (single.value("schema", "") != "uci_arena_single_game_profile_v1" ||
-        !single.value("qualified", false) ||
-        single.value("engine_build_fingerprint", "") != engine_sha256 ||
-        single.value("model_id", "") != checkpoint.at("model_id").get<std::string>() ||
-        single.value("checkpoint_hash", "") !=
-            checkpoint.at("checkpoint_hash").get<std::string>()) {
-        throw std::runtime_error(
-            "selected Lichess single-game profile does not match the exact installed "
-            "engine and model");
-    }
-    const json timing_model = timing.at("identity").at("model");
-    const json timing_provider = timing.at("identity").at("provider");
-    if (single.value("model_fingerprint", "") !=
-            timing_model.value("model_fingerprint", "") ||
-        single.value("adapter_id", "") != timing_model.value("adapter_id", "") ||
-        single.value("provider", "") !=
-            timing.at("identity").at("search").value("provider_effective", "") ||
-        single.value("provider_numeric_fingerprint", "") !=
-            timing_provider.value("provider_numeric_fingerprint", "") ||
-        single.value("hardware_driver_fingerprint", "") !=
-            timing_provider.value("hardware_driver_fingerprint", "") ||
-        single.value("onnx_runtime_version", "") !=
-            timing_provider.value("onnx_runtime_version", "")) {
-        throw std::runtime_error(
-            "selected timing and Lichess single-game profiles have different runtime "
-            "identities");
-    }
-    const json capacity = read_json(capacity_path);
-    if (capacity.value("schema", "") !=
-            "uci_arena_lichess_capacity_profile_v1" ||
-        !capacity.value("qualified", false) ||
-        capacity.value("engine_build_fingerprint", "") != engine_sha256 ||
-        capacity.value("single_game_profile_sha256", "") !=
-            "sha256:" + sha256_file(single_path) ||
-        capacity.value("model_id", "") != single.value("model_id", "") ||
-        capacity.value("model_fingerprint", "") !=
-            single.value("model_fingerprint", "") ||
-        capacity.value("provider", "") != single.value("provider", "") ||
-        capacity.value("provider_numeric_fingerprint", "") !=
-            single.value("provider_numeric_fingerprint", "") ||
-        capacity.value("hardware_driver_fingerprint", "") !=
-            single.value("hardware_driver_fingerprint", "") ||
-        capacity.value("maximum_concurrency", 0ULL) < configured_capacity) {
-        throw std::runtime_error(
-            "selected Lichess capacity profile does not match the exact single-game "
-            "profile and configured capacity");
-    }
-}
-
-json installed_engine_locator_options(const fs::path& data_root) {
-    json options = json::object();
-    if (const auto syzygy = saved_locator_path(data_root, "syzygy"); syzygy.has_value()) {
-        options["SyzygyPath"] = syzygy->string();
-    }
-    const auto opening_book = saved_locator_path(data_root, "opening_book");
-    if (!opening_book.has_value()) {
-        return options;
-    }
-
-    fs::path book_file;
-    if (fs::is_regular_file(*opening_book)) {
-        book_file = *opening_book;
-    } else {
-        const fs::path canonical = *opening_book / "strong_rare_v1.bin";
-        if (fs::is_regular_file(canonical) && !fs::is_symlink(canonical)) {
-            book_file = canonical;
-        } else {
-            std::vector<fs::path> candidates;
-            for (const auto& entry : fs::directory_iterator(*opening_book)) {
-                if (!entry.is_regular_file() || entry.is_symlink()) {
-                    continue;
-                }
-                std::string extension = entry.path().extension().string();
-                std::ranges::transform(extension, extension.begin(),
-                                       [](const unsigned char character) {
-                                           return static_cast<char>(std::tolower(character));
-                                       });
-                if (extension == ".bin" || extension == ".book") {
-                    candidates.push_back(entry.path());
-                }
+    if (accepts("saved_locator")) {
+        try {
+            if (const auto saved = saved_locator_path(paths.data_root, kind);
+                saved.has_value()) {
+                return saved;
             }
-            std::ranges::sort(candidates);
-            if (candidates.size() != 1) {
-                throw std::runtime_error("opening-book directory is ambiguous; import the intended "
-                                         "book file explicitly");
-            }
-            book_file = candidates.front();
+        } catch (const std::exception&) {
+            // Retained locator evidence is not authority. A broken optional
+            // selection may still use a verified receipt when the provider
+            // explicitly accepts that source.
         }
     }
-    options["OwnBook"] = true;
-    options["BookFile"] = normalized_absolute(book_file).string();
-    const fs::path stats = book_file.parent_path() / (book_file.stem().string() + ".ffstats");
-    if (fs::is_regular_file(stats) && !fs::is_symlink(stats)) {
-        options["BookStatsFile"] = normalized_absolute(stats).string();
-    }
-    const fs::path policy = book_file.parent_path() / (book_file.stem().string() + ".policy");
-    if (fs::is_regular_file(policy) && !fs::is_symlink(policy)) {
-        options["BookPolicyFile"] = normalized_absolute(policy).string();
-    }
-    return options;
-}
-
-json generated_component_config(const std::string& component_id, const fs::path& receipts_root,
-                                const fs::path& workspace, const fs::path& component_root) {
-    const fs::path data_root = receipts_root.parent_path();
-    if (component_id == "book_forge.service") {
-        json config{
-            {"schema", "uci_arena_book_forge_config_v1"},
-            {"stockfish",
-             installed_entrypoint(receipts_root, "stockfish.engine", "stockfish").string()},
-        };
-        if (const auto token_path = saved_locator_path(data_root, "lichess_token_path");
-            token_path.has_value()) {
-            config["acquisition"] = {{"tokenFile", token_path->string()}};
-        }
-        return config;
-    }
-    if (component_id == "uci_arena_evidence.service") {
-        const fs::path engine = installed_entrypoint(receipts_root, "uci_arena.engine", "uci");
-        const fs::path model_root =
-            installed_active_root(receipts_root, "uci_arena.engine") / "models" / "default";
-        if (!fs::is_directory(model_root) || contains_symbolic_link(model_root)) {
-            throw std::runtime_error("installed UCI Arena model root is unavailable");
-        }
-        const std::string engine_sha256 = installed_engine_sha256(engine);
-        json config{
-            {"schema", "uci_arena_evidence_service_config_v1"},
-            {"workspace", workspace.string()},
-            {"activeModelPointer",
-             (workspace / "runtime-models" / "active_model_runtime.json").string()},
-            {"runtimeModelsRoot", (workspace / "runtime-models").string()},
-            {"profileImports", json::array()},
-            {"engine", engine.string()},
-            {"stockfish",
-             installed_entrypoint(receipts_root, "stockfish.engine", "stockfish").string()},
-            {"referee",
-             installed_entrypoint(receipts_root, "uci_arena.engine", "referee").string()},
-        };
-        if (const auto profile_path = saved_locator_path(data_root, "timing_profile");
-            profile_path.has_value()) {
-            const json profile = read_json(*profile_path);
-            const json identity = profile.at("identity");
-            config["profileImports"].push_back(profile_path->string());
-            config["model_id"] = identity.at("model").at("model_id");
-            config["model_fingerprint"] = identity.at("model").at("model_fingerprint");
-            config["model_root"] = model_root.string();
-            config["provider"] = identity.at("search").at("provider_effective");
-            config["hardware_driver_fingerprint"] =
-                identity.at("provider").value("hardware_driver_fingerprint", "");
-            config["engine_path"] = engine.string();
-            config["engine_sha256"] = engine_sha256;
-            config["uci_options"] = timing_profile_uci_options(profile);
-        }
-        return config;
-    }
-    if (component_id == "lichess.adapter") {
-        const json component_manifest = read_json(component_root / "arena-component.json");
-        fs::path template_relative =
-            fs::path("deploy") / "lichess" / "config.uci_arena.template.yml";
-        if (component_manifest.contains("configuration_template")) {
-            if (!component_manifest.at("configuration_template").is_string()) {
-                throw std::runtime_error(
-                    "installed Lichess adapter configuration-template contract is invalid");
-            }
-            template_relative = fs::path(
-                component_manifest.at("configuration_template").get<std::string>())
-                                    .lexically_normal();
-        }
-        if (!safe_relative_path(template_relative)) {
-            throw std::runtime_error(
-                "installed Lichess adapter configuration-template path is unsafe");
-        }
-        const fs::path template_path = component_root / template_relative;
-        json config = read_json(template_path);
-        if (config.value("schema", "") != "uci_arena_lichess_adapter_v6") {
-            throw std::runtime_error("installed Lichess adapter template is incompatible");
-        }
-        const fs::path engine = installed_entrypoint(receipts_root, "uci_arena.engine", "uci");
-        const fs::path engine_root = installed_active_root(receipts_root, "uci_arena.engine");
-        const fs::path model_root = engine_root / "models" / "default";
-        const std::string engine_sha256 = installed_engine_sha256(engine);
-        const json checkpoint = installed_checkpoint_identity(model_root);
-        config["engine"]["executable"] = engine.string();
-        config["engine"]["working_directory"] = engine_root.string();
-        config["engine"]["uci_options"]["ModelRoot"] = model_root.string();
-        const auto timing_path = saved_locator_path(data_root, "timing_profile");
-        const auto single_path =
-            saved_locator_path(data_root, "lichess_single_game_profile");
-        const auto capacity_path =
-            saved_locator_path(data_root, "lichess_capacity_profile");
-        bool exact_profile_set = false;
-        if (timing_path.has_value() && single_path.has_value() &&
-            capacity_path.has_value()) {
-            try {
-                require_exact_lichess_profiles(
-                    *timing_path, *single_path, *capacity_path, engine_sha256, checkpoint,
-                    config.at("capacity").at("total_slots").get<std::uint64_t>());
-                exact_profile_set = true;
-            } catch (const std::exception&) {
-                // Locator imports are individually transactional. Keep the adapter safely
-                // disabled while an operator replaces a multi-file qualification set.
-            }
-        }
-        if (exact_profile_set) {
-            config["engine"]["time_profile"] = timing_path->string();
-            config["engine"]["single_game_profile"] = single_path->string();
-            config["capacity"]["capacity_profile"] = capacity_path->string();
-        } else {
-            config["engine"].erase("time_profile");
-            config["engine"].erase("single_game_profile");
-            config["capacity"].erase("capacity_profile");
-            config["scheduler"]["enabled"] = false;
-            config["capacity"]["bot"]["target_active"] = 0;
-        }
-        if (const auto profile_path =
-                saved_locator_path(data_root, "lichess_transport_profile");
-            profile_path.has_value()) {
-            config["timing"]["transport_profile_path"] = profile_path->string();
-        }
-        const json locator_options = installed_engine_locator_options(data_root);
-        for (const auto& [name, value] : locator_options.items()) {
-            config["engine"]["uci_options"][name] = value;
-        }
-        return config;
-    }
-    return json();
-}
-
-std::optional<json> generated_evidence_active_model_pointer(const json& config) {
-    if (config.value("schema", "") != "uci_arena_evidence_service_config_v1" ||
-        !config.contains("model_id")) {
+    if (!accepts("install_receipt")) {
         return std::nullopt;
     }
-    return json{
-        {"schema", "arena_installed_active_model_runtime_v1"},
-        {"model_id", config.at("model_id")},
-        {"model_root", config.at("model_root")},
-        {"model_fingerprint", config.at("model_fingerprint")},
-        {"provider", config.at("provider")},
-        {"hardware_driver_fingerprint", config.value("hardware_driver_fingerprint", "")},
-        {"engine_path", config.at("engine_path")},
-        {"engine_sha256", config.at("engine_sha256")},
-        {"uci_options", config.at("uci_options")},
+
+    if (!discovery_cache.has_value()) {
+        discovery_cache = discovery_rows(paths, {}, nullptr);
+    }
+    const json* selected = nullptr;
+    for (const auto& candidate : discovery_cache->at(kind).at("candidates")) {
+        if (candidate.value("source", "") != "install_receipt" ||
+            candidate.value("state", "") != "installed_managed" ||
+            !candidate.contains("path") || !candidate.at("path").is_string()) {
+            continue;
+        }
+        if (selected == nullptr ||
+            discovery_quality_score(candidate) > discovery_quality_score(*selected) ||
+            (discovery_quality_score(candidate) == discovery_quality_score(*selected) &&
+             candidate.at("path").get<std::string>() <
+                 selected->at("path").get<std::string>())) {
+            selected = &candidate;
+        }
+    }
+    if (selected == nullptr) {
+        return std::nullopt;
+    }
+    const fs::path path =
+        normalized_absolute(selected->at("path").get<std::string>());
+    static_cast<void>(validate_import_locator(kind, path));
+    return path;
+}
+
+struct ProviderInstallResult {
+    json configuration;
+    json generated_documents;
+};
+
+ProviderInstallResult render_provider_installation(
+    const SetupPaths& paths, const json& manifest, const fs::path& component_root,
+    const fs::path& workspace, const bool enabled) {
+    const json& integration = manifest.at("installer_integration");
+    const fs::path receipts_root = paths.data_root / "receipts";
+    json bindings = json::object();
+    for (const auto& binding : integration.at("dependency_bindings")) {
+        const std::string name = binding.at("name").get<std::string>();
+        const std::string component_id = binding.at("component_id").get<std::string>();
+        const bool required = binding.at("required").get<bool>();
+        try {
+            const std::string source = binding.at("source").get<std::string>();
+            if (source == "entrypoint") {
+                bindings[name] = installed_entrypoint(
+                    receipts_root, component_id,
+                    binding.at("entrypoint").get<std::string>())
+                                     .string();
+            } else {
+                const fs::path active_root =
+                    installed_active_root(receipts_root, component_id);
+                if (source == "active_root") {
+                    bindings[name] = active_root.string();
+                } else {
+                    const fs::path relative = fs::path(
+                        binding.at("path").get<std::string>()).lexically_normal();
+                    const fs::path selected = normalized_absolute(active_root / relative);
+                    if (!within(active_root, selected) || !fs::exists(selected) ||
+                        contains_symbolic_link(selected)) {
+                        throw std::runtime_error(
+                            "installed component-path binding is unavailable: " + name);
+                    }
+                    bindings[name] = selected.string();
+                }
+            }
+        } catch (const std::exception&) {
+            if (required) {
+                throw;
+            }
+        }
+    }
+
+    json locators = json::object();
+    std::optional<json> discovery_cache;
+    for (const auto& binding : integration.at("locator_bindings")) {
+        const std::string name = binding.at("name").get<std::string>();
+        const std::string kind = binding.at("kind").get<std::string>();
+        try {
+            const auto selected =
+                provider_locator_path(paths, kind, binding, discovery_cache);
+            if (selected.has_value()) {
+                locators[name] = selected->string();
+            } else if (binding.at("required").get<bool>()) {
+                throw std::runtime_error("required saved locator is unavailable: " + kind);
+            }
+        } catch (const std::exception&) {
+            if (binding.at("required").get<bool>()) {
+                throw;
+            }
+        }
+    }
+    const std::string component_id = manifest.at("component_id").get<std::string>();
+    const std::string component_version = manifest.at("component_version").get<std::string>();
+    const json context{
+        {"schema", "arena_provider_install_context_v1"},
+        {"schema_version", 1},
+        {"component",
+         {{"id", component_id},
+          {"version", component_version},
+          {"root", component_root.string()}}},
+        {"workspace", workspace.string()},
+        {"enabled", enabled},
+        {"bindings", std::move(bindings)},
+        {"locators", std::move(locators)},
     };
+    const fs::path context_root = paths.cache_root / "provider-context";
+    fs::create_directories(context_root);
+    if (!within(paths.cache_root, context_root) || contains_symbolic_link(context_root)) {
+        throw std::runtime_error(
+            "provider installer context root contains a symbolic-link boundary");
+    }
+    const auto nonce = std::chrono::system_clock::now().time_since_epoch().count();
+    const fs::path context_path =
+        context_root / (component_id + ".installer-context-" +
+                        std::to_string(nonce) + ".json");
+    if (!within(context_root, context_path) || fs::exists(context_path)) {
+        throw std::runtime_error("provider installer context path is unsafe or occupied");
+    }
+    write_json_atomic(context_path, context);
+    json response;
+    try {
+        const json& invocation = integration.at("invocation");
+        const fs::path runtime = installed_entrypoint(
+            receipts_root, invocation.at("runtime_component_id").get<std::string>(),
+            invocation.at("runtime_entrypoint").get<std::string>());
+        const std::string entrypoint_name =
+            integration.at("entrypoint").get<std::string>();
+        const fs::path renderer = component_root /
+            manifest.at("entrypoints").at(entrypoint_name).get<std::string>();
+        arena::application::ProcessSupervisor process;
+        response = process.run_json(
+            runtime, component_root,
+            {renderer.string(), "--context", context_path.string()},
+            std::chrono::seconds(15));
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(context_path, ignored);
+        throw;
+    }
+    std::error_code ignored;
+    fs::remove(context_path, ignored);
+    if (!response.is_object() || response.size() != 4 ||
+        response.value("schema", "") != "arena_provider_install_result_v1" ||
+        response.value("schema_version", 0) != 1 ||
+        !response.contains("configuration") ||
+        !response.at("configuration").is_object() ||
+        !response.contains("generated_documents") ||
+        !response.at("generated_documents").is_array() ||
+        response.at("generated_documents").size() > 16) {
+        throw std::runtime_error(
+            "provider installer-integration result is incompatible: " + component_id);
+    }
+    std::set<fs::path> generated_paths;
+    for (const auto& generated : response.at("generated_documents")) {
+        if (!generated.is_object() || generated.size() != 2 ||
+            !generated.contains("path") || !generated.at("path").is_string() ||
+            !generated.contains("document") || !generated.at("document").is_object()) {
+            throw std::runtime_error(
+                "provider installer generated-document contract is invalid");
+        }
+        const fs::path relative =
+            fs::path(generated.at("path").get<std::string>()).lexically_normal();
+        if (!safe_relative_path(relative) ||
+            !generated_paths.insert(relative).second ||
+            !within(workspace, workspace / relative)) {
+            throw std::runtime_error(
+                "provider installer generated-document path is unsafe");
+        }
+    }
+    return {response.at("configuration"), response.at("generated_documents")};
 }
 
 struct ImportWrite {
@@ -3004,84 +3865,68 @@ struct ImportWrite {
     json document;
 };
 
-json invoke_book_forge_retry_auth(const SetupPaths& paths, const json& receipt) {
-    if (receipt.value("component_id", "") != "book_forge.service") {
-        throw std::runtime_error("Book Forge credential recovery received the wrong receipt");
-    }
-    const fs::path active_root =
-        normalized_absolute(receipt.at("active_root").get<std::string>());
-    static_cast<void>(validate_component_payload(
-        active_root, "book_forge.service",
-        receipt.at("component_version").get<std::string>()));
-    const fs::path receipts_root = paths.data_root / "receipts";
-    const fs::path node = installed_entrypoint(receipts_root, "node_runtime.private", "node");
-    const fs::path cli = installed_entrypoint(receipts_root, "book_forge.service", "cli");
-    const auto data_paths = receipt.value("data_paths", json::array());
-    const std::string configuration_path = receipt.value("configuration_path", "");
-    if (data_paths.empty() || !data_paths.at(0).is_string() ||
-        configuration_path.empty()) {
-        throw std::runtime_error("Book Forge credential recovery has no managed workspace");
-    }
-    const fs::path workspace =
-        normalized_absolute(data_paths.at(0).get<std::string>());
-    const fs::path configuration = normalized_absolute(configuration_path);
-    if (!within(paths.workspace_root, workspace) ||
-        !within(workspace, configuration) || !fs::is_regular_file(configuration) ||
-        contains_symbolic_link(configuration)) {
-        throw std::runtime_error(
-            "Book Forge credential recovery configuration is unavailable");
-    }
-    arena::application::ProcessSupervisor process;
-    return recover_book_forge_credential(
-        [&] {
-            return process.run_json(
-                node, active_root,
-                {cli.string(), "acquisition", "retry-auth", "--workspace", workspace.string(),
-                 "--config", configuration.string(), "--json"},
-                std::chrono::seconds(10));
-        },
-        3, std::chrono::milliseconds(250));
-}
-
-json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) {
-    std::vector<std::string> affected;
-    if (kind == "timing_profile") {
-        affected = {"uci_arena_evidence.service", "lichess.adapter"};
-    } else if (kind == "opening_book" || kind == "syzygy" ||
-               kind == "lichess_single_game_profile" ||
-               kind == "lichess_capacity_profile" ||
-               kind == "lichess_transport_profile") {
-        affected = {"lichess.adapter"};
-    } else if (kind == "lichess_token_path") {
-        affected = {"book_forge.service"};
-    } else {
-        return json::array();
-    }
-
+json refresh_import_consumers(
+    const SetupPaths& paths, const std::string& kind,
+    const std::string& retained_transaction_id = {},
+    json* retained_writes = nullptr,
+    const std::function<void()>& checkpoint = {}) {
     const fs::path receipts_root = paths.data_root / "receipts";
     std::vector<ImportWrite> writes;
     std::set<std::string> refreshed_components;
-    for (const auto& component_id : affected) {
-        const fs::path receipt_path = receipts_root / (component_id + ".json");
-        if (!fs::is_regular_file(receipt_path)) {
+    if (!fs::is_directory(receipts_root)) {
+        return json::array();
+    }
+    std::vector<fs::path> receipt_paths;
+    for (const auto& entry : fs::directory_iterator(receipts_root)) {
+        if (entry.is_regular_file() && !entry.is_symlink() &&
+            entry.path().extension() == ".json" &&
+            entry.path().filename().string().find(".rollback-") == std::string::npos) {
+            receipt_paths.push_back(entry.path());
+        }
+    }
+    if (receipt_paths.size() > 256) {
+        throw std::runtime_error("installed receipt inventory exceeds its bounded limit");
+    }
+    std::ranges::sort(receipt_paths);
+    for (const auto& receipt_path : receipt_paths) {
+        json receipt;
+        try {
+            receipt = read_json(receipt_path);
+        } catch (const std::exception&) {
             continue;
         }
-        const json receipt = read_json(receipt_path);
-        const std::string receipt_state =
-            receipt.value("state", "");
-        const bool refresh_disabled_lichess =
-            component_id == "lichess.adapter" &&
-            receipt_state == "installed_disabled";
+        const std::string component_id = receipt.value("component_id", "");
+        const std::string receipt_state = receipt.value("state", "");
         if (receipt.value("schema", "") != "arena_install_receipt_v1" ||
-            receipt.value("component_id", "") != component_id ||
+            !valid_identifier(component_id) ||
             (receipt_state != "installed_managed" &&
-             !refresh_disabled_lichess)) {
+             receipt_state != "installed_disabled") ||
+            !receipt.contains("active_root") ||
+            !receipt.at("active_root").is_string() ||
+            !receipt.contains("component_version") ||
+            !receipt.at("component_version").is_string()) {
             continue;
         }
         const fs::path component_root =
             normalized_absolute(receipt.at("active_root").get<std::string>());
-        static_cast<void>(validate_component_payload(
-            component_root, component_id, receipt.at("component_version").get<std::string>()));
+        ValidatedComponentPayload validated;
+        try {
+            validated = validate_component_payload(
+                component_root, component_id,
+                receipt.at("component_version").get<std::string>());
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (!validated.manifest.contains("installer_integration")) {
+            continue;
+        }
+        const json& integration = validated.manifest.at("installer_integration");
+        if (std::ranges::none_of(
+                integration.at("locator_bindings"), [&kind](const json& binding) {
+                    return binding.value("kind", "") == kind;
+                })) {
+            continue;
+        }
         const std::string configured = receipt.value("configuration_path", "");
         if (configured.empty()) {
             throw std::runtime_error("installed consumer has no generated configuration: " +
@@ -3089,24 +3934,27 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
         }
         const fs::path configuration_path = normalized_absolute(configured);
         const fs::path workspace = configuration_path.parent_path();
-        if (!within(paths.workspace_root, configuration_path) ||
-            !within(paths.workspace_root, workspace)) {
+        const fs::path declared_workspace = provider_workspace(paths, integration);
+        if (workspace != declared_workspace ||
+            !within(declared_workspace, configuration_path)) {
             throw std::runtime_error(
-                "installed consumer configuration escapes the selected workspace");
+                "installed consumer configuration escapes its declared workspace");
         }
-        const json generated =
-            generated_component_config(component_id, receipts_root, workspace, component_root);
-        if (const auto pointer = generated_evidence_active_model_pointer(generated);
-            pointer.has_value()) {
-            const fs::path pointer_path =
-                normalized_absolute(generated.at("activeModelPointer").get<std::string>());
-            if (!within(workspace, pointer_path)) {
+        const ProviderInstallResult generated = render_provider_installation(
+            paths, validated.manifest, component_root, workspace,
+            receipt_state == "installed_managed");
+        for (const auto& document : generated.generated_documents) {
+            const fs::path document_path = normalized_absolute(
+                workspace /
+                fs::path(document.at("path").get<std::string>()).lexically_normal());
+            if (!within(workspace, document_path)) {
                 throw std::runtime_error(
-                    "generated Evidence active-model pointer escapes its workspace");
+                    "generated provider document escapes its workspace");
             }
-            writes.push_back({component_id, pointer_path, *pointer});
+            writes.push_back(
+                {component_id, document_path, document.at("document")});
         }
-        writes.push_back({component_id, configuration_path, generated});
+        writes.push_back({component_id, configuration_path, generated.configuration});
         refreshed_components.insert(component_id);
     }
 
@@ -3114,12 +3962,19 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
         fs::path path;
         fs::path backup;
         bool existed;
+        std::optional<std::size_t> retained_index;
     };
     std::vector<AppliedWrite> applied;
-    const std::string transaction_id =
-        std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    const std::string transaction_id = retained_transaction_id.empty()
+        ? std::to_string(std::chrono::system_clock::now().time_since_epoch().count())
+        : retained_transaction_id;
     try {
         for (const auto& write : writes) {
+            if (contains_symbolic_link(write.path.parent_path()) ||
+                (fs::exists(write.path) && fs::is_symlink(write.path))) {
+                throw std::runtime_error(
+                    "generated import consumer path contains a symbolic-link boundary");
+            }
             fs::create_directories(write.path.parent_path());
             const bool existed = fs::is_regular_file(write.path);
             const fs::path backup = write.path.string() + ".import-rollback-" + transaction_id;
@@ -3128,18 +3983,27 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
             if (existed) {
                 fs::copy_file(write.path, backup, fs::copy_options::overwrite_existing);
             }
-            applied.push_back({write.path, backup, existed});
+            std::optional<std::size_t> retained_index;
+            if (retained_writes != nullptr) {
+                retained_index = retained_writes->size();
+                retained_writes->push_back({
+                    {"path", write.path.string()},
+                    {"backup", backup.string()},
+                    {"existed", existed},
+                    {"state", "prepared"},
+                });
+                if (checkpoint) checkpoint();
+            }
+            applied.push_back({write.path, backup, existed, retained_index});
             write_json_atomic(write.path, write.document);
             if (read_json(write.path) != write.document) {
                 throw std::runtime_error(
                     "generated import consumer configuration verification failed");
             }
-        }
-        if (kind == "lichess_token_path" &&
-            refreshed_components.contains("book_forge.service") &&
-            fs::is_regular_file(receipts_root / "node_runtime.private.json")) {
-            static_cast<void>(invoke_book_forge_retry_auth(
-                paths, read_json(receipts_root / "book_forge.service.json")));
+            if (retained_index.has_value()) {
+                (*retained_writes)[*retained_index]["state"] = "written";
+                if (checkpoint) checkpoint();
+            }
         }
     } catch (...) {
         std::error_code ignored;
@@ -3153,14 +4017,20 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
                 fs::remove(current->backup, ignored);
                 ignored.clear();
             }
+            if (current->retained_index.has_value()) {
+                (*retained_writes)[*current->retained_index]["state"] = "restored";
+            }
         }
+        if (checkpoint) checkpoint();
         throw;
     }
 
-    std::error_code ignored;
-    for (const auto& write : applied) {
-        fs::remove(write.backup, ignored);
-        ignored.clear();
+    if (retained_writes == nullptr) {
+        std::error_code ignored;
+        for (const auto& write : applied) {
+            fs::remove(write.backup, ignored);
+            ignored.clear();
+        }
     }
     json refreshed = json::array();
     for (const auto& component_id : refreshed_components) {
@@ -3214,6 +4084,116 @@ json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
     }
 }
 
+void migrate_provider_workspace(
+    const SetupPaths& paths, const json& previous_receipt,
+    const fs::path& destination, const std::string& transaction_id,
+    json& migration, const std::function<void()>& checkpoint) {
+    const json data_paths = previous_receipt.value("data_paths", json::array());
+    const std::string configured = previous_receipt.value("configuration_path", "");
+    if (!data_paths.is_array() || data_paths.size() != 1 ||
+        !data_paths.at(0).is_string() || configured.empty()) {
+        throw std::runtime_error(
+            "provider workspace migration requires one exact receipt-owned data path");
+    }
+    const fs::path source =
+        normalized_absolute(data_paths.at(0).get<std::string>());
+    const fs::path configuration = normalized_absolute(configured);
+    if (source == destination) {
+        migration["state"] = "not_required";
+        checkpoint();
+        return;
+    }
+    if (configuration.parent_path() != source || !fs::is_directory(source) ||
+        contains_symbolic_link(source)) {
+        throw std::runtime_error(
+            "provider workspace migration source does not match its validated receipt");
+    }
+    for (const auto& entry : fs::recursive_directory_iterator(source)) {
+        if (entry.is_symlink()) {
+            throw std::runtime_error(
+                "provider workspace migration rejects symbolic-link content");
+        }
+    }
+    if (fs::exists(destination)) {
+        if (!fs::is_directory(destination) || !fs::is_empty(destination)) {
+            throw std::runtime_error(
+                "provider workspace migration destination is already occupied");
+        }
+        fs::remove(destination);
+    }
+    fs::create_directories(destination.parent_path());
+    migration = {
+        {"source", source.string()},
+        {"destination", destination.string()},
+        {"state", "prepared"},
+        {"locator_writes", json::array()},
+    };
+    checkpoint();
+    std::error_code move_error;
+    fs::rename(source, destination, move_error);
+    if (move_error) {
+        throw std::runtime_error(
+            "provider workspace migration requires an atomic same-volume move: " +
+            move_error.message());
+    }
+    migration["state"] = "moved";
+    checkpoint();
+
+    const fs::path locators_root = paths.data_root / "locators";
+    if (!fs::is_directory(locators_root)) return;
+    std::vector<fs::path> locator_paths;
+    for (const auto& entry : fs::directory_iterator(locators_root)) {
+        if (entry.is_regular_file() && !entry.is_symlink() &&
+            entry.path().extension() == ".json" &&
+            entry.path().filename().string().find(".rollback-") == std::string::npos) {
+            locator_paths.push_back(entry.path());
+        }
+    }
+    if (locator_paths.size() > 64) {
+        throw std::runtime_error("saved locator inventory exceeds its bounded limit");
+    }
+    std::ranges::sort(locator_paths);
+    for (const fs::path& locator_path : locator_paths) {
+        json locator = read_json(locator_path);
+        const std::string kind = locator.value("kind", "");
+        const std::string selected = locator.value("path", "");
+        if (locator.value("schema", "") != "arena_saved_locator_v1" ||
+            locator.value("schema_version", 0) != 1 || !valid_identifier(kind) ||
+            selected.empty()) {
+            continue;
+        }
+        const fs::path selected_path = normalized_absolute(selected);
+        if (!within(source, selected_path)) continue;
+        const fs::path relative = selected_path.lexically_relative(source);
+        const fs::path rebased = normalized_absolute(destination / relative);
+        if (!within(destination, rebased) || contains_symbolic_link(rebased)) {
+            throw std::runtime_error(
+                "rebased provider locator escapes its migrated workspace");
+        }
+        const fs::path backup = locator_path.string() +
+            ".workspace-rollback-" + transaction_id;
+        fs::copy_file(locator_path, backup, fs::copy_options::overwrite_existing);
+        const std::size_t row = migration["locator_writes"].size();
+        migration["locator_writes"].push_back({
+            {"kind", kind},
+            {"path", locator_path.string()},
+            {"backup", backup.string()},
+            {"previous_path", selected_path.string()},
+            {"rebased_path", rebased.string()},
+            {"state", "prepared"},
+        });
+        checkpoint();
+        locator["path"] = rebased.string();
+        locator["validation"] = validate_import_locator(kind, rebased);
+        locator["saved_at"] = current_utc_iso();
+        write_json_atomic(locator_path, locator);
+        migration["locator_writes"][row]["state"] = "rebased";
+        checkpoint();
+    }
+    migration["state"] = "rebased";
+    checkpoint();
+}
+
 bool supports_startup_capability(const json& receipt, const std::string_view capability) {
     if (!receipt.contains("active_root") || !receipt.at("active_root").is_string()) {
         return false;
@@ -3229,30 +4209,15 @@ bool supports_startup_capability(const json& receipt, const std::string_view cap
                                                 std::string(capability)) != capabilities.end();
 }
 
-json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
-                             const std::string& action,
-                             const bool trusted_existing_receipt_workspace = false) {
+struct ProviderWorkspaceInvocation {
+    fs::path workspace;
+    fs::path control_workspace;
+};
+
+ProviderWorkspaceInvocation validated_provider_workspace(
+    const SetupPaths& paths, const json& receipt, const json& workspace_argument,
+    const bool trusted_existing_receipt_workspace) {
     const std::string component_id = receipt.at("component_id").get<std::string>();
-    const fs::path active_root = receipt.at("active_root").get<std::string>();
-    const json manifest =
-        validate_component_payload(
-            active_root, component_id, receipt.at("component_version").get<std::string>())
-            .manifest;
-    const fs::path receipts_root = paths.data_root / "receipts";
-    const fs::path node = installed_entrypoint(receipts_root, "node_runtime.private", "node");
-    const json entrypoints = manifest.at("entrypoints");
-    std::string control_entrypoint;
-    if (entrypoints.contains("startup")) {
-        control_entrypoint = "startup";
-    } else if (entrypoints.contains("cli")) {
-        control_entrypoint = "cli";
-    } else if (entrypoints.contains("adapter")) {
-        control_entrypoint = "adapter";
-    } else {
-        throw std::runtime_error("startup-capable component has no declared control entrypoint: " +
-                                 component_id);
-    }
-    const fs::path cli = installed_entrypoint(receipts_root, component_id, control_entrypoint);
     const auto data_paths = receipt.value("data_paths", json::array());
     if (data_paths.empty() || !data_paths.at(0).is_string()) {
         throw std::runtime_error("startup-capable component has no managed workspace: " +
@@ -3268,36 +4233,93 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
         trusted_existing_receipt_workspace && receipt.contains("startup") &&
         receipt.at("startup").is_object() &&
         receipt.at("startup").value("installed", false);
-    if (!within(paths.workspace_root, workspace) && !trusted_receipt_workspace) {
+    const json manifest =
+        validate_component_payload(
+            receipt.at("active_root").get<std::string>(), component_id,
+            receipt.at("component_version").get<std::string>())
+            .manifest;
+    const fs::path declared_workspace =
+        provider_workspace(paths, manifest.at("installer_integration"));
+    if (workspace != declared_workspace && !trusted_receipt_workspace) {
         throw std::runtime_error(
-            "startup-capable component workspace is outside the selected workspace "
-            "root");
+            "startup-capable component workspace differs from its declared placement");
     }
-    std::vector<std::string> arguments{
-        cli.string(),
-        "startup",
-        action,
-    };
-    if (control_entrypoint == "adapter") {
-        arguments.push_back("--runtime-dir");
-        arguments.push_back((workspace / "runtime").string());
-    } else {
-        arguments.push_back("--workspace");
-        arguments.push_back(workspace.string());
+    const fs::path workspace_relative = fs::path(
+        workspace_argument.at("relative_path").get<std::string>()).lexically_normal();
+    const fs::path control_workspace = workspace_relative == fs::path(".")
+                                           ? workspace
+                                           : normalized_absolute(workspace / workspace_relative);
+    if (!at_or_within(workspace, control_workspace)) {
+        throw std::runtime_error(
+            "startup control workspace escapes its provider workspace");
     }
+    if (contains_symbolic_link(control_workspace)) {
+        throw std::runtime_error(
+            "startup control workspace contains a symbolic-link boundary");
+    }
+    return {workspace, control_workspace};
+}
+
+json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
+                             const std::string& action,
+                             const bool trusted_existing_receipt_workspace = false) {
+    const std::string component_id = receipt.at("component_id").get<std::string>();
+    const fs::path active_root = receipt.at("active_root").get<std::string>();
+    const json manifest =
+        validate_component_payload(
+            active_root, component_id, receipt.at("component_version").get<std::string>())
+            .manifest;
+    if (!manifest.contains("installer_integration") ||
+        !manifest.at("installer_integration").contains("startup_control")) {
+        throw std::runtime_error(
+            "startup-capable component has no Installer startup control contract: " +
+            component_id);
+    }
+    if (action != "install" && action != "uninstall") {
+        throw std::runtime_error("provider startup action is unsupported: " + action);
+    }
+    const fs::path receipts_root = paths.data_root / "receipts";
+    const json& integration = manifest.at("installer_integration");
+    const json& invocation = integration.at("invocation");
+    const json& control = integration.at("startup_control");
+    const fs::path runtime = installed_entrypoint(
+        receipts_root, invocation.at("runtime_component_id").get<std::string>(),
+        invocation.at("runtime_entrypoint").get<std::string>());
+    const std::string control_entrypoint =
+        control.at("entrypoint").get<std::string>();
+    const fs::path cli = installed_entrypoint(receipts_root, component_id, control_entrypoint);
+    std::vector<std::string> arguments{cli.string()};
+    for (const auto& argument : control.at("actions").at(action)) {
+        arguments.push_back(argument.get<std::string>());
+    }
+    const json& workspace_argument = control.at("workspace_argument");
+    const ProviderWorkspaceInvocation provider_workspace =
+        validated_provider_workspace(paths, receipt, workspace_argument,
+                                     trusted_existing_receipt_workspace);
+    arguments.push_back(workspace_argument.at("flag").get<std::string>());
+    arguments.push_back(provider_workspace.control_workspace.string());
     const std::string configuration_path = receipt.value("configuration_path", "");
     if (!configuration_path.empty()) {
         const fs::path configuration = normalized_absolute(configuration_path);
-        if (!within(workspace, configuration) || !fs::is_regular_file(configuration) ||
-            fs::is_symlink(configuration)) {
+        const bool valid_configuration = within(provider_workspace.workspace, configuration) &&
+                                         fs::is_regular_file(configuration) &&
+                                         !fs::is_symlink(configuration);
+        if (!valid_configuration && action == "install") {
             throw std::runtime_error("startup-capable component configuration is unavailable");
         }
-        arguments.push_back("--config");
-        arguments.push_back(configuration.string());
+        if (valid_configuration) {
+            arguments.push_back(
+                control.at("configuration_argument").get<std::string>());
+            arguments.push_back(configuration.string());
+        }
     }
     arena::application::ProcessSupervisor process;
-    const json response = process.run_json(node, active_root, arguments, std::chrono::seconds(30));
-    const json status = response.contains("startup") ? response.at("startup") : response;
+    const json response =
+        process.run_json(runtime, active_root, arguments, std::chrono::seconds(30));
+    const json& result_contract = control.at("result");
+    const json status = result_contract.at("envelope") == "startup"
+                            ? response.at("startup")
+                            : response;
     if (!status.is_object() || !status.contains("installed") ||
         !status.at("installed").is_boolean()) {
         throw std::runtime_error("provider startup adapter returned an invalid status: " +
@@ -3308,24 +4330,165 @@ json invoke_provider_startup(const SetupPaths& paths, const json& receipt,
         throw std::runtime_error("provider startup adapter did not confirm " + action + ": " +
                                  component_id);
     }
-    if (expected_installed && status.contains("matchesCurrentConfiguration") &&
-        (!status.at("matchesCurrentConfiguration").is_boolean() ||
+    if (expected_installed &&
+        result_contract.at("require_configuration_match_on_install").get<bool>() &&
+        (!status.contains("matchesCurrentConfiguration") ||
+         !status.at("matchesCurrentConfiguration").is_boolean() ||
          !status.at("matchesCurrentConfiguration").get<bool>())) {
         throw std::runtime_error("provider startup adapter configuration does not match: " +
                                  component_id);
     }
-    if (expected_installed && component_id == "uci_arena_evidence.service" &&
+    if (expected_installed &&
+        result_contract.at("require_live_on_install").get<bool>() &&
         (!status.contains("active") || !status.at("active").is_boolean() ||
          !status.at("active").get<bool>())) {
-        throw std::runtime_error(
-            "Evidence Service startup adapter did not confirm a live daemon");
+        throw std::runtime_error("provider startup adapter did not confirm a live daemon: " +
+                                 component_id);
     }
     return status;
 }
 
+void verify_provider_service_health(const SetupPaths& paths, const json& receipt,
+                                    const ValidatedComponentPayload& validated) {
+    if (!validated.service_contract.has_value() ||
+        validated.service_contract->value("schema", "") !=
+            "uci_arena_standalone_service_contract_v1") {
+        throw std::runtime_error(
+            "installed startup authority has no standalone service health contract: " +
+            receipt.at("component_id").get<std::string>());
+    }
+    const json& manifest = validated.manifest;
+    if (!manifest.contains("entrypoints") ||
+        !manifest.at("entrypoints").is_object() ||
+        !manifest.at("entrypoints").contains("cli") ||
+        !manifest.at("entrypoints").at("cli").is_string()) {
+        throw std::runtime_error("installed service health CLI is unavailable");
+    }
+
+    const std::string component_id = receipt.at("component_id").get<std::string>();
+    const std::string component_version =
+        receipt.at("component_version").get<std::string>();
+    const fs::path active_root = receipt.at("active_root").get<std::string>();
+    const fs::path receipts_root = paths.data_root / "receipts";
+    const fs::path cli = installed_entrypoint(receipts_root, component_id, "cli");
+    fs::path executable = cli;
+    std::vector<std::string> arguments;
+    const json* startup_control = nullptr;
+    if (manifest.contains("installer_integration") &&
+        manifest.at("installer_integration").is_object()) {
+        const json& integration = manifest.at("installer_integration");
+        const json& invocation = integration.at("invocation");
+        executable = installed_entrypoint(
+            receipts_root,
+            invocation.at("runtime_component_id").get<std::string>(),
+            invocation.at("runtime_entrypoint").get<std::string>());
+        arguments.push_back(cli.string());
+        if (integration.contains("startup_control")) {
+            startup_control = &integration.at("startup_control");
+        }
+    }
+
+    const json& service_contract = *validated.service_contract;
+    const bool manager_integrated =
+        service_contract.contains("manager_integration_api");
+    if (manager_integrated) {
+        const json& api = service_contract.at("manager_integration_api");
+        for (const auto& argument : api.at("arguments")) {
+            arguments.push_back(argument.get<std::string>());
+        }
+        arguments.emplace_back("status");
+    } else {
+        const fs::path contract_path =
+            active_root / fs::path(manifest.at("contract_manifest").get<std::string>());
+        const json contract = read_json(contract_path);
+        arguments.push_back(
+            contract.at("health_smoke").at("command").get<std::string>());
+    }
+
+    if (startup_control != nullptr) {
+        const json& workspace_argument = startup_control->at("workspace_argument");
+        const ProviderWorkspaceInvocation provider_workspace =
+            validated_provider_workspace(paths, receipt, workspace_argument, true);
+        arguments.push_back(workspace_argument.at("flag").get<std::string>());
+        arguments.push_back(provider_workspace.control_workspace.string());
+        const std::string configuration_path =
+            receipt.value("configuration_path", "");
+        if (!configuration_path.empty()) {
+            const fs::path configuration =
+                normalized_absolute(configuration_path);
+            if (!within(provider_workspace.workspace, configuration) ||
+                !fs::is_regular_file(configuration) ||
+                contains_symbolic_link(configuration)) {
+                throw std::runtime_error(
+                    "provider health configuration is unavailable: " +
+                    component_id);
+            }
+            arguments.push_back(
+                startup_control->at("configuration_argument").get<std::string>());
+            arguments.push_back(configuration.string());
+        }
+    }
+
+    arena::application::ProcessSupervisor process;
+    const json response =
+        process.run_json(executable, active_root, arguments, std::chrono::seconds(30));
+    const std::string expected_status_schema =
+        service_contract.at("status_schema").get<std::string>();
+    if (manager_integrated) {
+        const json& api = service_contract.at("manager_integration_api");
+        if (!response.is_object()) {
+            throw std::runtime_error(
+                "provider Manager API status failed contract validation: " +
+                component_id);
+        }
+        const std::string response_api_version =
+            response.value("api_version", "");
+        const std::string declared_api_version = api.value("version", "");
+        const auto major_version = [](const std::string& version) {
+            return version.substr(0, version.find('.'));
+        };
+        if (response.value("schema", "") !=
+                "uci_arena_manager_service_api_v1" ||
+            !response.contains("api_version") ||
+            !response.at("api_version").is_string() ||
+            !compatible_manager_api_version(
+                response.at("api_version").get_ref<const std::string&>()) ||
+            !api.contains("version") || !api.at("version").is_string() ||
+            major_version(response_api_version) !=
+                major_version(declared_api_version) ||
+            response.value("component_id", "") != component_id ||
+            response.value("component_version", "") != component_version ||
+            response.value("operation", "") != "status" ||
+            !response.contains("ok") || !response.at("ok").is_boolean() ||
+            !response.at("ok").get<bool>() ||
+            !response.contains("payload") || !response.at("payload").is_object() ||
+            !response.at("payload").contains("status") ||
+            !response.at("payload").at("status").is_object() ||
+            response.at("payload").at("status").value("schema", "") !=
+                expected_status_schema) {
+            throw std::runtime_error(
+                "provider Manager API status failed contract validation: " +
+                component_id);
+        }
+        return;
+    }
+
+    if (!response.is_object()) {
+        throw std::runtime_error("provider health response is not an object: " +
+                                 component_id);
+    }
+    const json status = response.value("schema", "") == expected_status_schema
+                            ? response
+                            : response.value("status", json::object());
+    if (!status.is_object() || status.value("schema", "") != expected_status_schema) {
+        throw std::runtime_error("provider health status schema is invalid: " +
+                                 component_id);
+    }
+}
+
 void rename_managed_component_tree_with_retry(const fs::path& source,
-                                              const fs::path& destination,
-                                              const std::string& component_id) {
+                                               const fs::path& destination,
+                                               const std::string& component_id) {
     constexpr int attempts = 100;
     constexpr auto retry_delay = std::chrono::milliseconds(100);
     std::string failure = "rename did not complete";
@@ -3342,6 +4505,134 @@ void rename_managed_component_tree_with_retry(const fs::path& source,
     }
     throw std::runtime_error("cannot replace managed component " + component_id +
                              " after shutdown: " + failure);
+}
+
+void remove_managed_component_tree_with_retry(const fs::path& target,
+                                               const std::string& component_id,
+                                               const std::string_view operation) {
+    constexpr int attempts = 100;
+    constexpr auto retry_delay = std::chrono::milliseconds(100);
+    std::string failure = "managed component root remains present";
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        std::error_code remove_error;
+        fs::remove_all(target, remove_error);
+        if (!remove_error && !fs::exists(target)) {
+            return;
+        }
+        if (remove_error) {
+            failure = remove_error.message();
+        }
+        if (attempt + 1 < attempts) {
+            std::this_thread::sleep_for(retry_delay);
+        }
+    }
+    throw std::runtime_error("cannot remove managed component " + component_id +
+                             " during " + std::string(operation) + ": " + failure);
+}
+
+json cleanup_superseded_component_roots(
+    const SetupPaths& paths,
+    const std::function<void(const json&)>& checkpoint) {
+    const fs::path components_root =
+        normalized_absolute(paths.install_root / "components");
+    json cleanup{{"schema", "arena_superseded_component_cleanup_v1"},
+                 {"roots", json::array()}};
+    if (!fs::is_directory(platform::filesystem_api_path(components_root))) {
+        return cleanup;
+    }
+
+    std::map<std::string, fs::path, std::less<>> active_roots;
+    for (const auto& receipt : receipt_rows(paths)) {
+        if (!receipt.contains("component_id") ||
+            !receipt.at("component_id").is_string() ||
+            !receipt.contains("active_root") ||
+            !receipt.at("active_root").is_string()) {
+            continue;
+        }
+        const std::string component_id =
+            receipt.at("component_id").get<std::string>();
+        if (!valid_identifier(component_id)) {
+            continue;
+        }
+        const fs::path active_root = normalized_absolute(
+            receipt.at("active_root").get<std::string>());
+        const fs::path component_root =
+            normalized_absolute(components_root / component_id);
+        if (active_root.parent_path() == component_root &&
+            within(components_root, active_root) && active_root != components_root) {
+            active_roots.emplace(component_id, active_root);
+        }
+    }
+
+    for (const auto& [component_id, active_root] : active_roots) {
+        const fs::path component_root = active_root.parent_path();
+        std::error_code iteration_error;
+        std::vector<fs::path> candidates;
+        fs::directory_iterator iterator(
+            platform::filesystem_api_path(component_root), iteration_error);
+        const fs::directory_iterator end;
+        while (!iteration_error && iterator != end) {
+            const fs::path candidate = normalized_absolute(
+                component_root / iterator->path().filename());
+            if (candidate != active_root) {
+                candidates.push_back(candidate);
+            }
+            iterator.increment(iteration_error);
+        }
+        if (iteration_error) {
+            cleanup["roots"].push_back(
+                {{"component_id", component_id},
+                 {"path", component_root.string()},
+                 {"state", "cleanup_failed"},
+                 {"error", "cannot enumerate component roots: " +
+                               iteration_error.message()}});
+            checkpoint(cleanup);
+            continue;
+        }
+
+        for (const fs::path& candidate : candidates) {
+            json outcome{{"component_id", component_id},
+                         {"path", candidate.string()}};
+            try {
+                if (!within(component_root, candidate) || candidate == component_root ||
+                    contains_symbolic_link(candidate) ||
+                    !fs::is_directory(platform::filesystem_api_path(candidate))) {
+                    throw std::runtime_error(
+                        "candidate is not a bounded regular component directory");
+                }
+                const json manifest = read_json(candidate / "arena-component.json");
+                const std::string version =
+                    manifest.value("component_version", "");
+                if (manifest.value("component_id", "") != component_id ||
+                    !valid_identifier(version)) {
+                    throw std::runtime_error(
+                        "candidate manifest identity does not match its component");
+                }
+                static_cast<void>(
+                    validate_component_payload(candidate, component_id, version));
+            } catch (const std::exception& error) {
+                outcome["state"] = "preserved_modified_or_unrecognized";
+                outcome["error"] = error.what();
+                cleanup["roots"].push_back(std::move(outcome));
+                checkpoint(cleanup);
+                continue;
+            }
+
+            outcome["state"] = "removing";
+            cleanup["roots"].push_back(outcome);
+            checkpoint(cleanup);
+            try {
+                remove_managed_component_tree_with_retry(
+                    candidate, component_id, "post-commit cleanup");
+                cleanup["roots"].back()["state"] = "removed";
+            } catch (const std::exception& error) {
+                cleanup["roots"].back()["state"] = "cleanup_failed";
+                cleanup["roots"].back()["error"] = error.what();
+            }
+            checkpoint(cleanup);
+        }
+    }
+    return cleanup;
 }
 
 bool requires_uninstall_startup(const json& receipt) {
@@ -3640,14 +4931,60 @@ json SetupEngine::persist_release_media(const json& catalog, const SetupPaths& p
     }
 }
 
+json inspect_opening_book_snapshot(const fs::path& book_root) {
+    json result{{"state", "missing"},
+                {"path", book_root.string()},
+                {"missing_files", json::array()}};
+    const fs::path manifest_path = book_root / "snapshot.manifest.json";
+    try {
+        if (!fs::is_directory(book_root) || contains_symbolic_link(book_root) ||
+            !fs::is_regular_file(manifest_path) || contains_symbolic_link(manifest_path)) {
+            result["missing_files"].push_back("snapshot.manifest.json");
+            return result;
+        }
+        if (fs::file_size(manifest_path) > 1024ULL * 1024ULL) {
+            throw std::runtime_error("snapshot manifest exceeds one MiB");
+        }
+        const json manifest = read_json(manifest_path);
+        if (!manifest.is_object() || !manifest.contains("schema") ||
+            !manifest.at("schema").is_string() || !manifest.contains("artifacts") ||
+            !manifest.at("artifacts").is_object() || manifest.at("artifacts").empty() ||
+            manifest.at("artifacts").size() > managed_book_max_files) {
+            throw std::runtime_error("snapshot manifest has no bounded artifact map");
+        }
+        result["snapshot_schema"] = manifest.at("schema");
+        result["artifact_count"] = manifest.at("artifacts").size();
+        for (const auto& [name, digest] : manifest.at("artifacts").items()) {
+            const fs::path relative = fs::path(name);
+            const bool valid_digest =
+                digest.is_string() && digest.get_ref<const std::string&>().size() == 64 &&
+                std::ranges::all_of(digest.get_ref<const std::string&>(),
+                                    [](const unsigned char character) {
+                                        return std::isdigit(character) != 0 ||
+                                               (character >= 'a' && character <= 'f');
+                                    });
+            if (!safe_relative_path(relative) || relative == fs::path("snapshot.manifest.json") ||
+                !valid_digest) {
+                throw std::runtime_error("snapshot manifest contains an unsafe artifact declaration");
+            }
+            const fs::path artifact = book_root / relative;
+            if (!fs::is_regular_file(artifact) || contains_symbolic_link(artifact)) {
+                result["missing_files"].push_back(relative.generic_string());
+            }
+        }
+        result["state"] = result["missing_files"].empty() ? "detected_unmanaged" : "partial";
+    } catch (const std::exception& error) {
+        result["state"] = "invalid";
+        result["validation_error"] = error.what();
+    }
+    return result;
+}
+
 json SetupEngine::inventory(const SetupPaths& paths,
-                            const std::vector<fs::path>& extra_roots,
-                            ports::AssetSearchIndex* search_index) {
+                             const std::vector<fs::path>& extra_roots,
+                             ports::AssetSearchIndex* search_index) {
     json knowledge{
-        {"opening_book",
-         {{"state", "missing"},
-          {"path", paths.knowledge_root.string()},
-          {"missing_files", json::array()}}},
+        {"opening_book", inspect_opening_book_snapshot(paths.knowledge_root / "opening_books")},
         {"syzygy",
          {{"state", "missing"},
           {"path", paths.knowledge_root.string()},
@@ -3655,27 +4992,20 @@ json SetupEngine::inventory(const SetupPaths& paths,
           {"dtz_files", 0},
           {"bytes", 0}}},
     };
-    const fs::path book_root = paths.knowledge_root / "opening_books";
-    const std::array<const char*, 4> book_files{
-        "strong_rare_v1.bin",
-        "strong_rare_v1.ffstats",
-        "strong_rare_v1.policy",
-        "snapshot.manifest.json",
+    json discovery = discovery_rows(paths, extra_roots, search_index);
+    const auto managed_components = [&discovery](const std::string& kind) {
+        std::set<std::string> ids;
+        for (const auto& candidate : discovery.at(kind).at("candidates")) {
+            if (candidate.value("source", "") == "install_receipt" &&
+                candidate.value("state", "") == "installed_managed" &&
+                candidate.contains("details") && candidate.at("details").is_object() &&
+                candidate.at("details").contains("component_id") &&
+                candidate.at("details").at("component_id").is_string()) {
+                ids.insert(candidate.at("details").at("component_id").get<std::string>());
+            }
+        }
+        return json(ids);
     };
-    for (const char* name : book_files) {
-        if (!fs::is_regular_file(book_root / name) || contains_symbolic_link(book_root / name)) {
-            knowledge["opening_book"]["missing_files"].push_back(name);
-        }
-    }
-    if (knowledge["opening_book"]["missing_files"].empty()) {
-        knowledge["opening_book"]["state"] = "detected_unmanaged";
-        knowledge["opening_book"]["path"] = book_root.string();
-        const json managed = managed_knowledge_components(paths, "opening_book.");
-        if (!managed.empty()) {
-            knowledge["opening_book"]["state"] = "installed_managed";
-            knowledge["opening_book"]["managed_components"] = managed;
-        }
-    }
     const fs::path tablebase_root = paths.knowledge_root / "tablebases";
     if (fs::is_directory(tablebase_root) && !contains_symbolic_link(tablebase_root)) {
         for (const auto& entry : fs::directory_iterator(tablebase_root)) {
@@ -3697,43 +5027,57 @@ json SetupEngine::inventory(const SetupPaths& paths,
         if (knowledge["syzygy"]["wdl_files"].get<std::uint64_t>() > 0) {
             knowledge["syzygy"]["state"] = "detected_unmanaged";
             knowledge["syzygy"]["path"] = tablebase_root.string();
-            const json managed = managed_knowledge_components(paths, "syzygy.");
-            if (!managed.empty()) {
-                knowledge["syzygy"]["state"] = "installed_managed";
-                knowledge["syzygy"]["managed_components"] = managed;
-            }
         }
     }
-    json discovery = discovery_rows(paths, extra_roots, search_index);
-    if (knowledge["opening_book"]["state"] == "missing") {
-        const json& selection = discovery.at("opening_book").at("selection");
-        if (selection.value("state", "") != "unresolved" &&
-            selection.value("state", "") != "broken" && selection.contains("path") &&
-            selection.at("path").is_string()) {
+    const json& book_selection = discovery.at("opening_book").at("selection");
+    const bool managed_book_selection =
+        book_selection.value("source", "") == "install_receipt" &&
+        book_selection.value("state", "") == "installed_managed";
+    if (knowledge["opening_book"]["state"] == "missing" || managed_book_selection) {
+        if (book_selection.value("state", "") != "unresolved" &&
+            book_selection.value("state", "") != "broken" &&
+            book_selection.contains("path") && book_selection.at("path").is_string()) {
             try {
-                const fs::path selected = selection.at("path").get<std::string>();
+                const fs::path selected = book_selection.at("path").get<std::string>();
                 knowledge["opening_book"]["validation"] = validate_book_locator(selected);
-                knowledge["opening_book"]["state"] = "detected_unmanaged";
+                knowledge["opening_book"]["state"] =
+                    managed_book_selection ? "installed_managed" : "detected_unmanaged";
                 knowledge["opening_book"]["path"] = normalized_absolute(selected).string();
-                knowledge["opening_book"]["source"] = selection.value("source", "discovered");
+                knowledge["opening_book"]["source"] =
+                    book_selection.value("source", "discovered");
+                if (managed_book_selection && book_selection.contains("details") &&
+                    book_selection.at("details").contains("component_id")) {
+                    knowledge["opening_book"]["managed_components"] =
+                        managed_components("opening_book");
+                }
             } catch (const std::exception&) {
             }
         }
     }
-    if (knowledge["syzygy"]["state"] == "missing") {
-        const json& selection = discovery.at("syzygy").at("selection");
-        if (selection.value("state", "") != "unresolved" &&
-            selection.value("state", "") != "broken" && selection.contains("path") &&
-            selection.at("path").is_string()) {
+    const json& syzygy_selection = discovery.at("syzygy").at("selection");
+    const bool managed_syzygy_selection =
+        syzygy_selection.value("source", "") == "install_receipt" &&
+        syzygy_selection.value("state", "") == "installed_managed";
+    if (knowledge["syzygy"]["state"] == "missing" || managed_syzygy_selection) {
+        if (syzygy_selection.value("state", "") != "unresolved" &&
+            syzygy_selection.value("state", "") != "broken" &&
+            syzygy_selection.contains("path") && syzygy_selection.at("path").is_string()) {
             try {
-                const fs::path selected = selection.at("path").get<std::string>();
+                const fs::path selected = syzygy_selection.at("path").get<std::string>();
                 const json validation = validate_syzygy_locator(selected);
-                knowledge["syzygy"]["state"] = "detected_unmanaged";
+                knowledge["syzygy"]["state"] =
+                    managed_syzygy_selection ? "installed_managed" : "detected_unmanaged";
                 knowledge["syzygy"]["path"] = normalized_absolute(selected).string();
-                knowledge["syzygy"]["source"] = selection.value("source", "discovered");
+                knowledge["syzygy"]["source"] =
+                    syzygy_selection.value("source", "discovered");
                 knowledge["syzygy"]["wdl_files"] = validation.at("wdl_files");
                 knowledge["syzygy"]["dtz_files"] = validation.at("dtz_files");
                 knowledge["syzygy"]["bytes"] = validation.at("bytes");
+                if (managed_syzygy_selection && syzygy_selection.contains("details") &&
+                    syzygy_selection.at("details").contains("component_id")) {
+                    knowledge["syzygy"]["managed_components"] =
+                        managed_components("syzygy");
+                }
             } catch (const std::exception&) {
             }
         }
@@ -3828,11 +5172,11 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         } catch (...) {
             std::error_code ignored;
             if (!receipt_existed) {
-                fs::remove(receipt_path, ignored);
+                fs::remove(platform::filesystem_api_path(receipt_path), ignored);
                 ignored.clear();
             }
             if (!active_root_existed) {
-                fs::remove_all(active_root, ignored);
+                fs::remove_all(platform::filesystem_api_path(active_root), ignored);
             }
             throw;
         }
@@ -3858,11 +5202,11 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         } catch (...) {
             std::error_code ignored;
             if (!receipt_existed) {
-                fs::remove(receipt_path, ignored);
+                fs::remove(platform::filesystem_api_path(receipt_path), ignored);
                 ignored.clear();
             }
             if (!active_root_existed) {
-                fs::remove_all(active_root, ignored);
+                fs::remove_all(platform::filesystem_api_path(active_root), ignored);
             }
             throw;
         }
@@ -4020,6 +5364,7 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
     const auto ids = selected_ids(catalog, preset, selected_components, download_missing_knowledge,
                                   download_missing_books, download_missing_tablebases);
     json actions = json::array();
+    json blockers = json::array();
     std::uint64_t download = 0;
     std::uint64_t staging = 0;
     std::uint64_t installed = 0;
@@ -4056,6 +5401,18 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
             } catch (const std::exception&) {
             }
         }
+        const std::string selected_version = component.at("version").get<std::string>();
+        const fs::path selected_root =
+            paths.install_root / "components" / id / selected_version;
+        const bool partial_selected_root = fs::exists(selected_root) && !already_current;
+        if (partial_selected_root && !repair) {
+            blockers.push_back({
+                {"code", "partial_installation_requires_repair"},
+                {"component_id", id},
+                {"version", selected_version},
+                {"path", selected_root.string()},
+            });
+        }
         const auto& artifact = platform_artifact(component);
         const std::string hash = artifact.at("sha256").get<std::string>();
         if (artifact_hashes.insert(hash).second) {
@@ -4070,7 +5427,8 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
             knowledge_activation += integer_field(component, "installed_bytes");
         }
         backup += integer_field(component, "backup_bytes");
-        actions.push_back({{"action", already_current ? "repair" : "install"},
+        actions.push_back({{"action", already_current || partial_selected_root ? "repair"
+                                                                             : "install"},
                            {"component_id", id},
                            {"version", component.at("version")},
                            {"dependencies", component.value("dependencies", json::array())},
@@ -4079,7 +5437,6 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
                                             : component.value("default_enabled", true)},
                            {"artifact", artifact}});
     }
-    json blockers = json::array();
     std::uint64_t effective_reserve = reserve;
     if (preset != "complete_arena" && reserve > 0) {
         const fs::space_info workspace_space =
@@ -4225,6 +5582,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     };
     write_json_atomic(journal_path, journal);
     json results = json::array();
+    std::set<std::string> migrated_locator_kinds;
+    journal["consumer_refresh_writes"] = json::array();
+    json superseded_component_cleanup{
+        {"schema", "arena_superseded_component_cleanup_v1"},
+        {"roots", json::array()}};
     try {
         const fs::path catalog_directory = fs::path(plan.value("catalog_directory", "."));
         for (const auto& action : plan.at("actions")) {
@@ -4240,6 +5602,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 throw std::runtime_error("plan contains an unsafe component identity");
             }
             const fs::path receipt_path = receipts_root / (id + ".json");
+            std::optional<json> previous_receipt;
             journal["actions"].push_back(
                 {{"component_id", id}, {"version", version}, {"state", "staging"}});
             write_json_atomic(journal_path, journal);
@@ -4260,24 +5623,24 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             const json& manifest = validated.manifest;
 
             if (fs::is_regular_file(receipt_path)) {
-                const json previous_receipt = read_json(receipt_path);
+                previous_receipt = read_json(receipt_path);
                 const bool previous_startup_installed =
-                    previous_receipt.contains("startup") &&
-                    previous_receipt.at("startup").is_object() &&
-                    previous_receipt.at("startup").value("installed", false);
+                    previous_receipt->contains("startup") &&
+                    previous_receipt->at("startup").is_object() &&
+                    previous_receipt->at("startup").value("installed", false);
                 if (previous_startup_installed) {
-                    if (!supports_startup_capability(previous_receipt,
+                    if (!supports_startup_capability(*previous_receipt,
                                                      "startup_uninstall")) {
                         throw std::runtime_error(
                             "installed provider startup cannot be stopped before replacement: " +
                             id);
                     }
                     journal["actions"].back()["previous_startup_receipt"] =
-                        previous_receipt;
+                        *previous_receipt;
                     journal["actions"].back()["previous_startup_transition_started"] = true;
                     write_json_atomic(journal_path, journal);
                     static_cast<void>(invoke_provider_startup(
-                        paths, previous_receipt, "uninstall", true));
+                        paths, *previous_receipt, "uninstall", true));
                     journal["actions"].back()["previous_startup_uninstalled"] = true;
                     write_json_atomic(journal_path, journal);
                 }
@@ -4304,21 +5667,28 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["actions"].back()["state"] = "target_activated";
             write_json_atomic(journal_path, journal);
 
-            const json knowledge_activation =
-                activate_knowledge(target, manifest, paths, transaction_id, id);
-            if (!knowledge_activation.empty()) {
-                journal["actions"].back()["knowledge_activation"] = knowledge_activation;
-                const std::string locator_kind =
-                    id.rfind("opening_book.", 0) == 0
-                        ? "opening_book"
-                        : id.rfind("syzygy.", 0) == 0 ? "syzygy" : "";
-                if (!locator_kind.empty()) {
+            json knowledge_activations =
+                plan_knowledge_activation(target, manifest, paths, transaction_id, id);
+            json activated_resources = json::array();
+            json activated_files = json::array();
+            if (!knowledge_activations.empty()) {
+                journal["actions"].back()["knowledge_activations"] = knowledge_activations;
+                write_json_atomic(journal_path, journal);
+                apply_knowledge_activation(
+                    knowledge_activations, [&](const json& checkpoint) {
+                        journal["actions"].back()["knowledge_activations"] = checkpoint;
+                        write_json_atomic(journal_path, journal);
+                    });
+                activated_resources = receipt_activated_resources(knowledge_activations);
+                activated_files = flattened_activated_files(activated_resources);
+                json created_locators = json::array();
+                for (const auto& resource : activated_resources) {
+                    const std::string locator_kind = resource.at("kind").get<std::string>();
                     const fs::path locator_path =
                         paths.data_root / "locators" / (locator_kind + ".json");
                     if (!fs::exists(locator_path)) {
                         const fs::path activation_path =
-                            normalized_absolute(
-                                knowledge_activation.at("path").get<std::string>());
+                            normalized_absolute(resource.at("path").get<std::string>());
                         const json validation =
                             validate_import_locator(locator_kind, activation_path);
                         const json locator{
@@ -4331,11 +5701,10 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             {"saved_at", current_utc_iso()},
                         };
                         write_json_atomic(locator_path, locator);
-                        journal["actions"].back()["created_knowledge_locator"] =
-                            locator_path.string();
-                    } else {
-                        static_cast<void>(
-                            saved_locator_path(paths.data_root, locator_kind));
+                        created_locators.push_back(locator_path.string());
+                        journal["actions"].back()["created_knowledge_locators"] =
+                            created_locators;
+                        write_json_atomic(journal_path, journal);
                     }
                 }
                 journal["actions"].back()["state"] = "knowledge_activated";
@@ -4352,65 +5721,89 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             json data_paths = json::array();
             json ownership = json::array();
             std::string configuration_path;
-            if (validated.service_contract.has_value() || id == "book_forge.service" ||
-                id == "uci_arena_evidence.service" || id == "lichess.adapter") {
-                std::string workspace_name;
-                if (validated.manifest.contains("workspace_name") &&
-                    validated.manifest.at("workspace_name").is_string()) {
-                    workspace_name =
-                        validated.manifest.at("workspace_name").get<std::string>();
-                    if (!valid_identifier(workspace_name)) {
-                        throw std::runtime_error(
-                            "component workspace name is not a safe identifier");
+            if (validated.manifest.contains("installer_integration")) {
+                const json& integration =
+                    validated.manifest.at("installer_integration");
+                const fs::path workspace = provider_workspace(paths, integration);
+                if (previous_receipt.has_value()) {
+                    const json previous_paths =
+                        previous_receipt->value("data_paths", json::array());
+                    if (previous_paths.is_array() && previous_paths.size() == 1 &&
+                        previous_paths.at(0).is_string() &&
+                        normalized_absolute(
+                            previous_paths.at(0).get<std::string>()) != workspace) {
+                        json& migration =
+                            journal["actions"].back()["workspace_migration"];
+                        migration = {{"state", "planning"}};
+                        write_json_atomic(journal_path, journal);
+                        migrate_provider_workspace(
+                            paths, *previous_receipt, workspace, transaction_id,
+                            migration, [&]() { write_json_atomic(journal_path, journal); });
+                        for (const auto& locator :
+                             migration.value("locator_writes", json::array())) {
+                            migrated_locator_kinds.insert(
+                                locator.at("kind").get<std::string>());
+                        }
                     }
-                } else {
-                    workspace_name = id == "book_forge.service" ? "book-forge"
-                                     : id == "uci_arena_evidence.service"
-                                         ? "evidence-service"
-                                         : "lichess-adapter";
                 }
-                const fs::path workspace = paths.workspace_root / workspace_name;
-                if (action.value("enabled", true) ||
-                    id == "lichess.adapter") {
+                const bool enabled = action.value("enabled", true);
+                if (enabled ||
+                    integration.at("configure_when_disabled").get<bool>()) {
                     fs::create_directories(workspace);
+                    if (contains_symbolic_link(workspace)) {
+                        throw std::runtime_error(
+                            "provider workspace contains a symbolic-link boundary");
+                    }
                     arena::platform::grant_manager_workspace_access(
                         workspace, paths.manager_service_access);
                     const fs::path config_path = workspace / "manager-config.json";
                     journal["actions"].back()["configuration_path"] = config_path.string();
                     if (fs::is_regular_file(config_path)) {
+                        if (fs::is_symlink(config_path)) {
+                            throw std::runtime_error(
+                                "provider configuration cannot be a symbolic link");
+                        }
                         const fs::path backup =
                             workspace / ("manager-config.rollback-" + transaction_id + ".json");
                         fs::copy_file(config_path, backup, fs::copy_options::overwrite_existing);
                         journal["actions"].back()["configuration_backup"] = backup.string();
                     }
-                    const json generated_config =
-                        generated_component_config(id, receipts_root, workspace, target);
-                    if (const auto active_pointer =
-                            generated_evidence_active_model_pointer(generated_config);
-                        active_pointer.has_value()) {
-                        const fs::path pointer_path =
-                            generated_config.at("activeModelPointer").get<std::string>();
-                        if (!within(workspace, pointer_path)) {
+                    const ProviderInstallResult generated =
+                        render_provider_installation(
+                            paths, validated.manifest, target, workspace, enabled);
+                    json generated_writes = json::array();
+                    for (const auto& document : generated.generated_documents) {
+                        const fs::path relative =
+                            fs::path(document.at("path").get<std::string>())
+                                .lexically_normal();
+                        const fs::path document_path =
+                            normalized_absolute(workspace / relative);
+                        if (!within(workspace, document_path) ||
+                            contains_symbolic_link(document_path.parent_path())) {
                             throw std::runtime_error(
-                                "generated Evidence active-model pointer escapes its "
-                                "workspace");
+                                "provider generated-document path escapes its workspace");
                         }
-                        fs::create_directories(pointer_path.parent_path());
-                        journal["actions"].back()["active_model_pointer_path"] =
-                            pointer_path.string();
-                        if (fs::is_regular_file(pointer_path)) {
+                        fs::create_directories(document_path.parent_path());
+                        const bool existed = fs::is_regular_file(document_path);
+                        json write{{"path", document_path.string()}, {"existed", existed}};
+                        if (existed) {
+                            if (fs::is_symlink(document_path)) {
+                                throw std::runtime_error(
+                                    "provider generated document cannot replace a link");
+                            }
                             const fs::path backup =
-                                pointer_path.parent_path() /
-                                ("active_model_runtime.rollback-" + transaction_id + ".json");
-                            fs::copy_file(pointer_path, backup,
+                                document_path.string() + ".rollback-" + transaction_id;
+                            fs::copy_file(document_path, backup,
                                           fs::copy_options::overwrite_existing);
-                            journal["actions"].back()["active_model_pointer_backup"] =
-                                backup.string();
+                            write["backup"] = backup.string();
                         }
+                        generated_writes.push_back(std::move(write));
+                        journal["actions"].back()["generated_document_writes"] =
+                            generated_writes;
                         write_json_atomic(journal_path, journal);
-                        write_json_atomic(pointer_path, *active_pointer);
+                        write_json_atomic(document_path, document.at("document"));
                     }
-                    write_json_atomic(config_path, generated_config);
+                    write_json_atomic(config_path, generated.configuration);
                     configuration_path = config_path.string();
                 }
                 data_paths.push_back(workspace.string());
@@ -4423,8 +5816,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     {"source", "component_data_path"},
                 });
             }
-            for (const auto& activated :
-                 knowledge_activation.value("activated_files", json::array())) {
+            for (const auto& activated : activated_files) {
                 ownership.push_back({
                     {"path", activated.at("path")},
                     {"ownership_class", "generated"},
@@ -4450,7 +5842,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 {"data_paths", std::move(data_paths)},
                 {"ownership", std::move(ownership)},
                 {"configuration_path", configuration_path},
-                {"activated_files", knowledge_activation.value("activated_files", json::array())},
+                {"activated_files", activated_files},
+                {"activated_resources", activated_resources},
             };
             if (!paths.bundle_owner.empty()) {
                 receipt["bundle_owner"] = paths.bundle_owner;
@@ -4459,13 +5852,10 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 receipt["service_contract"] = *validated.service_contract;
             }
             write_json_atomic(receipt_path, receipt);
-            if (action.value("enabled", true) && id == "book_forge.service" &&
-                saved_locator_path(paths.data_root, "lichess_token_path").has_value()) {
-                receipt["credential_recovery"] =
-                    invoke_book_forge_retry_auth(paths, receipt);
-                write_json_atomic(receipt_path, receipt);
-            }
-            if (action.value("enabled", true) && id != "lichess.adapter" &&
+            const bool credential_gated_startup =
+                validated.service_contract.has_value() &&
+                validated.service_contract->value("credential_gated_startup", false);
+            if (action.value("enabled", true) && !credential_gated_startup &&
                 supports_startup_capability(receipt, "startup_install")) {
                 const json startup = invoke_provider_startup(paths, receipt, "install");
                 journal["actions"].back()["startup_installed"] = true;
@@ -4476,6 +5866,15 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["actions"].back()["state"] = "committed";
             write_json_atomic(journal_path, journal);
             results.push_back(receipt);
+        }
+        json refreshed_locator_consumers = json::object();
+        for (const std::string& kind : migrated_locator_kinds) {
+            refreshed_locator_consumers[kind] = refresh_import_consumers(
+                paths, kind, transaction_id + "-" + kind,
+                &journal["consumer_refresh_writes"],
+                [&]() { write_json_atomic(journal_path, journal); });
+            journal["refreshed_locator_consumers"] = refreshed_locator_consumers;
+            write_json_atomic(journal_path, journal);
         }
         if (paths.restart_manager_service) {
 #ifdef _WIN32
@@ -4492,7 +5891,27 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         }
         journal["state"] = "committed";
         write_json_atomic(journal_path, journal);
+        try {
+            superseded_component_cleanup = cleanup_superseded_component_roots(
+                paths, [&](const json& checkpoint) {
+                    journal["superseded_component_cleanup"] = checkpoint;
+                    write_json_atomic(journal_path, journal);
+                });
+        } catch (const std::exception& cleanup_error) {
+            superseded_component_cleanup["error"] = cleanup_error.what();
+            journal["superseded_component_cleanup"] =
+                superseded_component_cleanup;
+            write_json_atomic(journal_path, journal);
+        }
         std::error_code ignored;
+        for (const auto& write :
+             journal.value("consumer_refresh_writes", json::array())) {
+            const std::string backup = write.value("backup", "");
+            if (!backup.empty()) {
+                fs::remove(backup, ignored);
+                ignored.clear();
+            }
+        }
         for (const auto& action : journal.at("actions")) {
             if (action.contains("rollback_path")) {
                 fs::remove_all(action.at("rollback_path").get<std::string>(), ignored);
@@ -4502,27 +5921,47 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 fs::remove(action.at("receipt_backup").get<std::string>(), ignored);
                 ignored.clear();
             }
-            if (action.contains("knowledge_activation")) {
-                const std::string backup =
-                    action.at("knowledge_activation").value("backup_path", "");
-                if (!backup.empty()) {
-                    fs::remove_all(backup, ignored);
-                    ignored.clear();
+            for (const auto& activation :
+                 action.value("knowledge_activations", json::array())) {
+                for (const auto field : {"backup_path", "candidate_path"}) {
+                    const std::string path = activation.value(field, "");
+                    if (!path.empty()) {
+                        fs::remove_all(path, ignored);
+                        ignored.clear();
+                    }
                 }
             }
             if (action.contains("configuration_backup")) {
                 fs::remove(action.at("configuration_backup").get<std::string>(), ignored);
                 ignored.clear();
             }
-            if (action.contains("active_model_pointer_backup")) {
-                fs::remove(action.at("active_model_pointer_backup").get<std::string>(), ignored);
-                ignored.clear();
+            for (const auto& write :
+                 action.value("generated_document_writes", json::array())) {
+                const std::string backup = write.value("backup", "");
+                if (!backup.empty()) {
+                    fs::remove(backup, ignored);
+                    ignored.clear();
+                }
+            }
+            if (action.contains("workspace_migration")) {
+                for (const auto& locator :
+                     action.at("workspace_migration")
+                         .value("locator_writes", json::array())) {
+                    const std::string backup = locator.value("backup", "");
+                    if (!backup.empty()) {
+                        fs::remove(backup, ignored);
+                        ignored.clear();
+                    }
+                }
             }
         }
         fs::remove_all(staging_root / transaction_id, ignored);
     } catch (const std::exception& error) {
         std::error_code rollback_error;
         std::string startup_rollback_failure;
+        std::string knowledge_rollback_failure;
+        std::string component_rollback_failure;
+        std::string workspace_rollback_failure;
         const auto append_startup_rollback_failure =
             [&startup_rollback_failure](const std::string& failure) {
                 if (!startup_rollback_failure.empty()) {
@@ -4530,10 +5969,34 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 }
                 startup_rollback_failure += failure;
             };
+        const json consumer_refresh_writes =
+            journal.value("consumer_refresh_writes", json::array());
+        for (auto write = consumer_refresh_writes.rbegin();
+             write != consumer_refresh_writes.rend(); ++write) {
+            if (write->value("state", "") == "restored") continue;
+            const fs::path path = write->at("path").get<std::string>();
+            const fs::path backup = write->at("backup").get<std::string>();
+            fs::remove(path, rollback_error);
+            rollback_error.clear();
+            if (write->value("existed", false) && fs::is_regular_file(backup)) {
+                fs::rename(backup, path, rollback_error);
+                if (rollback_error) {
+                    workspace_rollback_failure +=
+                        (workspace_rollback_failure.empty() ? "" : "; ") +
+                        std::string("cannot restore refreshed consumer ") + path.string() +
+                        ": " + rollback_error.message();
+                    rollback_error.clear();
+                }
+            } else {
+                fs::remove(backup, rollback_error);
+                rollback_error.clear();
+            }
+        }
         for (auto action = journal["actions"].rbegin(); action != journal["actions"].rend();
              ++action) {
             const std::string state = action->value("state", "staging");
             bool preserve_action = false;
+            bool action_rollback_failed = false;
             if (action->value("startup_installed", false) && action->contains("receipt_path")) {
                 try {
                     const fs::path receipt_path = action->at("receipt_path").get<std::string>();
@@ -4551,33 +6014,90 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             if (preserve_action) {
                 continue;
             }
-            if (action->contains("knowledge_activation")) {
-                const auto& activation = action->at("knowledge_activation");
-                const fs::path destination = activation.at("path").get<std::string>();
-                fs::remove_all(destination, rollback_error);
-                rollback_error.clear();
-                const std::string backup = activation.value("backup_path", "");
-                if (!backup.empty() && fs::exists(backup)) {
-                    fs::rename(backup, destination, rollback_error);
-                    rollback_error.clear();
+            if (action->contains("knowledge_activations")) {
+                const auto& activations = action->at("knowledge_activations");
+                for (auto activation = activations.rbegin(); activation != activations.rend();
+                     ++activation) {
+                    const fs::path destination = activation->at("path").get<std::string>();
+                    const fs::path candidate =
+                        activation->at("candidate_path").get<std::string>();
+                    const fs::path backup = activation->at("backup_path").get<std::string>();
+                    const bool candidate_existed = fs::exists(candidate);
+                    fs::remove_all(candidate, rollback_error);
+                    if (rollback_error) {
+                        knowledge_rollback_failure +=
+                            (knowledge_rollback_failure.empty() ? "" : "; ") +
+                            std::string("cannot remove candidate ") + candidate.string() + ": " +
+                            rollback_error.message();
+                        rollback_error.clear();
+                    }
+                    if (fs::exists(backup)) {
+                        fs::remove_all(destination, rollback_error);
+                        if (rollback_error) {
+                            knowledge_rollback_failure +=
+                                (knowledge_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot clear destination ") + destination.string() +
+                                ": " + rollback_error.message();
+                            rollback_error.clear();
+                            continue;
+                        }
+                        fs::rename(backup, destination, rollback_error);
+                        if (rollback_error) {
+                            knowledge_rollback_failure +=
+                                (knowledge_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot restore destination ") + destination.string() +
+                                ": " + rollback_error.message();
+                            rollback_error.clear();
+                        }
+                    } else if (!activation->value("had_existing", false) &&
+                               (activation->value("state", "planned") == "activated" ||
+                                (activation->value("state", "planned") == "prepared" &&
+                                 !candidate_existed))) {
+                        fs::remove_all(destination, rollback_error);
+                        if (rollback_error) {
+                            knowledge_rollback_failure +=
+                                (knowledge_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot remove new destination ") +
+                                destination.string() + ": " + rollback_error.message();
+                            rollback_error.clear();
+                        }
+                    }
                 }
             }
-            if (action->contains("created_knowledge_locator")) {
-                fs::remove(
-                    action->at("created_knowledge_locator").get<std::string>(),
-                    rollback_error);
+            const json created_locators =
+                action->value("created_knowledge_locators", json::array());
+            for (auto locator = created_locators.rbegin(); locator != created_locators.rend();
+                 ++locator) {
+                fs::remove(locator->get<std::string>(), rollback_error);
                 rollback_error.clear();
             }
             if (state != "staging" && action->contains("target")) {
-                fs::remove_all(action->at("target").get<std::string>(), rollback_error);
-                rollback_error.clear();
+                try {
+                    remove_managed_component_tree_with_retry(
+                        action->at("target").get<std::string>(),
+                        action->value("component_id", "unknown"), "rollback");
+                } catch (const std::exception& component_error) {
+                    action_rollback_failed = true;
+                    component_rollback_failure +=
+                        (component_rollback_failure.empty() ? "" : "; ") +
+                        std::string(component_error.what());
+                    (*action)["component_rollback_error"] = component_error.what();
+                }
             }
             if (action->contains("rollback_path") && action->contains("target")) {
                 const fs::path rollback = action->at("rollback_path").get<std::string>();
                 const fs::path target = action->at("target").get<std::string>();
                 if (fs::exists(rollback) && !fs::exists(target)) {
-                    fs::rename(rollback, target, rollback_error);
-                    rollback_error.clear();
+                    try {
+                        rename_managed_component_tree_with_retry(
+                            rollback, target, action->value("component_id", "unknown"));
+                    } catch (const std::exception& component_error) {
+                        action_rollback_failed = true;
+                        component_rollback_failure +=
+                            (component_rollback_failure.empty() ? "" : "; ") +
+                            std::string(component_error.what());
+                        (*action)["component_rollback_error"] = component_error.what();
+                    }
                 }
             }
             if (action->contains("receipt_path")) {
@@ -4604,20 +6124,66 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     }
                 }
             }
-            if (action->contains("active_model_pointer_path")) {
-                const fs::path pointer = action->at("active_model_pointer_path").get<std::string>();
-                fs::remove(pointer, rollback_error);
-                rollback_error.clear();
-                if (action->contains("active_model_pointer_backup")) {
-                    const fs::path backup =
-                        action->at("active_model_pointer_backup").get<std::string>();
-                    if (fs::exists(backup)) {
-                        fs::rename(backup, pointer, rollback_error);
+            if (action->contains("generated_document_writes")) {
+                const auto& writes = action->at("generated_document_writes");
+                for (auto write = writes.rbegin(); write != writes.rend(); ++write) {
+                    const fs::path path = write->at("path").get<std::string>();
+                    fs::remove(path, rollback_error);
+                    rollback_error.clear();
+                    const std::string backup_value = write->value("backup", "");
+                    if (write->value("existed", false) && !backup_value.empty()) {
+                        const fs::path backup = backup_value;
+                        if (fs::is_regular_file(backup)) {
+                            fs::rename(backup, path, rollback_error);
+                            rollback_error.clear();
+                        }
+                    } else if (!backup_value.empty()) {
+                        fs::remove(backup_value, rollback_error);
                         rollback_error.clear();
                     }
                 }
             }
-            (*action)["state"] = "rolled_back";
+            if (action->contains("workspace_migration")) {
+                const json& migration = action->at("workspace_migration");
+                const json locator_writes =
+                    migration.value("locator_writes", json::array());
+                for (auto locator = locator_writes.rbegin();
+                     locator != locator_writes.rend(); ++locator) {
+                    const fs::path path = locator->at("path").get<std::string>();
+                    const fs::path backup = locator->at("backup").get<std::string>();
+                    fs::remove(path, rollback_error);
+                    rollback_error.clear();
+                    if (fs::is_regular_file(backup)) {
+                        fs::rename(backup, path, rollback_error);
+                    }
+                    if (rollback_error) {
+                        workspace_rollback_failure +=
+                            (workspace_rollback_failure.empty() ? "" : "; ") +
+                            std::string("cannot restore migrated locator ") + path.string() +
+                            ": " + rollback_error.message();
+                        rollback_error.clear();
+                    }
+                }
+                const std::string source_value = migration.value("source", "");
+                const std::string destination_value =
+                    migration.value("destination", "");
+                if (!source_value.empty() && !destination_value.empty()) {
+                    const fs::path source = source_value;
+                    const fs::path destination = destination_value;
+                    if (!fs::exists(source) && fs::exists(destination)) {
+                        fs::create_directories(source.parent_path());
+                        fs::rename(destination, source, rollback_error);
+                        if (rollback_error) {
+                            workspace_rollback_failure +=
+                                (workspace_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot restore provider workspace ") +
+                                source.string() + ": " + rollback_error.message();
+                            rollback_error.clear();
+                        }
+                    }
+                }
+            }
+            (*action)["state"] = action_rollback_failed ? "rollback_failed" : "rolled_back";
             if (action->value("previous_startup_transition_started", false) &&
                 action->contains("previous_startup_receipt")) {
                 try {
@@ -4632,13 +6198,32 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             }
         }
         fs::remove_all(staging_root / transaction_id, rollback_error);
-        journal["state"] = startup_rollback_failure.empty() ? "rolled_back" : "rollback_failed";
-        journal["error"] = startup_rollback_failure.empty()
-                               ? error.what()
-                               : std::string(error.what()) +
-                                     "; startup rollback failed: " + startup_rollback_failure;
-        write_json_atomic(journal_path, journal);
+        std::string rollback_failure;
         if (!startup_rollback_failure.empty()) {
+            rollback_failure = "startup: " + startup_rollback_failure;
+        }
+        if (!knowledge_rollback_failure.empty()) {
+            rollback_failure += (rollback_failure.empty() ? "" : "; ") +
+                                std::string("knowledge activation: ") +
+                                knowledge_rollback_failure;
+        }
+        if (!component_rollback_failure.empty()) {
+            rollback_failure += (rollback_failure.empty() ? "" : "; ") +
+                                std::string("component roots: ") +
+                                component_rollback_failure;
+        }
+        if (!workspace_rollback_failure.empty()) {
+            rollback_failure += (rollback_failure.empty() ? "" : "; ") +
+                                std::string("provider workspace: ") +
+                                workspace_rollback_failure;
+        }
+        journal["state"] = rollback_failure.empty() ? "rolled_back" : "rollback_failed";
+        journal["error"] = rollback_failure.empty()
+                               ? error.what()
+                               : std::string(error.what()) + "; rollback failed: " +
+                                     rollback_failure;
+        write_json_atomic(journal_path, journal);
+        if (!rollback_failure.empty()) {
             throw std::runtime_error(journal.at("error").get<std::string>());
         }
         throw;
@@ -4648,6 +6233,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         {"transaction_id", transaction_id},
         {"state", "committed"},
         {"components", std::move(results)},
+        {"superseded_component_cleanup",
+         std::move(superseded_component_cleanup)},
     };
 }
 
@@ -4674,7 +6261,17 @@ json SetupEngine::verify(const SetupPaths& paths) {
                 throw std::runtime_error(
                     "installed service contract receipt evidence does not match the payload");
             }
-            for (const auto& activated : receipt.value("activated_files", json::array())) {
+            const json expected_resources = expected_receipt_knowledge_resources(
+                receipt.at("active_root").get<std::string>(), validated.manifest, paths, receipt);
+            const json expected_activated_files =
+                flattened_activated_files(expected_resources);
+            if (receipt.value("activated_resources", json::array()) != expected_resources ||
+                receipt.value("activated_files", json::array()) !=
+                    expected_activated_files) {
+                throw std::runtime_error(
+                    "installed knowledge activation receipt evidence does not match the payload");
+            }
+            for (const auto& activated : expected_activated_files) {
                 const fs::path path = activated.at("path").get<std::string>();
                 if (!within(paths.knowledge_root, path) || !fs::is_regular_file(path) ||
                     fs::file_size(path) != integer_field(activated, "size_bytes") ||
@@ -4686,31 +6283,41 @@ json SetupEngine::verify(const SetupPaths& paths) {
             const std::string configuration_path = receipt.value("configuration_path", "");
             if (!configuration_path.empty()) {
                 const fs::path configuration = normalized_absolute(configuration_path);
-                if (!within(paths.workspace_root, configuration) ||
+                if (!validated.manifest.contains("installer_integration")) {
+                    throw std::runtime_error(
+                        "generated component configuration has no owning integration contract");
+                }
+                const fs::path workspace = provider_workspace(
+                    paths, validated.manifest.at("installer_integration"));
+                if (configuration.parent_path() != workspace ||
                     !fs::is_regular_file(configuration) || contains_symbolic_link(configuration)) {
                     throw std::runtime_error("generated component configuration is unavailable");
                 }
-                const json expected = generated_component_config(
-                    receipt.at("component_id").get<std::string>(), paths.data_root / "receipts",
-                    configuration.parent_path(), receipt.at("active_root").get<std::string>());
-                if (read_json(configuration) != expected) {
+                const ProviderInstallResult expected = render_provider_installation(
+                    paths, validated.manifest,
+                    receipt.at("active_root").get<std::string>(),
+                    configuration.parent_path(),
+                    receipt.value("state", "") == "installed_managed");
+                if (read_json(configuration) != expected.configuration) {
                     throw std::runtime_error("generated component configuration drifted from its "
                                              "verified installer inputs");
                 }
-                if (const auto expected_pointer = generated_evidence_active_model_pointer(expected);
-                    expected_pointer.has_value()) {
-                    const fs::path pointer = expected.at("activeModelPointer").get<std::string>();
-                    if (!within(configuration.parent_path(), pointer) ||
-                        !fs::is_regular_file(pointer) || contains_symbolic_link(pointer) ||
-                        read_json(pointer) != *expected_pointer) {
-                        throw std::runtime_error("generated Evidence active-model pointer drifted "
-                                                 "from its verified installer inputs");
+                for (const auto& document : expected.generated_documents) {
+                    const fs::path generated_path = normalized_absolute(
+                        configuration.parent_path() /
+                        fs::path(document.at("path").get<std::string>()).lexically_normal());
+                    if (!within(configuration.parent_path(), generated_path) ||
+                        !fs::is_regular_file(generated_path) ||
+                        contains_symbolic_link(generated_path) ||
+                        read_json(generated_path) != document.at("document")) {
+                        throw std::runtime_error(
+                            "provider generated document drifted from its verified inputs");
                     }
                 }
             }
             if (receipt.contains("startup") && receipt.at("startup").is_object() &&
                 receipt.at("startup").value("installed", false)) {
-                invoke_provider_startup(paths, receipt, "status");
+                verify_provider_service_health(paths, receipt, validated);
             }
             results.push_back(
                 {{"component_id", receipt.at("component_id")}, {"state", "verified"}});
@@ -4774,26 +6381,30 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
     const std::string component_id = "lichess_profile.import." + fingerprint.substr(0, 16);
     const std::string component_version = "1";
     const fs::path import_root = paths.data_root / "imports" / "lichess_profiles";
-    const fs::path active_root = import_root / fingerprint;
-    const fs::path staging_root = import_root / (".staging-" + fingerprint);
-    const bool active_root_existed = fs::exists(active_root);
-    fs::create_directories(import_root);
+    const fs::path active_root = import_root / fingerprint.substr(0, 32);
+    const fs::path staging_root = import_root / (".s-" + fingerprint.substr(0, 16));
+    const fs::path active_api_root = platform::filesystem_api_path(active_root);
+    const fs::path staging_api_root = platform::filesystem_api_path(staging_root);
+    const bool active_root_existed = fs::exists(active_api_root);
+    fs::create_directories(platform::filesystem_api_path(import_root));
     require_no_symbolic_link(import_root);
 
     std::error_code ignored;
-    fs::remove_all(staging_root, ignored);
-    if (!fs::exists(active_root)) {
-        fs::create_directories(staging_root);
+    fs::remove_all(staging_api_root, ignored);
+    if (!fs::exists(active_api_root)) {
+        fs::create_directories(staging_api_root);
         try {
             for (const auto& file : files) {
                 const fs::path target = staging_root / file.relative;
                 if (!within(staging_root, target)) {
                     throw std::runtime_error("managed Lichess profile path escapes staging");
                 }
-                fs::create_directories(target.parent_path());
-                fs::copy_file(file.source, target, fs::copy_options::overwrite_existing);
-                if (fs::file_size(target) != file.size ||
-                    sha256_file(target) != file.sha256) {
+                const fs::path api_target = platform::filesystem_api_path(target);
+                fs::create_directories(api_target.parent_path());
+                fs::copy_file(platform::filesystem_api_path(file.source), api_target,
+                              fs::copy_options::overwrite_existing);
+                if (fs::file_size(api_target) != file.size ||
+                    sha256_file(api_target) != file.sha256) {
                     throw std::runtime_error(
                         "managed Lichess profile closure verification failed");
                 }
@@ -4810,31 +6421,34 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
                 {"uninstall_policy", "preserve_with_manager_data"},
             };
             write_json_atomic(staging_root / "arena-component.json", manifest);
-            fs::rename(staging_root, active_root);
+            fs::rename(staging_api_root, active_api_root);
         } catch (...) {
-            fs::remove_all(staging_root, ignored);
+            fs::remove_all(staging_api_root, ignored);
             throw;
         }
     }
+    const json active_manifest =
+        validate_component_payload(active_root, component_id, component_version).manifest;
+    if (active_manifest.value("files", json::array()) != identity_rows ||
+        active_manifest.value("entrypoints", json::object()).value("profile", "") !=
+            source.filename().generic_string()) {
+        throw std::runtime_error(
+            "managed Lichess profile root does not match its complete content identity");
+    }
     const fs::path managed_profile = active_root / source.filename();
-    if (!fs::is_regular_file(managed_profile) ||
-        sha256_file(managed_profile) != sha256_file(source)) {
+    const fs::path managed_api_profile = platform::filesystem_api_path(managed_profile);
+    if (!fs::is_regular_file(managed_api_profile) ||
+        sha256_file(managed_api_profile) != sha256_file(source)) {
         throw std::runtime_error("managed Lichess profile activation verification failed");
     }
 
     const fs::path receipt_path =
         paths.data_root / "receipts" / (component_id + ".json");
     const bool receipt_existed = fs::is_regular_file(receipt_path);
-    json activated_files = json::array();
     json ownership = json::array();
     for (const auto& file : identity_rows) {
         const fs::path path =
             active_root / file.at("path").get<std::string>();
-        activated_files.push_back({
-            {"path", path.string()},
-            {"size_bytes", file.at("size_bytes")},
-            {"sha256", file.at("sha256")},
-        });
         ownership.push_back({
             {"path", path.string()},
             {"ownership_class", "generated"},
@@ -4847,14 +6461,15 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         });
     }
     const fs::path manifest_path = active_root / "arena-component.json";
+    const fs::path manifest_api_path = platform::filesystem_api_path(manifest_path);
     ownership.push_back({
         {"path", manifest_path.string()},
         {"ownership_class", "generated"},
         {"normal_uninstall", "preserve"},
         {"purge", "exact_identity"},
         {"kind", "file"},
-        {"size_bytes", fs::file_size(manifest_path)},
-        {"sha256", sha256_file(manifest_path)},
+        {"size_bytes", fs::file_size(manifest_api_path)},
+        {"sha256", sha256_file(manifest_api_path)},
         {"source", "managed_copy_manifest"},
     });
     ownership.push_back({
@@ -4871,6 +6486,7 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         {"component_id", component_id},
         {"component_version", component_version},
         {"state", "installed_managed"},
+        {"import_mode", "managed_copy"},
         {"active_root", active_root.string()},
         {"artifact_sha256", fingerprint},
         {"installed_at", current_utc_iso()},
@@ -4878,7 +6494,7 @@ json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& sourc
         {"data_paths", json::array()},
         {"ownership", std::move(ownership)},
         {"configuration_path", ""},
-        {"activated_files", std::move(activated_files)},
+        {"activated_files", json::array()},
     };
     write_json_atomic(receipt_path, receipt);
     return {

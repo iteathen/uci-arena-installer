@@ -8,7 +8,9 @@
     "schema",
     "suite_version",
     "release_ready",
+    "composition",
     "providers",
+    "provider_asset_mirror",
     "managed_repository",
     "components",
     "managed_components"
@@ -20,16 +22,34 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-.][A-Za-z0-9.-]+)?$"
     },
     "release_ready": {"type": "boolean"},
-    "providers": {
+    "composition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["manager", "uci_arena", "lichess_bot", "book_forge", "evidence_service"],
+      "required": ["manifest_name", "sha256"],
       "properties": {
-        "manager": {"$ref": "#/$defs/managerProvider"},
-        "uci_arena": {"$ref": "#/$defs/uciArenaProvider"},
-        "lichess_bot": {"$ref": "#/$defs/lichessProvider"},
-        "book_forge": {"$ref": "#/$defs/bookForgeProvider"},
-        "evidence_service": {"$ref": "#/$defs/evidenceProvider"}
+        "manifest_name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+\\.json$"
+        },
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"$ref": "#/$defs/providerBase"}
+    },
+    "provider_asset_mirror": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "release_tag"],
+      "properties": {
+        "repository": {"const": "iteathen/uci-arena-installer"},
+        "release_tag": {
+          "type": "string",
+          "pattern": "^provider-mirror/v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?$"
+        }
       }
     },
     "managed_repository": {"const": "iteathen/uci-arena-installer"},
@@ -56,61 +76,6 @@
         "workflow_name": {"type": "string"}
       }
     },
-    "uciArenaProvider": {
-      "allOf": [
-        {"$ref": "#/$defs/providerBase"},
-        {
-          "properties": {
-            "repository": {"const": "iteathen/UCI_Arena"},
-            "workflow_name": {"const": "Provider component candidate"}
-          }
-        }
-      ]
-    },
-    "managerProvider": {
-      "allOf": [
-        {"$ref": "#/$defs/providerBase"},
-        {
-          "properties": {
-            "repository": {"const": "iteathen/uci-arena-manager"},
-            "workflow_name": {"const": "Manager component candidate"}
-          }
-        }
-      ]
-    },
-    "lichessProvider": {
-      "allOf": [
-        {"$ref": "#/$defs/providerBase"},
-        {
-          "properties": {
-            "repository": {"const": "iteathen/uci-arena-lichess-bot"},
-            "workflow_name": {"const": "Lichess Bot component candidate"}
-          }
-        }
-      ]
-    },
-    "bookForgeProvider": {
-      "allOf": [
-        {"$ref": "#/$defs/providerBase"},
-        {
-          "properties": {
-            "repository": {"const": "iteathen/uci-arena-book-forge"},
-            "workflow_name": {"const": "Book Forge component candidate"}
-          }
-        }
-      ]
-    },
-    "evidenceProvider": {
-      "allOf": [
-        {"$ref": "#/$defs/providerBase"},
-        {
-          "properties": {
-            "repository": {"const": "iteathen/uci-arena-evidence-service"},
-            "workflow_name": {"const": "Evidence Service component candidate"}
-          }
-        }
-      ]
-    },
     "providerComponent": {
       "type": "object",
       "additionalProperties": false,
@@ -134,7 +99,7 @@
         "provenance_workflow_trigger"
       ],
       "properties": {
-        "provider_id": {"enum": ["manager", "uci_arena", "lichess_bot", "book_forge", "evidence_service"]},
+        "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
         "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "component_version": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "target_triple": {
@@ -179,7 +144,10 @@
           "const": "https://token.actions.githubusercontent.com"
         },
         "provenance_workflow_name": {"type": "string"},
-        "provenance_workflow_ref": {"const": "refs/heads/main"},
+        "provenance_workflow_ref": {
+          "type": "string",
+          "pattern": "^refs/heads/[A-Za-z0-9._/-]+$"
+        },
         "provenance_workflow_trigger": {"const": "workflow_dispatch"}
       }
     }

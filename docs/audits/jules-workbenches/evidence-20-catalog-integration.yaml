@@ -1,0 +1,40 @@
+schema: uci_arena_jules_api_task_manifest_v1
+task_id: evidence-20-catalog-integration
+state: prepared_not_launched
+launch_after:
+  - engine_session_sessions_13034909149691235140_is_terminal_and_reviewed
+transport: jules_rest_api
+source:
+  repository: iteathen/uci-arena-evidence-service
+  branch: agent/project-daemon-heartbeat-staleness
+  expected_sha: 3991983c397a222871cba70c6232da1a8be5b265
+  base_branch: agent/harden-resource-config-after-daemon-timing
+  base_pr: 22
+  existing_pr: 23
+  issue: 20
+scope:
+  owner: catalog_status_projection
+  permitted_paths:
+    - src/catalog.mjs
+    - src/daemon_liveness.mjs
+    - src/cli.mjs
+    - src/manager_api.mjs
+    - test/daemon_liveness.test.mjs
+    - specs/daemon_liveness_v1.yaml
+    - tools/spec-preflight.mjs
+  forbidden:
+    - catalog_schema_or_migrations
+    - scheduling_or_prune_behavior
+    - process_lock_pid_or_tree_authority
+    - new_duplicate_liveness_calculations
+requirements:
+  - catalog_status_owns_projection
+  - one_sample_clock_for_sampled_at_and_age
+  - preserve_heartbeat_at_compatibility
+  - remove_redundant_consumer_wrappers
+  - direct_real_temporary_catalog_tests
+  - node_24_15_check_and_acceptance
+control:
+  require_plan_approval: true
+  automation_mode: NONE
+  task_body: docs/audits/jules-workbenches/evidence-20-catalog-integration-task.md

@@ -11,7 +11,8 @@
     "precedence",
     "selection",
     "candidates",
-    "browse"
+    "browse",
+    "indexed_search"
   ],
   "properties": {
     "schema": {"const": "arena_setup_discovery_v1"},
@@ -24,15 +25,19 @@
         "book_forge",
         "evidence_service",
         "timing_profile",
+        "lichess_single_game_profile",
+        "lichess_capacity_profile",
+        "lichess_transport_profile",
         "lichess_token_path",
         "restaurant"
       ]
     },
     "precedence": {
       "const": [
-        "install_receipt",
         "saved_locator",
+        "install_receipt",
         "provider_manifest",
+        "indexed",
         "discovered",
         "unresolved"
       ]
@@ -76,6 +81,26 @@
         },
         "managed_copy_allowed": {"type": "boolean"}
       }
+    },
+    "indexed_search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "state", "ownership", "registration"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "adapter": {"type": "string"},
+        "state": {"type": "string"},
+        "detail_code": {"type": "string"},
+        "maximum_results": {"type": "integer", "minimum": 0},
+        "returned_candidates": {"type": "integer", "minimum": 0},
+        "total_returned_candidates": {"type": "integer", "minimum": 0},
+        "accepted_candidates": {"type": "integer", "minimum": 0},
+        "rejected_candidates": {"type": "integer", "minimum": 0},
+        "elapsed_ms": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"},
+        "ownership": {"const": "external_dependency"},
+        "registration": {"const": "explicit_import_required"}
+      }
     }
   },
   "$defs": {
@@ -89,6 +114,7 @@
             "install_receipt",
             "saved_locator",
             "provider_manifest",
+            "indexed",
             "discovered",
             "unresolved"
           ]

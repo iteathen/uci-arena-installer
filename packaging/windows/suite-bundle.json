@@ -1,0 +1,54 @@
+{
+  "schema": "arena_windows_suite_bundle_v1",
+  "display_name": "UCI Arena Suite Setup",
+  "manufacturer": "UCI Arena contributors",
+  "features": [
+    {
+      "component_id": "uci_arena.engine",
+      "variable": "InstallUciArenaEngine",
+      "label": "UCI Arena Engine (LatticeKnight default)"
+    },
+    {
+      "component_id": "book_forge.service",
+      "variable": "InstallBookForge",
+      "label": "Book Forge service"
+    },
+    {
+      "component_id": "opening_book.standard",
+      "variable": "InstallStandardOpeningBook",
+      "label": "Standard opening book (small starter set)"
+    },
+    {
+      "component_id": "uci_arena_evidence.service",
+      "variable": "InstallEvidenceService",
+      "label": "UCI Arena Evidence Service"
+    },
+    {
+      "component_id": "lichess.adapter",
+      "variable": "InstallLichessAdapter",
+      "label": "Lichess Bot (installed disabled until account setup)"
+    }
+  ],
+  "scopes": {
+    "per-user": {
+      "name_suffix": "(Personal)",
+      "per_machine": false,
+      "upgrade_code": "74279A7D-47F9-4115-85DA-7F64AC63E041",
+      "install_root": "[LocalAppDataFolder]UCI Arena Manager\\installed",
+      "data_root": "[LocalAppDataFolder]UCI Arena Manager",
+      "cache_root": "[LocalAppDataFolder]UCI Arena Manager\\cache",
+      "knowledge_root": "[LocalAppDataFolder]UCI Arena Manager\\knowledge",
+      "restart_manager_service": false
+    },
+    "per-machine": {
+      "name_suffix": "(All users)",
+      "per_machine": true,
+      "upgrade_code": "8E2B374D-B0B2-4998-BEEA-AFCBCFB9406C",
+      "install_root": "[ProgramFiles64Folder]UCI Arena Manager",
+      "data_root": "[CommonAppDataFolder]UCI Arena Manager",
+      "cache_root": "[CommonAppDataFolder]UCI Arena Manager\\cache",
+      "knowledge_root": "[CommonAppDataFolder]UCI Arena Manager\\knowledge",
+      "restart_manager_service": true
+    }
+  }
+}

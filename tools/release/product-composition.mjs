@@ -9,6 +9,7 @@ const COMPONENT_VERSION = /^[0-9]+\.[0-9]+(?:\.[0-9]+)?$/u;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const ROLE = /^[a-z][a-z0-9_]*$/u;
 const COMPONENT_ID = /^[a-z0-9][a-z0-9._-]*$/u;
+const PACKAGE_IDENTIFIER = /^[A-Za-z0-9._-]+$/u;
 
 function fail(message) {
   throw new Error(`product composition: ${message}`);
@@ -105,6 +106,52 @@ export function resolveComposition(candidate, availableComponents) {
     if (!resolved) fail(`exact component candidate is unavailable: ${component.component_id}@${component.version}`);
     return { ...component, candidate: resolved };
   });
+}
+
+export function validateCompositionManifests(candidate, availableComponents) {
+  const resolved = resolveComposition(candidate, availableComponents);
+  for (const component of resolved) {
+    const manifest = component.candidate?.manifest;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)
+        || manifest.schema !== "arena_install_component_v1"
+        || manifest.schema_version !== 1
+        || manifest.component_id !== component.component_id
+        || manifest.component_version !== component.version) {
+      fail(`resolved manifest identity differs for ${component.component_id}`);
+    }
+    const installerIntegration = manifest.installer_integration;
+    if (installerIntegration !== undefined
+        && (!installerIntegration || typeof installerIntegration !== "object"
+          || Array.isArray(installerIntegration)
+          || installerIntegration.schema !== "arena_provider_installer_integration_v1"
+          || installerIntegration.schema_version !== 1
+          || !PACKAGE_IDENTIFIER.test(installerIntegration.workspace_name ?? "")
+          || !PACKAGE_IDENTIFIER.test(manifest.workspace_name ?? "")
+          || installerIntegration.workspace_name !== manifest.workspace_name
+          || !["workspace_root", "product_data"].includes(
+            installerIntegration.workspace_placement ?? "workspace_root",
+          ))) {
+      fail(
+        `resolved installer-integration workspace is invalid or inconsistent for ${component.component_id}`,
+      );
+    }
+    const manifestDependencies = manifest.dependencies === undefined ? [] : manifest.dependencies;
+    if (!Array.isArray(manifestDependencies)
+        || new Set(manifestDependencies).size !== manifestDependencies.length
+        || manifestDependencies.some((dependency) => !COMPONENT_ID.test(dependency))) {
+      fail(`resolved manifest dependencies are invalid for ${component.component_id}`);
+    }
+    const compositionDependencies = new Set(component.requires);
+    const omitted = manifestDependencies.filter(
+      (dependency) => !compositionDependencies.has(dependency),
+    );
+    if (omitted.length > 0) {
+      fail(
+        `${component.component_id} composition omits manifest dependencies: ${omitted.join(", ")}`,
+      );
+    }
+  }
+  return resolved;
 }
 
 function main(argv) {

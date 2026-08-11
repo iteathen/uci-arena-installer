@@ -205,7 +205,8 @@
             },
             "provenance_bundle_sha256": {"$ref": "#/$defs/digest"},
             "provenance_certificate_identity": {
-              "const": "https://github.com/iteathen/uci-arena-installer/.github/workflows/managed-component-release.yml@refs/heads/main"
+              "type": "string",
+              "pattern": "^https://github\\.com/iteathen/uci-arena-installer/\\.github/workflows/managed-component-release\\.yml@refs/heads/[A-Za-z0-9._/-]+$"
             },
             "provenance_oidc_issuer": {
               "const": "https://token.actions.githubusercontent.com"
@@ -214,7 +215,8 @@
               "const": "Managed component candidate"
             },
             "provenance_workflow_ref": {
-              "const": "refs/heads/main"
+              "type": "string",
+              "pattern": "^refs/heads/[A-Za-z0-9._/-]+$"
             },
             "provenance_workflow_trigger": {
               "const": "workflow_dispatch"

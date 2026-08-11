@@ -19,7 +19,7 @@
   ],
   "properties": {
     "schema": {"const": "uci_arena_standalone_service_contract_v1"},
-    "component_id": {"enum": ["book_forge.service", "uci_arena_evidence.service"]},
+    "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
     "component_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "cli_entrypoint": {"type": "string", "minLength": 1},
     "configuration_schema": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},

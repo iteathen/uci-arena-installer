@@ -5,7 +5,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "arena/application/installer/result.hpp"
@@ -109,6 +112,50 @@ TEST_CASE("Windows installer scope plan recommends an explicit clean choice", "[
     REQUIRE(personal.allowed);
     REQUIRE(personal.selected_scope == WindowsInstallScope::per_user);
     REQUIRE_FALSE(personal.selection_required);
+}
+
+TEST_CASE("installed setup resolves Personal scope from the private libexec layout",
+          "[setup]") {
+    namespace fs = std::filesystem;
+    using arena::platform::WindowsInstallScope;
+    const fs::path root = fs::temp_directory_path() /
+                          ("arena-private-scope-" +
+                           std::to_string(GetCurrentProcessId()) + "-" +
+                           std::to_string(GetTickCount64()));
+    const fs::path executable =
+        root / "libexec" / "uci-arena-installer" / "bin" / "arena-setup.exe";
+    const fs::path marker = root / "share" / "uci-arena" / "install-scope.txt";
+    fs::create_directories(executable.parent_path());
+    fs::create_directories(marker.parent_path());
+    std::ofstream(marker, std::ios::binary) << "per-user\r\n";
+
+    REQUIRE(arena::platform::windows_install_scope_from_executable(executable) ==
+            WindowsInstallScope::per_user);
+    fs::remove_all(root);
+}
+
+TEST_CASE("installed setup fails safely on an invalid nearer scope marker", "[setup]") {
+    namespace fs = std::filesystem;
+    using arena::platform::WindowsInstallScope;
+    const fs::path root = fs::temp_directory_path() /
+                          ("arena-invalid-scope-" +
+                           std::to_string(GetCurrentProcessId()) + "-" +
+                           std::to_string(GetTickCount64()));
+    const fs::path executable =
+        root / "libexec" / "uci-arena-installer" / "bin" / "arena-setup.exe";
+    const fs::path valid_marker =
+        root / "share" / "uci-arena" / "install-scope.txt";
+    const fs::path nearer_marker = root / "libexec" / "uci-arena-installer" /
+                                   "share" / "uci-arena" / "install-scope.txt";
+    fs::create_directories(executable.parent_path());
+    fs::create_directories(valid_marker.parent_path());
+    fs::create_directories(nearer_marker.parent_path());
+    std::ofstream(valid_marker, std::ios::binary) << "per-user\n";
+    std::ofstream(nearer_marker, std::ios::binary) << "unexpected\n";
+
+    REQUIRE(arena::platform::windows_install_scope_from_executable(executable) ==
+            WindowsInstallScope::per_machine);
+    fs::remove_all(root);
 }
 
 TEST_CASE("installer exit categories are stable", "[setup]") {

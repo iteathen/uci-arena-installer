@@ -14,6 +14,9 @@ enum class IndexedAssetKind {
     opening_book,
     syzygy,
     timing_profile,
+    lichess_single_game_profile,
+    lichess_capacity_profile,
+    lichess_transport_profile,
 };
 
 enum class IndexedSearchState {
@@ -23,9 +26,16 @@ enum class IndexedSearchState {
     failed,
 };
 
+struct IndexedAssetRule {
+    IndexedAssetKind kind{};
+    std::vector<std::string> file_extensions;
+    std::vector<std::string> filename_globs;
+};
+
 struct IndexedAssetQuery {
     std::size_t maximum_results{256};
     std::chrono::milliseconds timeout{2000};
+    std::vector<IndexedAssetRule> rules;
 };
 
 struct IndexedAssetCandidate {
@@ -53,6 +63,9 @@ class AssetSearchIndex {
 
 [[nodiscard]] std::string_view indexed_asset_kind_name(IndexedAssetKind kind) noexcept;
 [[nodiscard]] std::string_view indexed_search_state_name(IndexedSearchState state) noexcept;
+[[nodiscard]] bool valid_indexed_asset_query(const IndexedAssetQuery& query) noexcept;
+[[nodiscard]] bool indexed_asset_rule_matches(const IndexedAssetRule& rule,
+                                              const std::filesystem::path& path);
 [[nodiscard]] std::unique_ptr<AssetSearchIndex> make_platform_asset_search_index();
 
 } // namespace arena::ports

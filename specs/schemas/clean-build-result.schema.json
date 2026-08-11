@@ -13,6 +13,10 @@
     "source_commit",
     "clean_tree",
     "build_preset",
+    "input_authority",
+    "composition_sha256",
+    "release_lock_sha256",
+    "component_inputs",
     "installer_authority",
     "release_scope",
     "release_classification",
@@ -28,17 +32,45 @@
     "target_platform": {
       "enum": ["windows-x86_64", "linux-x86_64"]
     },
-    "source_repository": {"const": "iteathen/uci-arena-manager"},
+    "source_repository": {"const": "iteathen/uci-arena-installer"},
     "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "clean_tree": {"const": true},
     "build_preset": {"enum": ["windows-release", "linux-release"]},
-    "installer_authority": {"const": "iteathen/uci-arena-manager"},
-    "release_scope": {"const": "manager_core_development"},
-    "release_classification": {"const": "unsigned_platform_installer_candidate"},
+    "input_authority": {"enum": ["release_ready_lock", "diagnostic_review_lock"]},
+    "composition_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "release_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "component_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component_id", "component_version", "repository", "target_triple",
+          "source_commit", "workflow_ref", "artifact_name", "artifact_sha256",
+          "result_sha256", "provenance_bundle_sha256"
+        ],
+        "properties": {
+          "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+          "component_version": {"type": "string", "minLength": 1},
+          "repository": {"type": "string", "minLength": 3},
+          "target_triple": {"type": "string", "minLength": 1},
+          "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "workflow_ref": {"type": "string", "pattern": "^refs/heads/"},
+          "artifact_name": {"type": "string", "minLength": 1},
+          "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "result_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "provenance_bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "installer_authority": {"const": "iteathen/uci-arena-installer"},
+    "release_scope": {"enum": ["complete_development", "complete_release"]},
+    "release_classification": {"enum": ["unsigned_suite_candidate", "signed_suite_release"]},
     "artifacts": {
       "type": "array",
       "minItems": 2,
-      "maxItems": 4,
+      "maxItems": 5,
       "items": {
         "type": "object",
         "additionalProperties": false,

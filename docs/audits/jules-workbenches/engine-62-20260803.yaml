@@ -1,0 +1,66 @@
+schema: uci_arena_jules_api_session_manifest_v2
+session_id: engine-62-20260803
+transport: jules_rest_api
+control:
+  repository: iteathen/Jules-control
+  issue: 1
+  session_resource: sessions/13034909149691235140
+  workflow: .github/workflows/jules-control.yml
+  secret_environment: jules
+  secret_name: JULES_API_KEY
+source:
+  repository: iteathen/UCI_Arena
+  authoritative_branch: agent/integrate-engine-audit-stacks
+  authoritative_sha: 60f7bc9fe64dd1c405bcc6009232ecb875b760ef
+  authoritative_pr: 47
+  source_issue: 62
+  verified_by_api_starting_branch: true
+delivery:
+  automation_mode: AUTO_CREATE_PR
+  require_plan_approval: true
+  plan_approved: true
+  destination_base: agent/integrate-engine-audit-stacks
+  intended_destination_branch: agent/timestamp-resource-lease-revocation
+  output_pr: null
+  output_head_sha: null
+scope:
+  owner: packages/background-service-runtime
+  permitted_paths:
+    - packages/background-service-runtime/src/background-resource-lease.mjs
+    - packages/background-service-runtime/test/**
+    - packages/background-service-runtime/package.json
+    - specs/background_resource_lease_revocation_v1.yaml
+    - specs/index.yaml
+    - tools/spec_preflight_check.py
+  forbidden_paths:
+    - engine/**
+    - arena/**
+    - release/**
+    - .github/**
+    - packages/time-profile-contract/**
+  forbidden_changes:
+    - inference, search, evaluation, UCI, provider release, packaging, or model semantics
+    - Evidence-specific two-second policy in the shared package
+    - unbounded request arrays or high-frequency directory scans
+required_review:
+  - verify the resulting PR base is agent/integrate-engine-audit-stacks
+  - verify the authored commits descend from source.authoritative_sha
+  - inspect every changed file and call site
+  - reject duplicated timestamp or revocation authority
+  - verify bounds before allocation/materialization
+  - verify watcher/timer cleanup on every terminal path
+  - verify compatibility revocationReason is only a projection
+  - run exact Node 24.15 tests and required preflight
+  - keep the PR draft until hostile review passes
+cleanup:
+  temporary_repository_created: false
+  temporary_repository_cleanup_required: false
+  close_control_issue_after:
+    - session reaches terminal state
+    - output PR and exact head SHA are recorded
+    - hostile review disposition is recorded
+    - canonical handoff and registry are updated
+legacy_workbench_plan:
+  intended_repository: iteathen/jules-wb-engine-62-20260803
+  state: superseded_before_creation
+  deletion_required: false

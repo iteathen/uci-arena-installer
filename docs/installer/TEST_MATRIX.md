@@ -6,6 +6,12 @@ Required scenarios:
 
 - clean and repeated clean install;
 - spaces, Unicode, long paths, trailing separators, and unrelated working directory;
+- managed Lichess evidence with content-addressed filenames beyond the legacy
+  Windows path limit and the provider publisher's nested evidence layout,
+  including receipt ownership/knowledge classification, duplicate-path
+  digest-conflict rejection, staged validation, verify, repeated import,
+  normal uninstall preservation, exact-identity purge, and final directory
+  cleanup;
 - valid upgrade, invalid downgrade, repair, reinstall, replacement, uninstall,
   and separately planned purge;
 - missing or corrupt payload and invalid manifest;
@@ -32,16 +38,91 @@ Required scenarios:
   receipt/preservation root or any explicitly external/unknown path;
 - retained paths never counting as installed authority and reinstall
   revalidation of preserved state;
+- a saved locator for the exact receipt-managed resource preserving the receipt
+  as selected installation authority while a different explicit locator wins;
+- same-source retained candidates selecting stronger content evidence before
+  deterministic path order without treating discovery quality as authority;
+- saved knowledge/evidence locators being re-inspected after their external
+  content changes, with invalid content remaining visible as broken;
 - idempotent configuration, PATH, shortcuts, startup, and migration;
 - post-install health success and failure;
+- read-only indexed discovery for opening books, partial Syzygy collections,
+  timing evidence, and Lichess single-game/capacity/transport profiles through
+  typed product-owned query rules and replaceable Windows/Linux adapters;
+- manifest-driven opening-book snapshot inventory, including complete, partial,
+  malformed, and path-escaping artifact declarations without provider filename
+  knowledge in installer mechanism code;
+- unavailable, timed-out, truncated, empty, legacy, incomplete, incompatible,
+  and decoy indexed results remaining visible or rejected as appropriate
+  without registration, copying, activation, or filesystem mutation;
+- explicit root inspection bounded to root/direct-child files, saved-locator
+  selection outranking a bundled bootstrap asset, and installed receipt
+  authority remaining visible independently of the selected locator;
 - arbitrary component identities exercising declarative selection, default
   activation, capacity policy, and knowledge accounting without engine changes;
+- declarative knowledge activation with an unrelated component identity,
+  misleading knowledge-shaped identity without activation authority, bounded
+  source/destination validation, receipt-consistent managed inventory, prior
+  destination restoration after later failure, and normal-uninstall
+  preservation after receipt and binary authority are removed;
 - cleanup after success and failure;
+- complete-development review acquisition from private immutable prereleases,
+  including exact target commit, three-asset inventory, source-set coverage,
+  private-repository enforcement, safe names, and transactional replacement;
+- official release locks rejecting branch provenance while an explicit
+  non-release-ready diagnostic review lock accepts only exact branch refs and
+  still enforces workflow, commit, trigger, digest, Cosign, transparency-log,
+  and independent DSSE-predicate identity;
+- clean-build target selection rejecting missing, duplicate, or ambiguous
+  portable/platform candidates and preserving the last complete output after a
+  synthetic package failure;
+- catalog generation deriving dependency closure from composition, activation
+  roles and knowledge groups from component manifests, and capacities from
+  verified payload evidence without component-id branches;
+- Manager component version remaining independent from the suite MSI package
+  version;
+- Manager component version remaining independent from the Linux DEB, RPM,
+  and portable-tar suite package version;
+- exact Linux clean-build output naming for the two portable installers and
+  all three Manager package formats;
+- deterministic Linux portable-media bytes, explicit development-versus-TUF
+  trust selection, explicit online-versus-offline transport selection, missing
+  official trust-root rejection, secret-path rejection, and temporary payload
+  cleanup after setup returns;
+- Manager artifact byte/manifest mismatch and version-drift rejection before
+  MSI generation;
+- WiX compilation of both fixed-scope Manager MSIs from a synthetic immutable
+  component artifact, including user/machine PATH ownership, Personal service
+  exclusion, and All-users LocalService registration;
+- catalog/policy feature mismatch and secret-bearing suite-media rejection;
+- WiX compilation of both fixed-scope suite bundles with default-on persisted
+  Modify controls, explicit upgrade/repair operations, and normal uninstall
+  with no purge path; the upgrade operation restages and adopts every selected
+  receipt before related-bundle removal;
+- bootstrapper-adapter identity-ledger tests prove case-insensitive exact-bundle
+  deduplication and reset at each new plan; compiled bundles must embed that
+  adapter as the declared WixStdBA BAFunctions payload;
+- the opt-in isolated Personal upgrade cycle installs two synthetic bundle
+  versions, requires exactly one old-bundle removal plan, rejects missing-cache
+  launch evidence, uninstalls the fixture, and removes its test-owned registry
+  state (`$env:ARENA_RUN_WINDOWS_BUNDLE_UPGRADE_TEST=1; node --test
+  tools/release/build-windows-suite-bundle.test.mjs`);
+- a distinct default-on standard opening-book control and offline-only
+  `--offline` upgrade/repair arguments with no transport flag on uninstall;
 - Personal delegation without elevation;
+- execution of each final scope-neutral Windows envelope through bounded,
+  non-interactive `--validate-envelope` before publication, including complete
+  embedded-payload hashing without installed-scope planning, elevation, or use
+  of the default thread stack for payload buffers;
+- exact fixed-scope Burn command lines place transport options after their
+  owning upgrade/repair subcommand and keep uninstall transport-neutral;
 - All-users delegation to the elevation-requiring machine bundle;
 - deterministic online and offline launcher envelopes, exact embedded bundle
   digests, corrupt-envelope rejection, and temporary-child cleanup;
 - installed-scope maintenance and explicit cross-scope block;
+- retained stale optional locators remain visible but cannot block component
+  repair; a validated installer-managed knowledge receipt is the provider
+  fallback until the operator selects another external asset;
 - one startup owner with no duplicate Manager, Book Forge, Evidence, or Lichess daemon;
 - replaceable provider service contracts with independent operation-catalog
   schema names, exact receipt digests, unknown-major rejection, and tamper

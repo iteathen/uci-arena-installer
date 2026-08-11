@@ -97,12 +97,27 @@ signed_provenance:
         provider identity and attestation. Mirror repository identity grants
         no component authority.
       - Verify all three asset SHA-256 values before interpreting them.
+      - Each provider's explicitly dispatched signing job publishes the exact
+        verified archive, provider result, and Sigstore bundle directly to its
+        private immutable candidate prerelease. Actions artifact storage is not
+        part of the candidate transport or authority chain.
       - Cosign verification pins the exact certificate identity, OIDC issuer,
         provider repository, source commit, workflow name, workflow ref,
         workflow trigger, predicate type, and artifact bytes.
       - Official suite locks accept only the trusted provider workflow from
         refs/heads/main with workflow_dispatch. Source-tag candidates may be
         diagnostic provider outputs but have no official suite authority.
+      - A local complete-development review build may accept a separately
+        generated, non-release-ready review lock only through the explicit
+        diagnostic-review mode. Every row remains bound to one exact trusted
+        workflow, branch ref, source commit, immutable private release, result,
+        artifact, and Sigstore bundle; the certificate identity must derive
+        from that exact locked ref.
+      - Diagnostic-review acceptance changes only the permitted locked source
+        ref. It does not weaken digest, OIDC issuer, workflow, trigger,
+        repository, source-commit, predicate, transparency-log, or independent
+        DSSE-payload verification, and it can emit only an unsigned suite
+        candidate that is ineligible for mirroring or promotion.
       - Independently decode the verified DSSE payload and require exactly one
         subject for the locked artifact digest plus a predicate exactly equal
         to the separately digest-pinned arena_provider_release_result_v1.
@@ -171,6 +186,10 @@ signed_provenance:
       - Managed component versions preserve the upstream identity exactly and
         accept two- or three-part numeric versions; Stockfish 15.1 must not be
         relabeled as 15.1.0.
+      - The managed Stockfish manifest declares its `uci_engine` discovery
+        role through the `stockfish` entrypoint. The private Node runtime
+        declares no engine role; capability, component identity, filename, and
+        entrypoint names never substitute for the discovery declaration.
   suite_artifacts:
     predicate_type: https://uci-arena.example/attestations/installer-release/v1
     statement_type: https://in-toto.io/Statement/v1
@@ -202,6 +221,9 @@ interfaces:
   component: arena_install_component_v1
   standalone_service_contract: uci_arena_standalone_service_contract_v1
   provider_service_contract: uci_arena_service_contract_v1
+  provider_installer_integration: arena_provider_installer_integration_v1
+  provider_install_context: arena_provider_install_context_v1
+  provider_install_result: arena_provider_install_result_v1
   provider_result: arena_provider_release_result_v1
   plan: arena_install_plan_v1
   receipt: arena_install_receipt_v1
@@ -318,6 +340,16 @@ installer_lego_architecture:
     - development_workspace
     - repair_required
   modes: [clean_install, upgrade, repair, reinstall, downgrade, replacement, uninstall, purge]
+  partial_installation_rules:
+    - A selected immutable component root without a matching validated active
+      receipt is partial installation state, not installed authority.
+    - Clean-install planning reports that state as a repair-required blocker
+      before staging or mutating any selected component.
+    - Explicit repair may restage and replace the partial immutable root while
+      preserving provider workspaces, knowledge, locators, and external files.
+    - Rollback retries removal or restoration of managed immutable roots and
+      records rollback_failed when cleanup cannot be completed; it must not
+      report rolled_back while an untracked replacement root remains.
   ownership_classes:
     - application_replaceable
     - user_preserved
@@ -346,15 +378,15 @@ installer_lego_architecture:
   documentation_root: docs/installer
 
 standalone_service_contracts:
-  components:
-    - book_forge.service
-    - uci_arena_evidence.service
-  required_from_component_version: 0.2.0
-  manager_service_api_required_from_component_version: 0.3.0
-  legacy_compatibility: >
-    Existing 0.1.x provider candidates remain readable without a standalone
-    service contract. A service candidate at or after 0.2.0 fails closed when
-    its component manifest does not name a contract manifest.
+  applicability: >
+    Any component declaring manager_integration_api is an integrated Manager
+    service and must name its service contract. Installer integration alone
+    may belong to a non-service configuration consumer and does not imply a
+    service contract.
+  compatibility: >
+    Contract requirements derive only from declared integration roles. The
+    Installer must not select them from component ids, repository identities,
+    or historical version thresholds.
   validation:
     - The contract path is a safe relative path to a regular, non-symbolic-link
       file listed with its exact size and SHA-256 in arena-component.json.
@@ -369,9 +401,8 @@ standalone_service_contracts:
       smoke is the public status command with exit-zero plus schema validation.
     - Upgrade preserves and migrates service data, while repair and normal
       uninstall preserve it.
-    - At or after component version 0.3.0, the standalone service contract and
-      arena-component.json both contain the same manager_integration_api
-      declaration.
+    - When either the standalone service contract or arena-component.json
+      contains manager_integration_api, both contain the same declaration.
     - The declaration uses uci_arena_manager_service_api_v1 version 1.x over
       CLI JSON, selects the verified cli entrypoint with the argv prefix
       [api], declares all five required operations as a subset, and emits only
@@ -381,6 +412,18 @@ standalone_service_contracts:
     - Manager service API metadata is covered by the immutable component
       manifest and provider attestation; installer or Manager code never
       synthesizes it for an installed provider.
+    - Verify invokes a Manager-integrated service's declared dependency
+      runtime, CLI entrypoint, fixed Manager API argument prefix, status
+      operation, bounded provider workspace argument, and the declared
+      configuration argument when the validated receipt owns a generated
+      configuration. It accepts only an exit-zero
+      uci_arena_manager_service_api_v1 envelope with the exact
+      compatible API major, component id, component version, status operation,
+      ok true, and payload status schema declared by the validated contract.
+    - A standalone service without Manager integration is verified through its
+      declared health_smoke command and status schema. Startup install and
+      uninstall actions are lifecycle mutation contracts and are never
+      extended or guessed to perform health inspection.
   receipt:
     fields:
       - schema
@@ -445,6 +488,86 @@ provider_service_contracts:
       - manager_operations_sha256
       - credential_gated_startup
 
+provider_installer_integration:
+  owner: installable_provider
+  consumer: uci_arena_installer
+  purpose: >
+    A provider translates declared suite dependency and saved-locator bindings
+    into its own configuration and bounded generated documents. Installer owns
+    validation, invocation, journaling, placement, verification, and rollback,
+    but it does not interpret provider configuration fields or identities.
+  contract:
+    schema: arena_provider_installer_integration_v1
+    version: 1
+    invocation: dependency_runtime_with_fixed_argument_array
+    context_schema: arena_provider_install_context_v1
+    result_schema: arena_provider_install_result_v1
+    workspace_output_limit: 16
+    dependency_binding_limit: 32
+    locator_binding_limit: 32
+  requirements:
+    - The provider manifest names one digest-verified renderer entrypoint and
+      its declared dependency runtime; Installer never selects an interpreter
+      from a suffix, source layout, or provider id.
+    - A manifest that declares installer integration also declares the same
+      workspace_name at the component root. Release assembly rejects a missing
+      or divergent projection before catalog generation, and runtime payload
+      validation independently enforces the same invariant before mutation.
+    - A provider installer integration may declare workspace_placement as
+      workspace_root or product_data. Omission retains workspace_root for v1
+      compatibility. product_data resolves beneath the mutable Installer data
+      root at provider-data/<workspace_name>; it never resolves beneath an
+      immutable component or program root.
+    - Dependency inputs are explicit receipt-verified active roots,
+      entrypoints, or safe component-relative paths. Required bindings fail
+      closed; unavailable optional bindings are omitted.
+    - Locator subscriptions are named and typed. Each binding may declare the
+      accepted authority sources saved_locator and install_receipt. An omitted
+      source declaration preserves the v1 saved-then-receipt behavior for
+      existing manifests. Saving a locator refreshes only installed consumers
+      that declare that kind, without provider-id branches.
+    - Installer supplies a locator only from a source accepted by that binding.
+      In particular, a receipt-owned suite default is not presented through a
+      saved-locator-only override binding merely because both use the same
+      discovery kind. Selection remains data-driven and never branches on a
+      provider or component identity.
+    - Context contains component identity, immutable active root, provider
+      workspace, enablement, declared bindings, and validated locator paths.
+      Credential contents never enter context, argv, logs, receipts, or output.
+    - Renderer output is a closed versioned object containing one configuration
+      object and at most sixteen safe workspace-relative JSON documents.
+    - Installer writes configuration and generated documents atomically,
+      records every mutation in the transaction journal, restores prior files
+      in reverse order on failure, and removes temporary context plus backups.
+    - Verification reruns the same provider renderer through the declared
+      contract and compares every generated document; retained state is not
+      trusted merely because it exists.
+    - Adding or changing provider configuration normally changes only the
+      provider renderer and manifest bindings, not Installer control flow.
+    - The contract is capability-neutral: an Engine component may use the same
+      renderer boundary to publish arena_uci_engine_launch_profile_v1. Engine
+      owns translation of timing, search, model, and knowledge contracts into
+      UCI options; Installer supplies only declared receipt and locator paths,
+      writes the result transactionally, and records its preserved workspace.
+    - Adding or changing an Engine launch option, default topology, timing
+      calibration field, or knowledge binding changes the Engine artifact and
+      manifest data. It must not introduce an Engine-id or UCI-option branch in
+      Installer planning, deployment, verification, repair, or rollback.
+    - A startup-capable provider declares arena_provider_startup_control_v1
+      beside its renderer: exact entrypoint, fixed install/uninstall argument
+      arrays, workspace/configuration flags, result envelope, and required
+      configuration-match/live evidence. Installer never guesses these values
+      from component identity, entrypoint names, or implementation language.
+    - A startup-control workspace relative path of `.` denotes the provider
+      workspace itself; another safe relative path denotes one of its
+      descendants. Installer accepts exactly those two bounded shapes, rejects
+      traversal outside the provider workspace, and rejects symbolic-link or
+      reparse traversal before invoking the provider adapter.
+    - Credential-gated startup installation remains provider/operator work;
+      Installer does not receive credential contents. Credential-free startup
+      removal remains declared so normal uninstall can remove startup authority
+      even when Installer did not create it.
+
 setup:
   executable: arena-setup
   operations: [inventory, import, plan, apply, verify, repair, upgrade, uninstall-plan, uninstall, purge-plan, purge]
@@ -493,12 +616,21 @@ setup:
         selected component from the new signed catalog, and does not silently
         reinstall a component the operator previously removed.
       - Upgrade preserves the exact workspace recorded by a validated existing
-        provider receipt even when shell-folder redirection or a corrected
-        installer default resolves a different workspace root. This narrow
-        compatibility authority applies only while uninstalling or restoring
-        that receipt's already-installed startup registration; it never
-        authorizes a browser, catalog, or new component to select an arbitrary
-        outside-root path.
+        provider receipt while stopping or restoring that receipt's startup
+        registration. If the replacement manifest changes the declared
+        workspace placement, Installer then migrates that exact stopped
+        receipt-owned directory to the new declared path by a same-volume
+        atomic rename before rendering replacement configuration.
+      - Workspace migration rejects links, an occupied destination, an
+        unverified receipt/configuration relationship, and cross-volume moves.
+        It journals the directory move, rebases only saved locators whose
+        validated paths are descendants of that exact workspace, regenerates
+        every declared consumer, and reverses locator and directory changes
+        before restoring prior startup on any failure.
+      - The narrow migration authority never authorizes a browser, catalog, or
+        new component to select an arbitrary outside-root path. A workspace
+        that is not the exact validated receipt data path remains external and
+        unchanged.
       - Linux packages carry arena-setup, the retained signed catalog, and
         lifecycle integration; distro-native service scripts and arena-setup
         provide equivalent component install, repair, upgrade, and removal.
@@ -517,13 +649,13 @@ packaging:
   windows_outputs: dist/windows
   linux_outputs: dist/linux
   clean_build:
-    authority: iteathen/uci-arena-manager
+    authority: iteathen/uci-arena-installer
     suite_command: protected .github/workflows/release.yml workflow_dispatch
     local_complete_candidate_command: >
       node tools/release/clean-build.mjs --complete-development
       --platform <target>
     manager_component_command: >
-      node tools/release/clean-build.mjs --manager-only --platform <target>
+      acquire one immutable attested manager.core candidate for <target>
     output_manifest:
       schema: arena_clean_build_result_v1
       filename: clean-build-result.json
@@ -532,6 +664,10 @@ packaging:
         - source_commit
         - target_platform
         - build_preset
+        - composition_sha256
+        - release_lock_sha256
+        - exact_component_input_digests
+        - exact_component_source_commits_and_workflow_refs
         - exact_artifact_names
         - artifact_sizes
         - artifact_sha256_digests
@@ -546,18 +682,24 @@ packaging:
         integration. They accept workflow_dispatch only, run solely after an
         explicit operator request, and are never configured as automatically
         required pull-request status checks.
-      - Build the dashboard, configure the native release preset, clean native
-        outputs before rebuilding, run native tests once for the shared Windows
-        binary set, and invoke the existing CPack deployment generators for
-        each fixed package scope.
-      - The Windows clean-build entrypoint resolves CMake, CPack, and CTest as
-        one toolchain: an explicit ARENA_CMAKE_EXECUTABLE wins, followed by the
-        newest supported repository-local portable CMake, followed by PATH.
-        Per-user packaging still fails closed below CMake 4.3.
+      - Acquire and verify one immutable Manager component candidate and one
+        Installer runtime candidate per target. Platform integration overlays
+        are Installer-owned data applied only after both manifests validate.
+      - Windows package generation uses pinned WiX over the same validated
+        Manager and Installer runtime roots for both fixed scopes. Linux package
+        generation uses distro adapters over the same validated Manager root
+        plus Installer-owned integration policy; neither path reads a Manager
+        source or build tree.
       - Complete development composition resolves the pinned Cosign verifier
         from an explicit COSIGN_EXECUTABLE, then the exact repository-local
         build/tooling/cosign-3.0.6 payload, then PATH. Missing verification
         tooling or any provenance failure remains blocking.
+      - Linux portable-media construction receives trust mode and transport
+        mode as explicit release-assembly inputs. Development launchers pass
+        --allow-unsigned-development-catalog and never pretend to carry TUF;
+        official launchers require release/tuf/root.json and pass
+        --metadata-dir. Offline launchers additionally pass --offline, while
+        online launchers do not.
       - Pull-request CI and the protected suite release workflow install the
         same explicit Linux native-build prerequisite set before vcpkg
         dependency bootstrap. Release-only package validators may extend that
@@ -578,15 +720,33 @@ packaging:
         arena_clean_build_result_v1 manifest and cannot succeed when any
         required installer is missing, empty, ambiguously named, or accompanied
         by stale installer output.
-      - Local and CI Manager-Core builds use the same explicit --manager-only
-        command and artifact verifier. Omitting that scope fails closed rather
-        than claiming native Manager packages are Complete Arena media.
+      - The result distinguishes release_ready_lock from
+        diagnostic_review_lock input authority and records every composed
+        component repository, version, target, source commit, workflow ref,
+        artifact digest, result digest, and Sigstore-bundle digest.
+      - Manager publishes one immutable, manifest-bound component candidate per
+        target. Installer release assembly consumes that candidate through the
+        same component contract locally and in protected CI; it never reads a
+        Manager source checkout or mistakes the candidate for Complete Arena
+        media.
       - The explicit --complete-development path composes only the
         release-ready digest-pinned lock and its verified provider Sigstore
         bundles. It may emit an unsigned development bootstrapper, but it
         cannot bypass provider attestation verification, synthesize a
         component, accept an unreviewed source checkout, or label the result
         official.
+      - Before merge, the additional explicit --diagnostic-review-lock path
+        may compose one complete target-specific non-release-ready lock from
+        immutable private branch candidates. It validates the same component,
+        dependency, manifest, digest, and provenance contracts as the normal
+        complete-development path, records unsigned_suite_candidate, and is
+        rejected by protected release, provider mirroring, and suite signing.
+      - Diagnostic review acquisition consumes a declarative source set with
+        exactly one component id, private repository, immutable prerelease tag,
+        and exact release-target commit for every composed component. The
+        package-source adapter downloads exactly the artifact, release result,
+        and Sigstore bundle into a fresh bounded root, derives the review lock
+        from those bytes, and publishes neither the lock nor the candidates.
       - A Complete development bootstrapper enables MSI same-version upgrades
         so a newer source commit can repair or replace an installed candidate
         that has the same unreleased suite version. Manager-only and official
@@ -613,10 +773,14 @@ packaging:
         Stockfish, Book Forge, standard opening book, Evidence runtime,
         Evidence Service, and the Lichess adapter according to the exact
         reviewed catalog.
-      - The protected suite workflow is the canonical complete clean build. It
-        requires a release-ready lock, builds Manager-Core on both platforms,
-        assembles exact provider candidates, runs the acceptance gates, and
-        emits the complete installer sets from the accepted bytes.
+      - The Windows feature surface exposes the packaged standard opening book
+        as its own default-selected knowledge component. Selecting Book Forge
+        does not silently stand in for selecting a published book artifact.
+      - The protected Installer workflow is the canonical complete clean build.
+        It requires a release-ready lock, acquires immutable Manager and provider
+        candidates for both platforms, validates their manifests and provenance,
+        runs the acceptance gates, and emits the complete installer sets from
+        the accepted bytes.
       - Provider artifacts from every lock-allowlisted private repository
         remain immutable component candidates. They never satisfy or replace a
         suite installer artifact.
@@ -641,15 +805,13 @@ packaging:
         - uci-arena-manager-<version>-linux-x86_64.tar.gz
     manager_component_outputs:
       windows-x86_64:
-        - UCI-Arena-Manager-<version>-windows-x64-user.msi
-        - UCI-Arena-Manager-<version>-windows-x64-machine.msi
-        - UCI-Arena-Manager-<version>-windows-x64.zip
+        - manager.core-<version>-windows-x86_64.tar.gz
       linux-x86_64:
-        - uci-arena-manager_<version>_amd64.deb
-        - uci-arena-manager-<version>-1.x86_64.rpm
-        - uci-arena-manager-<version>-linux-x86_64.tar.gz
+        - manager.core-<version>-linux-x86_64.tar.gz
   windows_manager_msi:
-    payload_source: complete_cmake_install_tree
+    owner: uci-arena-installer
+    payload_source: immutable_manager_component_artifact
+    integration_policy: packaging/windows/manager-integration.json
     scopes:
       per_user:
         recommended: true
@@ -665,22 +827,40 @@ packaging:
         data_root: ProgramData/UCI Arena Manager
         path: machine_msi_owned
         manager_lifecycle: LocalService_windows_service
-    service_registration: per_machine_cpack_wix_component_patch_only
+    service_registration: installer_owned_declarative_wix_integration_policy
     required_payloads:
       - manager_binaries
       - native_runtime_dependencies
       - dashboard_assets
       - installed_contract_schemas
+      - complete_installer_runtime_dependency_closure
     rules:
       - Per-user and per-machine MSIs package one tested native binary set and
         install an MSI-owned share/uci-arena/install-scope.txt marker containing
         exactly per-user or per-machine. Native entry points fail safely to
-        per-machine semantics when the marker is absent or invalid; scope is
-        never inferred from a React value or an untrusted catalog.
-      - Per-user MSI generation uses a pinned CMake/CPack version with native
-        per-user component-key support. Every component installed beneath the
-        user profile has an MSI-owned HKCU registry key path, and ICE38 is a
-        blocking validation rather than a suppressed warning.
+        per-machine semantics when the marker is absent or invalid. Public and
+        private native entrypoints resolve the nearest marker through a bounded
+        ancestor search from their own executable directory so the private
+        libexec layout cannot silently change Personal roots to machine roots;
+        scope is never inferred from a React value or an untrusted catalog.
+      - Installer validates every Manager artifact file against its component
+        manifest before generating either MSI. The MSI builder overlays only
+        manifest-bound Installer runtime files beneath the policy-declared
+        private Installer subroot and Installer-owned integration payloads,
+        including the fixed-scope marker; it does not infer Manager source-tree
+        layout or package a lone arena-setup executable.
+      - An Installer-owned adjacent arena-setup launcher preserves Manager's
+        stable setup-helper contract while forwarding the exact typed argument
+        vector and exit code to the private Installer runtime. The launcher
+        owns no package, planning, validation, backup, or rollback behavior.
+      - Manager, Installer runtime, launcher, scope-marker, and runtime-manifest
+        destinations must be disjoint. Any destination collision fails before
+        WiX source or package output is committed; independently owned runtime
+        libraries are never silently deduplicated.
+      - Per-user MSI generation uses pinned WiX 6 with native per-user package
+        scope. Every component installed beneath the user profile has an
+        MSI-owned HKCU key path where Windows Installer requires it, and ICE38
+        is a blocking validation rather than a suppressed warning.
       - Burn passes the fixed package scope explicitly to arena-setup together
         with every scope-owned root: install, data, cache, and knowledge. The
         provider workspace is not package-scope-owned and retains arena-setup's
@@ -709,6 +889,13 @@ packaging:
         separate artifacts. A configurable-scope bundle is forbidden until a
         separately reviewed toolchain upgrade supports it without weakening
         licensing, provenance, or reproducibility requirements.
+      - Fixed-scope bundle planning is exact-identity idempotent. If the
+        platform reports one related bundle registration more than once, the
+        bootstrapper adapter retains one execute/rollback plan and requests no
+        action for later occurrences of that same bundle code. Detection
+        duplication remains observable in the Burn log; it must never produce
+        duplicate removal authority, a missing-cache launch, or a success-path
+        error dialog.
       - A scope-neutral native launcher may provide one visible Personal or All
         users choice while delegating unchanged to the two fixed-scope bundles.
         It is a launcher brick, not a configurable WiX bundle: it never
@@ -719,6 +906,12 @@ packaging:
         selection, materializes only the selected child in a private temporary
         directory, and removes that directory after the child exits. This is
         child-bundle transport, not application component extraction.
+      - Release assembly executes each final envelope with the sole
+        --validate-envelope operation. That operation validates the complete
+        envelope and both embedded payload digests, is non-interactive, and
+        exits before installed-state inspection, scope policy, extraction,
+        elevation, or mutation. Operator --dry-run --scope planning remains a
+        separate environment-sensitive lifecycle check.
       - Online and offline launchers are separate deterministic envelopes.
         Their source bundle filenames and suite version are release-assembly
         inputs and never become control-flow constants in the native launcher.
@@ -793,6 +986,25 @@ packaging:
         user-profile default, which is not redirected through Documents or
         OneDrive. Existing receipt-owned workspaces remain authoritative on
         upgrade regardless of that default.
+  linux_manager_packages:
+    owner: uci-arena-installer
+    payload_source: immutable_manager_component_artifact
+    integration_policy: packaging/linux/manager-integration.json
+    formats: [deb, rpm, tar_gz]
+    rules:
+      - The package builder validates the complete Manager component manifest
+        before staging and never reads a Manager source or build tree.
+      - Component bytes are copied without content changes. Distro paths,
+        service units, desktop integration, maintainer scripts, package metadata,
+        compressed documentation, and output names come from Installer-owned
+        policy and adapters.
+      - Normal package removal removes package payload and startup authority but
+        preserves Manager and provider state. Distro purge hooks also preserve
+        valuable state; destructive suite data removal remains a separate,
+        previewed arena-setup purge transaction.
+      - DEB and RPM adapters receive the same validated, scope-neutral staging
+        tree. Adding or replacing one package adapter does not change Manager
+        component production or the other package format.
   artifact_names:
     - UCI-Arena-Setup-<version>-windows-x64-online.exe
     - UCI-Arena-Setup-<version>-windows-x64-offline.exe
@@ -812,6 +1024,9 @@ packaging:
       Carries the same accepted core component digest set and forces
       arena-setup offline mode; credentials and external Syzygy bytes remain
       excluded.
+    transport_rule: >
+      Offline fixed-scope bundles pass --offline to both apply and repair;
+      online bundles omit it. Uninstall never receives a transport flag.
     retained_channel:
       location: manager_data_root/release
       contents: [signed_catalog, signed_tuf_metadata, current_platform_payloads]
@@ -845,6 +1060,22 @@ components:
       platform lock realizes that composition with immutable artifact,
       manifest, digest, and provenance identities; it cannot silently replace
       a component version or dependency.
+    - Release assembly compares every resolved immutable component manifest
+      with the product composition before catalog generation. Every dependency
+      declared by arena-component.json must appear in that component's
+      composition dependency edges. Composition may add explicit suite wiring,
+      but it may never omit or weaken a provider-declared runtime dependency.
+    - Release assembly rejects an installer-integration workspace declaration
+      that is absent from or differs from the component manifest's top-level
+      workspace_name. A clean suite build cannot defer that provider contract
+      contradiction to the installed setup transaction.
+    - Every platform release lock records the exact product-composition file
+      name and SHA-256. Lock validation resolves component identity,
+      repository, version, and dependency edges from that composition rather
+      than from a hardcoded component table in release tooling.
+    - A lock with release_ready false is reviewable planning data only. It may
+      be validated and dry-run inspected, but acquisition, mirroring,
+      assembly, signing, installation mutation, and publication must reject it.
     - Presets and explicit custom selection are the only authorities that add
       ordinary components to a plan. The planner never injects manager.core,
       a runtime, or any other product identity implicitly.
@@ -878,11 +1109,17 @@ knowledge_assets:
   opening_book:
     default_component: opening_book.standard
     runtime_dependencies: []
-    required_files:
-      - strong_rare_v1.bin
-      - strong_rare_v1.ffstats
-      - strong_rare_v1.policy
-      - snapshot.manifest.json
+    snapshot_schema: uci_arena_book_snapshot_v2
+    manifest: snapshot.manifest.json
+    required_files_source: snapshot_manifest_artifact_map
+    rules:
+      - Inventory validates the bounded, path-safe artifact map and current
+        file presence without turning discovery into an unbounded hash pass.
+        Reviewed import and staged activation validate every exact declared
+        digest before granting managed authority. Installer mechanism code
+        contains no opening-book filename list.
+      - A provider filename or layout change updates the provider manifest and
+        composition data without changing inventory or deployment control flow.
     behavior: >
       Install a mutually validated provider snapshot. If only the Book Forge
       bootstrap snapshot is available, label it integration and do not claim
@@ -917,26 +1154,75 @@ knowledge_assets:
       operational workspace.
     - A user may select download, import an existing directory, or continue in degraded mode.
     - Inventory reports an activated knowledge asset as installed_managed only
-      when an installed-managed receipt owns activation files that still exist
-      under the configured knowledge root with their recorded sizes. Full
-      content integrity remains the verify command's responsibility.
+      when an installed-managed receipt declares that resource kind and owns
+      activation files that still exist under the configured knowledge root
+      with their recorded sizes. Full content integrity remains the verify
+      command's responsibility.
     - Inventory projects a validated saved or bounded-discovery opening-book or
       Syzygy locator into the knowledge summary as detected_unmanaged when no
       installed-managed activation is present. Syzygy counts and bytes cover
       only regular .rtbw and .rtbz files directly inside the selected directory;
       the projection never recurses, follows links, copies, or modifies files.
-    - Dedicated opening_book.* and syzygy.* component identities alone own
-      knowledge-file activation; an engine capability named opening_book or
-      syzygy describes consumption support and never makes the engine payload
-      an activation source.
-    - When a signed opening_book.* or syzygy.* component activates and no
-      explicit saved locator exists, arena-setup transactionally saves the
-      verified activation directory as the selected locator before generating
-      consumer configuration. An explicit imported locator always wins.
+    - Component identity, filename prefixes, and consumption capabilities never
+      grant knowledge-file activation authority. An installable component must
+      publish a validated activation declaration whose resource kind, source,
+      and destination are independent of its component id.
+    - When a signed component activates declared knowledge and no explicit saved
+      locator exists, arena-setup transactionally saves the verified activation
+      directory as the selected locator before generating consumer
+      configuration. An explicit imported locator always wins.
+
+knowledge_activation:
+  component_manifest_contract:
+    field: activation
+    maximum_entries: 4
+    destination_roots: [knowledge_root]
+    kinds: [opening_book, syzygy]
+    required_fields: [kind, source_path, destination_root, destination_path]
+    rules:
+      - Source and destination paths are safe relative paths. Every source
+        contains at least one digest-listed payload file, and each destination
+        is strictly beneath the Installer-owned knowledge root.
+      - Each resource kind and destination is unique within a component. Source
+        and destination trees may not overlap another declaration.
+      - Each activated resource has a matching read-only discovery declaration
+        for the same kind and component-relative source. Discovery remains
+        evidence only and does not grant mutation authority.
+      - The complete activation plan, including prior-destination evidence and
+        rollback locations, is durably journaled before the first destination
+        changes. Each applied destination is checkpointed independently.
+      - Commit cleanup and rollback traverse every declared activation. Rollback
+        removes candidates and new destinations and restores prior destinations
+        in reverse activation order.
+  receipt_contract:
+    field: activated_resources
+    fields: [kind, path, activated_files]
+    rules:
+      - Receipt resource declarations, not component ids, select managed
+        inventory state and installed-resource discovery.
+      - The legacy flat activated_files projection remains during schema v1 for
+        uninstall/purge compatibility and contains the exact union of every
+        activated resource file.
+      - Normal uninstall removes component authority while preserving activated
+        knowledge. Explicit purge remains exact-identity and ownership-aware.
 
 discovery:
   interface: arena_setup_discovery_v1
   locator_interface: arena_saved_locator_v1
+  component_manifest_contract:
+    field: discovery
+    maximum_entries: 16
+    locator_sources: [active_root, entrypoint, component_path]
+    rules:
+      - Each resource kind is unique within one component manifest.
+      - Entrypoint locators name a digest-listed component entrypoint.
+      - Component-path locators are safe relative paths containing at least one
+        digest-listed payload file.
+      - Install receipts and bounded provider-root inspection resolve only these
+        declarations; component ids, repository names, filename prefixes, and
+        historical versions never select a discovery kind.
+      - Discovery conveys read-only location evidence and grants no activation,
+        registration, startup, or deletion authority.
   kinds:
     - opening_book
     - syzygy
@@ -950,9 +1236,10 @@ discovery:
     - lichess_token_path
     - restaurant
   precedence:
-    - install_receipt
     - saved_locator
+    - install_receipt
     - provider_manifest
+    - indexed
     - discovered
     - unresolved
   bounded_sources:
@@ -970,7 +1257,13 @@ discovery:
     - operating_system_file_index
   indexed_asset_search:
     owner: replaceable_platform_search_adapter
-    kinds: [opening_book, syzygy, timing_profile]
+    kinds:
+      - opening_book
+      - syzygy
+      - timing_profile
+      - lichess_single_game_profile
+      - lichess_capacity_profile
+      - lichess_transport_profile
     windows_adapter: Windows_Search_SystemIndex
     linux_adapter: plocate_or_locate_database
     maximum_results: 256
@@ -979,6 +1272,9 @@ discovery:
     rules:
       - Indexed search queries only immutable extension or bounded filename patterns;
         it never walks the filesystem recursively.
+      - Product-owned query rules cross the platform port as typed extension
+        and filename-glob data. Windows Search and locate adapters translate
+        those rules without owning UCI Arena filenames or resource semantics.
       - The platform adapter returns candidate paths and bounded status only.
         Kind inspectors classify content, directory shape, identity, legacy
         status, and symbolic-link safety without turning ordinary discovery
@@ -988,6 +1284,10 @@ discovery:
         explicit browse without failing inventory.
       - Duplicate candidates are normalized and deterministic. A search result
         is never installation authority and requires explicit import before use.
+      - Within one discovery source class, deterministic content evidence ranks
+        the stronger reusable candidate before path ordering. Book payload bytes,
+        Syzygy coverage bytes, and evidence qualification/sample counts are
+        advisory discovery quality only and never substitute for activation gates.
       - Syzygy candidates are reduced to their containing flat collection and
         referenced in place. Opening books and timing-evidence candidates are
         never copied merely because the index found them.
@@ -995,6 +1295,18 @@ discovery:
         legacy, incomplete, or incompatible with the currently selected
         runtime. Exact identity and qualification are enforced only when a
         consumer claims the profile is applied or protected-live-safe.
+      - Parseable single-game, capacity, and transport evidence remains
+        discoverable when unqualified, legacy, incomplete, or runtime-mismatched.
+        Discovery reports the evidence classification; import and consumer
+        activation retain their exact schema, closure, qualification, and
+        identity gates.
+      - Discovery and preservation never compare a book, Syzygy collection, or
+        timing-evidence file to the suite product version. Compatibility is
+        capability- and content-based. Unknown optional metadata, newer minor
+        fields, absent sidecars, partial table coverage, or a different runtime
+        identity are reported without hiding, deleting, or blocking the asset.
+        A consumer that cannot activate evidence keeps it cataloged and explains
+        the missing capability, migration, or requalification needed.
       - A usable Polyglot book does not require optional statistics or policy
         sidecars. Missing sidecars reduce projected capabilities rather than
         blocking discovery or import.
@@ -1005,15 +1317,30 @@ discovery:
       - Any nonempty flat Syzygy WDL or DTZ subset is discoverable and usable
         for the positions it covers. WDL does not require DTZ, and incomplete
         cardinality coverage is reported rather than rejected.
+      - A validated saved locator is the operator's selected asset and outranks
+        an installed bootstrap candidate in the read-only discovery projection.
+        Installed authority remains visible on its receipt candidate and is
+        never inferred from selection precedence.
+      - Inventory re-inspects the current content behind a saved knowledge or
+        evidence locator. Cached locator validation is not current authority;
+        unreadable or invalid retained content remains visible as broken and
+        requires explicit reselection.
+      - When a saved locator names the exact same normalized resource as a valid
+        managed receipt, the receipt is selected so the projection does not
+        demote known installation authority to unmanaged retained state.
   user_selected_root_behavior:
     maximum_directory_depth: 1
     multiple_explicit_roots: supported
     detected_at_root_or_direct_child:
       - opening_book_file_or_flat_directory
       - syzygy_directory
+      - timing_profile_file
+      - lichess_single_game_profile_file
+      - lichess_capacity_profile_file
+      - lichess_transport_profile_file
       - known_uci_engine_filename
       - provider_component_manifest
-    ordering: normalized_path_ascending
+    ordering: source_precedence_then_advisory_quality_then_normalized_path
     rule: >
       A user-selected or explicitly mounted root is inspected only at the root
       and its direct non-symbolic-link children. It is never treated as
@@ -1060,7 +1387,7 @@ local_import:
     timing_profile: qualified_uci_time_profile_v3_regular_file
     lichess_single_game_profile: >
       qualified_uci_arena_single_game_profile_v1_with_complete_hash_verified_evidence_closure
-    lichess_capacity_profile: qualified_uci_arena_lichess_capacity_profile_v1_regular_file
+    lichess_capacity_profile: qualified_uci_arena_lichess_capacity_profile_v2_regular_file
     lichess_transport_profile: qualified_uci_arena_lichess_transport_profile_v2_regular_file
     lichess_token_path: path_reference_only_never_read
     restaurant: detect_only_import_forbidden
@@ -1075,13 +1402,23 @@ local_import:
       directory and bounded ancestors of the explicitly selected profile; an
       unsafe, ambiguous, missing, oversized, or hash-mismatched closure is
       rejected before activation.
+    - Managed Lichess profile staging and active roots use bounded internal
+      directory identifiers rather than embedding complete digests in path
+      names. Full content identity remains in the manifest and receipt, and an
+      existing shortened root is reused only after its complete manifest and
+      payload identity validate. Valid content-addressed evidence filenames
+      must not fail merely because the Manager data root is a normal Windows
+      path.
     - Lichess capacity and transport profiles remain qualified in-place
       references and are never copied or rewritten. The capacity profile must
       bind the exact selected single-game profile digest.
-    - Consumer activation verifies timing and single-game profile executable,
-      model, provider, and hardware identity against the exact installed
-      engine and model. An incompatible profile remains discoverable evidence
-      but is never presented as applied.
+    - Consumer activation verifies a timing profile's Engine-owned semantic
+      timing authority against the installed timing/search contract, model
+      semantics, provider/runtime and hardware identity, and effective search
+      topology. Its qualified executable digest remains provenance and may
+      differ after a timing-compatible rebuild. Single-game and capacity
+      evidence remain bound to the exact installed executable. An incompatible
+      profile remains discoverable evidence but is never presented as applied.
     - A successful import transaction regenerates and verifies every installed
       consumer configuration and active-model pointer affected by that locator
       before committing the locator. Failure restores the previous locator,
@@ -1212,6 +1549,12 @@ transaction:
         declared by receipt or preservation evidence. Configured root equality,
         symbolic-link traversal, external ownership, and unknown ownership are
         never deletion authority.
+      - Platform filesystem adapters apply the same supported path semantics to
+        staging, validation, identity checks, uninstall, and purge. Stored plans,
+        receipts, preservation evidence, and logs retain normalized operator paths;
+        platform API prefixes are syscall-only and never become ownership evidence.
+        A path accepted during managed activation must remain inspectable and
+        removable by a later ownership-authorized purge.
       - Digest-owned managed files are removed only when their current size and
         SHA-256 still match ownership evidence. Modified files are preserved and
         reported as modified_managed_file; absence is an idempotent skip.
@@ -1250,6 +1593,8 @@ transaction:
         reason: redacted installer and component lifecycle accountability
       - path: workspaces_outside_data_root
         reason: Book Forge observations, qualification evidence, snapshots, and Evidence raw evidence, datasets, exports, timing profiles, and other provider state are not installer payload
+      - path: provider-data/
+        reason: manifest-declared product-data provider workspaces remain provider-owned mutable state even when placed beneath the suite data root
     removed_on_normal_uninstall:
       - every receipt-selected immutable component root
       - every provider startup registration owned by an installed receipt
@@ -1352,10 +1697,11 @@ transaction:
       - stockfish
       - saved_lichess_token_path_reference_when_available
     evidence_service:
+      - exact_installed_evidence_runtime_root
       - uci_arena_engine
       - installed_model_root
       - stockfish
-      - complete_game_referee
+      - evidence_runtime_complete_game_referee
       - manager_owned_runtime_models_root
       - manager_owned_active_model_pointer
       - explicit_timing_profile_imports
@@ -1390,9 +1736,10 @@ transaction:
         transaction fails before commit when the replacement daemon is not
         live; a retained status file or successful task creation is not a
         substitute.
-      - Verify invokes the provider's public startup status operation and fails
-        when an installed startup receipt no longer reports installed true or
-        reports matchesCurrentConfiguration false.
+      - Verify uses the provider's public service-health contract, not an
+        undeclared startup-control action. A malformed, identity-mismatched,
+        schema-mismatched, unhealthy, or unavailable live status fails
+        verification without mutation.
       - Transaction rollback invokes startup_uninstall before restoring or
         removing the provider payload.
       - Disabled component binaries are installed without startup registration.
@@ -1445,32 +1792,61 @@ transaction:
       - Verify regenerates the expected configuration from receipt-verified
         component roots and currently valid saved locators, and fails on
         missing, stale, or altered generated configuration.
-      - When an exact qualified timing profile is selected, arena-setup writes
+      - When a qualified timing profile is selected, arena-setup writes
         and transactionally verifies an Evidence-compatible active-model
         pointer bound to the installed engine, model root, provider, options,
         and the executable digest computed from the verified installed
-        entrypoint. A profile digest is never substituted for the installed
-        executable digest. It never points the service at its own
-        configuration file.
-      - Lichess activation fails closed before credential access when timing,
-        single-game, capacity, or transport evidence is missing, incomplete,
-        or incompatible with the exact installed engine/model identity.
+        entrypoint. The timing profile's historical executable digest is
+        retained as qualified-build provenance and is never substituted for
+        the installed executable digest or used as timing authority. It never
+        points the service at its own configuration file.
+      - Timing-profile locator admission follows the Engine-owned v3 timing
+        contract. For an otherwise valid older v3 profile that lacks only the
+        additive permissions projection, provider-safety and forecast-shadow
+        qualification are derived only when every required base and
+        search-core-specific timing gate passes. An explicit false remains
+        false, malformed permissions fail closed, and adaptive-play authority
+        is never inferred.
+      - Lichess configuration activation follows the provider-declared required
+        and optional locator bindings, including each binding's accepted
+        locator-authority sources. Missing optional timing evidence retains
+        conservative foreground search and disables opponent-turn work;
+        missing, invalid, incompatible, or unqualified transport evidence
+        selects the provider-owned 650 millisecond bootstrap reserve. Provided
+        evidence is never weakened or rewritten, and the provider remains
+        authoritative for the exact qualification required by a selected
+        live-play mode before it accesses credentials.
       - Runtime verification requires opening_book_active and syzygy_active,
         not merely the presence of saved locators.
       - Protected live acceptance requires the selected timing profile to be
-        accepted, applied, exact-identity-bound, and provider-safety-qualified
-        with a positive reserve after installer-owned knowledge locators are
-        applied.
+        accepted, applied, exact-semantic-timing-authority-bound, and
+        provider-safety-qualified with a positive reserve after installer-owned
+        knowledge locators are applied. Provenance-only engine-build drift is
+        reported and does not invalidate that timing authority.
   repair:
     rules:
       - Repair restages every selected component from verified release media
         even when the installed version is already current.
+      - Repair adopts recoverable partial installation state only by replacing
+        the unreceipted immutable root with the verified selected artifact and
+        committing a new receipt; the stale root never grants authority.
       - Repair regenerates and verifies installer-owned consumer
         configurations and active-model pointers from current saved locators.
   upgrade:
     rules:
       - Upgrade restages every selected component so the new bundle atomically
         adopts all selected receipts before Burn removes a related older bundle.
+      - A prior immutable component root remains available until the replacement
+        receipt, generated configuration, startup state, and Manager restart
+        have committed. Post-commit maintenance then considers only sibling
+        roots beneath the same currently receipted component directory.
+      - Superseded roots are removed only after their manifest identity, complete
+        file inventory, sizes, and SHA-256 values still match Installer ownership
+        evidence. Modified, invalid, linked, or unrecognized roots are preserved
+        and reported; they are never treated as installed authority.
+      - Superseded-root cleanup is idempotent and non-authoritative. A cleanup
+        warning cannot roll back a newly committed working installation, and a
+        later repair or upgrade retries the same bounded cleanup safely.
 
 trust:
   metadata: tuf
@@ -1528,7 +1904,7 @@ release_gate_order:
   - provider_attestations
   - reviewed_release_lock
   - immutable_suite_candidate
-  - manager_only_clean_windows_and_linux
+  - manager_component_candidates_windows_and_linux
   - complete_clean_windows_and_linux
   - external_discovery_and_in_place_import
   - bounded_syzygy_manifest_range_and_real_fixture
@@ -1555,10 +1931,11 @@ release_gate_rules:
     receipts and passes them with the installed model root and configured
     shared knowledge root to the installed adapter. It never relies on
     provider-checkout-relative template paths.
-  - The bounded protected Lichess gate requires the installed, exact-identity
-    calibrated time profile to be accepted and applied with provider safety
-    qualification and a positive service reserve. Exact single-game and
-    one-child capacity qualification remain mandatory.
+  - The bounded protected Lichess gate requires the installed,
+    exact-semantic-timing-authority calibrated time profile to be accepted and
+    applied with provider safety qualification and a positive service reserve.
+    Provenance-only engine-build drift is retained and reported. Exact
+    single-game and one-child capacity qualification remain mandatory.
   - The Syzygy gate verifies signed full manifests without downloading the full
     collection, exercises range downloads against tiny local fixtures, and
     probes either a pinned real three-man test fixture or an explicitly supplied

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = "purge" ]; then
+  deb-systemd-helper purge uci-arena-manager.service >/dev/null
+fi
+
+# Normal package removal and dpkg purge both preserve valuable suite state.
+# Destructive data purge remains a separate arena-setup plan and confirmation.
+exit 0

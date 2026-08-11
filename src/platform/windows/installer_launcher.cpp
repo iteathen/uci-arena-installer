@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 namespace arena::platform {
 namespace {
@@ -43,6 +44,7 @@ constexpr std::array<std::byte, 16> kEnvelopeMagic{
     static_cast<std::byte>('!'), static_cast<std::byte>(0),
 };
 constexpr std::uint32_t kEnvelopeVersion = 1;
+constexpr std::size_t kPayloadIoBufferSize = 1024 * 1024;
 constexpr wchar_t kTitle[] = L"UCI Arena Suite Setup";
 constexpr wchar_t kPerUserUpgradeCode[] =
     L"{143E64C2-4153-4E8B-8C93-6FB590779E9E}";
@@ -293,7 +295,7 @@ std::array<std::byte, 32> hash_payload(
         input.clear();
         input.seekg(static_cast<std::streamoff>(payload.offset), std::ios::beg);
         std::uint64_t remaining = payload.size;
-        std::array<unsigned char, 1024 * 1024> buffer{};
+        std::vector<unsigned char> buffer(kPayloadIoBufferSize);
         while (remaining > 0) {
             const std::size_t requested = static_cast<std::size_t>(
                 std::min<std::uint64_t>(remaining, buffer.size()));
@@ -482,7 +484,7 @@ void extract_payload(const fs::path& self,
     }
     input.seekg(static_cast<std::streamoff>(payload.offset), std::ios::beg);
     std::uint64_t remaining = payload.size;
-    std::array<char, 1024 * 1024> buffer{};
+    std::vector<char> buffer(kPayloadIoBufferSize);
     while (remaining > 0) {
         const std::size_t requested = static_cast<std::size_t>(
             std::min<std::uint64_t>(remaining, buffer.size()));
@@ -629,13 +631,36 @@ WindowsInstallationSnapshot detect_windows_installation() {
 
 int run_windows_installer_launcher(
     const std::vector<std::wstring>& arguments) {
+    const bool envelope_validation_requested =
+        std::find(
+            arguments.begin(), arguments.end(), L"--validate-envelope") !=
+        arguments.end();
     std::unique_ptr<LauncherLog> log;
     fs::path temporary_directory;
     try {
+        if (envelope_validation_requested &&
+            (arguments.size() != 1 ||
+             arguments.front() != L"--validate-envelope")) {
+            throw LauncherFailure(
+                InstallerExitCode::invalid_invocation,
+                "--validate-envelope must be the only launcher argument");
+        }
         log = std::make_unique<LauncherLog>();
         const fs::path self = executable_path();
         const WindowsInstallerEnvelope envelope = read_envelope(self);
         validate_payloads(self, envelope);
+        if (envelope_validation_requested) {
+            log->write({
+                {"event", "envelope_validated"},
+                {"package", utf8_path(self)},
+                {"per_user_payload_bytes", envelope.per_user.size},
+                {"per_machine_payload_bytes", envelope.per_machine.size},
+                {"exit_code", 0},
+                {"exit_category", installer_exit_category(
+                    InstallerExitCode::success)},
+            });
+            return 0;
+        }
 
         bool dry_run = false;
         std::vector<std::wstring> forwarded;
@@ -745,7 +770,9 @@ int run_windows_installer_launcher(
                 {"exit_category", installer_exit_category(error.code())},
             });
         }
-        show_failure(error.what(), log_path);
+        if (!envelope_validation_requested) {
+            show_failure(error.what(), log_path);
+        }
         return static_cast<int>(error.code());
     } catch (const std::exception& error) {
         if (!temporary_directory.empty()) {
@@ -762,7 +789,9 @@ int run_windows_installer_launcher(
                     InstallerExitCode::internal_failure)},
             });
         }
-        show_failure(error.what(), log_path);
+        if (!envelope_validation_requested) {
+            show_failure(error.what(), log_path);
+        }
         return static_cast<int>(InstallerExitCode::internal_failure);
     }
 }

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -128,6 +130,119 @@ export function verifyBundlePayload(bundlePath, statementPath) {
     throw new Error("Sigstore bundle payload does not match the expected statement");
   }
   return actual;
+}
+
+function exactLockedFile(filename, expectedName, expectedSha256, label) {
+  const resolved = path.resolve(filename);
+  const status = lstatSync(resolved);
+  if (!status.isFile() || status.isSymbolicLink() || status.size < 1) {
+    throw new Error(`${label} must be a nonempty regular file`);
+  }
+  if (path.basename(resolved) !== expectedName || sha256File(resolved) !== expectedSha256) {
+    throw new Error(`${label} identity differs from the release lock`);
+  }
+  return { path: resolved, size: status.size };
+}
+
+function executeManagedCosignVerification(executable, request) {
+  const result = spawnSync(executable, [
+    "verify-blob-attestation",
+    "--bundle", request.bundlePath,
+    "--certificate-identity", request.certificateIdentity,
+    "--certificate-oidc-issuer", request.oidcIssuer,
+    "--certificate-github-workflow-repository", INSTALLER_REPOSITORY,
+    "--certificate-github-workflow-sha", request.sourceCommit,
+    "--certificate-github-workflow-name", request.workflowName,
+    "--certificate-github-workflow-ref", request.workflowRef,
+    "--certificate-github-workflow-trigger", request.workflowTrigger,
+    "--type", MANAGED_PREDICATE_TYPE,
+    request.artifactPath,
+  ], { encoding: "utf8", windowsHide: true });
+  if (result.error || result.status !== 0) {
+    const diagnostic = [result.error?.message, result.stderr, result.stdout]
+      .filter((value) => typeof value === "string" && value.trim().length > 0)
+      .join("\n");
+    throw new Error(`Cosign managed verification failed: ${diagnostic || `exit ${result.status}`}`);
+  }
+}
+
+export function verifyManagedCandidate({
+  artifactPath,
+  managedResultPath,
+  bundlePath,
+  lockRow,
+  cosignExecutable,
+  cosignVerify = executeManagedCosignVerification,
+}) {
+  const artifact = exactLockedFile(
+    artifactPath, lockRow.artifact_name, lockRow.artifact_sha256, "managed artifact",
+  );
+  const resultFile = exactLockedFile(
+    managedResultPath,
+    lockRow.managed_result_name,
+    lockRow.managed_result_sha256,
+    "managed result",
+  );
+  const bundle = exactLockedFile(
+    bundlePath,
+    lockRow.provenance_bundle_name,
+    lockRow.provenance_bundle_sha256,
+    "managed Sigstore bundle",
+  );
+  const managedResult = readJson(resultFile.path);
+  const exactFields = {
+    schema: "arena_managed_component_release_result_v1",
+    component_id: lockRow.component_id,
+    component_version: lockRow.component_version,
+    target_triple: lockRow.target_triple,
+    artifact_name: lockRow.artifact_name,
+    artifact_sha256: lockRow.artifact_sha256,
+    component_manifest_sha256: lockRow.component_manifest_sha256,
+    licenses_sha256: lockRow.licenses_sha256,
+    source_repository: INSTALLER_REPOSITORY,
+    source_commit: lockRow.source_commit,
+    release_authority: "installer_managed_component_only",
+    suite_installer_authority: INSTALLER_REPOSITORY,
+  };
+  for (const [field, expected] of Object.entries(exactFields)) {
+    if (managedResult[field] !== expected) {
+      throw new Error(`managed result ${field} differs from the locked candidate`);
+    }
+  }
+  if (managedResult.artifact_size_bytes !== artifact.size) {
+    throw new Error("managed result artifact_size_bytes differs from the artifact");
+  }
+  const workflowPrefix =
+    `${INSTALLER_REPOSITORY}/.github/workflows/managed-component-release.yml`
+    + `@${lockRow.provenance_workflow_ref}#`;
+  if (typeof managedResult.workflow_identity !== "string"
+      || !managedResult.workflow_identity.startsWith(workflowPrefix)
+      || !/#\d+\.\d+$/u.test(managedResult.workflow_identity)) {
+    throw new Error("managed result workflow_identity differs from the locked workflow");
+  }
+  cosignVerify(cosignExecutable, {
+    artifactPath: artifact.path,
+    bundlePath: bundle.path,
+    certificateIdentity: lockRow.provenance_certificate_identity,
+    oidcIssuer: lockRow.provenance_oidc_issuer,
+    sourceCommit: lockRow.source_commit,
+    workflowName: lockRow.provenance_workflow_name,
+    workflowRef: lockRow.provenance_workflow_ref,
+    workflowTrigger: lockRow.provenance_workflow_trigger,
+  });
+  const actual = readBundleStatement(bundle.path);
+  const expected = buildExpectedManagedStatement(managedResult);
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error("Sigstore bundle payload does not equal the locked managed result");
+  }
+  return {
+    schema: "arena_verified_managed_candidate_v1",
+    component_id: managedResult.component_id,
+    component_version: managedResult.component_version,
+    target_triple: managedResult.target_triple,
+    artifact_path: artifact.path,
+    managed_result: managedResult,
+  };
 }
 
 function parseArguments(argv) {
