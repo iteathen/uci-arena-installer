@@ -4,6 +4,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -13,8 +14,13 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "arena/application/installer/credential_recovery.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
@@ -2034,8 +2040,21 @@ TEST_CASE("provider upgrade migrates its workspace and active locators into prod
                          {"sha256", sha256_path(archive)},
                          {"size_bytes", fs::file_size(archive)}}}}})},
     };
+#ifdef _WIN32
+    const HANDLE workspace_lock =
+        CreateFileW(legacy_book.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(workspace_lock != INVALID_HANDLE_VALUE);
+    std::jthread release_workspace_lock([workspace_lock] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CloseHandle(workspace_lock);
+    });
+#endif
     const json applied =
         SetupEngine::apply(json::object(), plan, paths, true, false);
+#ifdef _WIN32
+    release_workspace_lock.join();
+#endif
     INFO(applied.dump(2));
     REQUIRE(applied.at("state") == "committed");
 
