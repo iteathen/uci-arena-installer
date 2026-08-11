@@ -72,6 +72,11 @@ int main(int argc, char** argv) {
     const bool evidence = cli.find("evidence") != std::string::npos;
     const std::string command = argv[2];
     const std::string operation = argv[3];
+    if (std::string_view(argv[0]).find("post-replace-only-runtime") !=
+            std::string_view::npos &&
+        operation == "prepare_replace") {
+        return 19;
+    }
     if (cli.find("installer-integration.fixture") != std::string::npos &&
         command == "lifecycle" &&
         (operation == "enable" || operation == "disable" ||

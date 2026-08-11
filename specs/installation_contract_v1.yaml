@@ -562,20 +562,28 @@ provider_installer_integration:
       configuration-match/live evidence. Installer never guesses these values
       from component identity, entrypoint names, or implementation language.
     - Startup-control v2 adds required pre_replace and post_replace actions plus
-      exact previous-root and replacement-root flags. During repair or upgrade,
-      Installer invokes pre_replace from the validated staged payload against
-      the exact prior receipt-owned workspace before any old payload path is
-      renamed. The provider stops and retargets its existing credential-bearing
-      startup registration without opening or copying credential contents.
+      exact previous-root and replacement-root flags. Before replacing any
+      component root, Installer stages and validates the complete transaction,
+      finds every installed live startup consumer whose own root or declared
+      dependency root will change, and quiesces those consumers in reverse
+      dependency order. A replaced v2 consumer uses pre_replace from its
+      validated staged payload against the exact prior receipt-owned workspace;
+      an affected v1 consumer uses its declared installed uninstall action.
+      No component root is renamed until every affected consumer proves inactive.
+      The provider stops and retargets its existing credential-bearing startup
+      registration without opening or copying credential contents.
     - A successful pre_replace response proves the registration remains
-      installed, is inactive, and is replacement-ready. After receipt and
-      configuration commit, Installer invokes post_replace from the installed
-      replacement and requires the declared live result. It journals both
-      transitions and never invokes the older payload's uninstall action.
-    - Rollback uses the staged v2 adapter to retarget the stopped registration
-      to the restored prior root, restores files and receipts, then invokes the
-      staged post_replace action. V1 remains accepted for providers that require
-      no staged replacement behavior.
+      installed, is inactive, and is replacement-ready. Installer defers every
+      affected consumer restart until all component roots, receipts, and
+      configurations are committed, then resumes consumers in dependency order.
+      A replaced v2 consumer uses post_replace from the installed replacement and
+      requires the declared live result. It journals every transaction-wide
+      transition and never invokes the older payload's uninstall action for that
+      v2 replacement.
+    - Rollback first stops any consumer already resumed against replacement
+      roots, restores files and receipts, then restores every prior startup
+      registration in dependency order. V1 remains accepted and is quiesced
+      transaction-wide whenever its declared dependency root changes.
     - A startup-control workspace relative path of `.` denotes the provider
       workspace itself; another safe relative path denotes one of its
       descendants. Installer accepts exactly those two bounded shapes, rejects
@@ -2022,6 +2030,10 @@ acceptance:
     provider through the staged replacement payload, replaces a same-version
     root, resumes the live startup registration, and requires no manual Task
     Scheduler intervention or credential re-entry.
+  - A transaction ordered with a shared dependency before its startup consumer
+    stages both payloads, quiesces the consumer before the dependency rename,
+    defers restart until all roots commit, and restores the prior live startup
+    registration after any rollback.
   - A routine component update test emits and applies a verified package while
     proving that no CMake configure, native compilation, MSI build, Burn build,
     or installer-envelope composition entrypoint was invoked.
