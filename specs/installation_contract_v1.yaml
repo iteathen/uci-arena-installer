@@ -593,6 +593,13 @@ provider_installer_integration:
       Installer does not receive credential contents. Credential-free startup
       removal remains declared so normal uninstall can remove startup authority
       even when Installer did not create it.
+    - Absence of Installer-owned startup state in a receipt is not evidence that
+      an operator-managed credential-gated startup registration is inactive.
+      Before replacing the component or one of its declared dependency roots,
+      Installer conservatively quiesces every installed credential-gated,
+      startup-capable receipt through its declared control contract unless
+      authoritative inactive state is available; it never discovers the
+      registration by product identity.
 
 setup:
   executable: arena-setup

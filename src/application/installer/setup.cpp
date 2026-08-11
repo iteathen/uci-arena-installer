@@ -4708,6 +4708,19 @@ bool requires_uninstall_startup(const json& receipt) {
            supports_startup_capability(receipt, "startup_uninstall");
 }
 
+bool requires_replacement_startup_quiescence(const json& receipt) {
+    const bool installer_managed_startup =
+        receipt.contains("startup") && receipt.at("startup").is_object() &&
+        receipt.at("startup").value("installed", false);
+    const bool credential_gated_startup =
+        receipt.contains("service_contract") &&
+        receipt.at("service_contract").is_object() &&
+        receipt.at("service_contract").value("credential_gated_startup", false);
+    return installer_managed_startup ||
+           (credential_gated_startup &&
+            supports_startup_capability(receipt, "startup_uninstall"));
+}
+
 } // namespace
 
 json copy_managed_lichess_profile(const SetupPaths& paths, const fs::path& source,
@@ -5700,9 +5713,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 continue;
             }
             const std::string id = receipt.at("component_id").get<std::string>();
-            const bool startup_installed =
-                receipt.contains("startup") && receipt.at("startup").is_object() &&
-                receipt.at("startup").value("installed", false);
+            const bool startup_requires_quiescence =
+                requires_replacement_startup_quiescence(receipt);
             bool affected = replaced_component_ids.contains(id);
             for (const auto& dependency : receipt.value("dependencies", json::array())) {
                 if (dependency.is_string() &&
@@ -5710,7 +5722,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     affected = true;
                 }
             }
-            if (!startup_installed || !affected) continue;
+            if (!startup_requires_quiescence || !affected) continue;
             if (!supports_startup_capability(receipt, "startup_uninstall")) {
                 throw std::runtime_error(
                     "installed provider startup cannot be stopped before dependency replacement: " +
@@ -5826,11 +5838,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
 
             if (fs::is_regular_file(receipt_path)) {
                 previous_receipt = read_json(receipt_path);
-                const bool previous_startup_installed =
-                    previous_receipt->contains("startup") &&
-                    previous_receipt->at("startup").is_object() &&
-                    previous_receipt->at("startup").value("installed", false);
-                if (previous_startup_installed &&
+                const bool previous_startup_requires_quiescence =
+                    requires_replacement_startup_quiescence(*previous_receipt);
+                if (previous_startup_requires_quiescence &&
                     !quiesced_startup_components.contains(id)) {
                     throw std::runtime_error(
                         "installed provider startup escaped transaction-wide quiescence: " +
