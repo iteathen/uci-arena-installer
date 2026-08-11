@@ -293,6 +293,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed.' }
 
     $deadline = [DateTimeOffset]::UtcNow.AddMinutes($TimeoutMinutes)
+    $lastMonitorFailure = $null
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         if ((Test-Path $stdoutLog) -and (Get-Item $stdoutLog).Length -gt $maximumLogBytes) {
             throw 'Runner stdout exceeded the bounded log limit.'
@@ -301,37 +302,56 @@ try {
             throw 'Runner stderr exceeded the bounded log limit.'
         }
         if (-not $runId) {
-            $runs = @(Invoke-GitHubJson -Arguments @(
-                'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
-                '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
-                '--json', 'databaseId,headSha,status,conclusion,createdAt'
-            ) -FailureMessage 'Could not query the dispatched workflow after three attempts.')
-            $matching = @($runs | Where-Object {
-                $_.headSha -eq $head -and
-                -not ($priorRunIds -contains [string]$_.databaseId)
-            } | Sort-Object { [int64]$_.databaseId })
-            if ($matching.Count -gt 1) {
-                $cleanupAuthorized = $false
-                throw 'More than one new matching workflow run exists; preserving the runner and refusing ambiguous monitoring.'
+            $runs = $null
+            try {
+                $runs = @(Invoke-GitHubJson -Arguments @(
+                    'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
+                    '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
+                    '--json', 'databaseId,headSha,status,conclusion,createdAt'
+                ) -FailureMessage 'Could not query the dispatched workflow after three attempts.')
+                $lastMonitorFailure = $null
+            } catch {
+                $lastMonitorFailure = $_.Exception.Message
             }
-            if ($matching.Count -eq 1) { $runId = [string]$matching[0].databaseId }
-        } else {
-            $run = Invoke-GitHubJson -Arguments @(
-                'run', 'view', $runId, '--repo', $Repository,
-                '--json', 'databaseId,headSha,status,conclusion'
-            ) -FailureMessage 'Could not inspect the dispatched workflow after three attempts.'
-            if ($run.headSha -ne $head) { throw 'Dispatched workflow head changed unexpectedly.' }
-            if ($run.status -eq 'completed') {
-                $completed = $true
-                if ($run.conclusion -ne 'success') {
-                    throw "Component release concluded $($run.conclusion)."
+            if ($runs) {
+                $matching = @($runs | Where-Object {
+                    $_.headSha -eq $head -and
+                    -not ($priorRunIds -contains [string]$_.databaseId)
+                } | Sort-Object { [int64]$_.databaseId })
+                if ($matching.Count -gt 1) {
+                    $cleanupAuthorized = $false
+                    throw 'More than one new matching workflow run exists; preserving the runner and refusing ambiguous monitoring.'
                 }
-                break
+                if ($matching.Count -eq 1) { $runId = [string]$matching[0].databaseId }
+            }
+        } elseif ($runnerProcess.HasExited) {
+            $run = $null
+            try {
+                $run = Invoke-GitHubJson -Arguments @(
+                    'run', 'view', $runId, '--repo', $Repository,
+                    '--json', 'databaseId,headSha,status,conclusion'
+                ) -FailureMessage 'Could not inspect the dispatched workflow after three attempts.'
+                $lastMonitorFailure = $null
+            } catch {
+                $lastMonitorFailure = $_.Exception.Message
+            }
+            if ($run) {
+                if ($run.headSha -ne $head) { throw 'Dispatched workflow head changed unexpectedly.' }
+                if ($run.status -eq 'completed') {
+                    $completed = $true
+                    if ($run.conclusion -ne 'success') {
+                        throw "Component release concluded $($run.conclusion)."
+                    }
+                    break
+                }
             }
         }
         Start-Sleep -Seconds 10
     }
-    if (-not $completed) { throw 'Component release exceeded its one-attempt deadline.' }
+    if (-not $completed) {
+        $monitorDetail = if ($lastMonitorFailure) { " Last monitor error: $lastMonitorFailure" } else { '' }
+        throw "Component release exceeded its one-attempt deadline.$monitorDetail"
+    }
 
     [pscustomobject]@{
         schema = 'arena_local_ephemeral_release_result_v1'
