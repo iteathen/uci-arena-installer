@@ -34,10 +34,10 @@ function Assert-Command {
 }
 
 function Import-VisualStudioEnvironment {
-    $vswhereCandidates = @(
+    $vswhereCandidates = @(@(
         (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'),
         (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\Installer\vswhere.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
     if ($vswhereCandidates.Count -lt 1) { throw 'vswhere.exe is unavailable.' }
     $installation = & $vswhereCandidates[0] -latest -products * `
         -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
