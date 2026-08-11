@@ -578,7 +578,8 @@ TEST_CASE("setup plan resolves only explicitly composed components") {
 }
 
 void write_provider_service_install(const SetupPaths& paths,
-                                    const std::string_view contract_version = "1.0") {
+                                    const std::string_view contract_version = "1.0",
+                                    const bool startup_active = false) {
     constexpr std::string_view component_id = "replaceable.provider";
     constexpr std::string_view component_version = "1.0.0";
     constexpr std::string_view cli_relative = "provider.mjs";
@@ -593,6 +594,9 @@ void write_provider_service_install(const SetupPaths& paths,
     constexpr std::string_view status_relative = "contracts/status-schema.json";
     const fs::path active_root =
         paths.install_root / "components" / component_id / component_version;
+    if (startup_active) {
+        write_mock_renderer_runtime(paths);
+    }
     fs::create_directories(active_root / "contracts");
     fs::create_directories(paths.data_root / "receipts");
     std::ofstream(active_root / cli_relative, std::ios::binary) << cli_contents;
@@ -619,7 +623,8 @@ void write_provider_service_install(const SetupPaths& paths,
          {{"provider_status",
            {{"arguments", json::array({"status"})},
             {"mutates", false},
-            {"credential", "forbidden"}}}}},
+            {"credential", "forbidden"},
+            {"response", "replaceable_provider_status_v1"}}}}},
     };
     const json startup{
         {"windows", "per_user_task_scheduler"},
@@ -635,7 +640,12 @@ void write_provider_service_install(const SetupPaths& paths,
           {"contract_version", contract_version},
           {"transport", "cli_json"},
           {"entrypoint", cli_relative}}},
-        {"invocation", {{"kind", "direct"}}},
+        {"invocation",
+         startup_active
+             ? json{{"kind", "dependency_runtime"},
+                    {"runtime_component_id", "runtime.host"},
+                    {"runtime_entrypoint", "execute"}}
+             : json{{"kind", "direct"}}},
         {"provided_capabilities", json::array({"provider.status"})},
         {"required_capabilities", json::array({"runtime.process"})},
         {"credential_contract",
@@ -678,7 +688,7 @@ void write_provider_service_install(const SetupPaths& paths,
                          {"size_bytes", contents.size()},
                          {"sha256", sha256_text(contents)}});
     }
-    const json installer_integration{
+    json installer_integration{
         {"schema", "arena_provider_installer_integration_v1"},
         {"schema_version", 1},
         {"entrypoint", "installer_integration"},
@@ -695,6 +705,23 @@ void write_provider_service_install(const SetupPaths& paths,
                        {"kind", "timing_profile"},
                        {"required", false}}})},
     };
+    if (startup_active) {
+        installer_integration["startup_control"] = {
+            {"schema", "arena_provider_startup_control_v1"},
+            {"schema_version", 1},
+            {"entrypoint", "cli"},
+            {"actions",
+             {{"install", json::array({"startup", "install"})},
+              {"uninstall", json::array({"startup", "uninstall"})}}},
+            {"workspace_argument",
+             {{"flag", "--runtime-directory"}, {"relative_path", "."}}},
+            {"configuration_argument", "--config"},
+            {"result",
+             {{"envelope", "root"},
+              {"require_configuration_match_on_install", true},
+              {"require_live_on_install", true}}},
+        };
+    }
     std::ofstream(active_root / "arena-component.json", std::ios::binary)
         << json{
                {"schema", "arena_install_component_v1"},
@@ -704,7 +731,11 @@ void write_provider_service_install(const SetupPaths& paths,
                {"entrypoints",
                 {{"cli", cli_relative}, {"installer_integration", renderer_relative}}},
                {"contract_manifest", contract_relative},
-               {"capabilities", json::array({"provider_status"})},
+               {"capabilities",
+                startup_active
+                    ? json::array(
+                          {"provider_status", "startup_install", "startup_uninstall"})
+                    : json::array({"provider_status"})},
                {"dependencies", json::array({"runtime.host"})},
                {"workspace_name", "replaceable-provider"},
                {"installer_integration", installer_integration},
@@ -720,9 +751,7 @@ void write_provider_service_install(const SetupPaths& paths,
                 return item.first.generic_string() == relative;
             })->second);
     };
-    std::ofstream(paths.data_root / "receipts" / "replaceable.provider.json",
-                  std::ios::binary)
-        << json{
+    json receipt{
                {"schema", "arena_install_receipt_v1"},
                {"schema_version", 1},
                {"component_id", component_id},
@@ -731,7 +760,10 @@ void write_provider_service_install(const SetupPaths& paths,
                {"active_root", active_root.string()},
                {"artifact_sha256", std::string(64, 'a')},
                {"dependencies", json::array({"runtime.host"})},
-               {"data_paths", json::array()},
+               {"data_paths",
+                startup_active
+                    ? json::array({(paths.workspace_root / "replaceable-provider").string()})
+                    : json::array()},
                {"configuration_path", ""},
                {"activated_files", json::array()},
                {"service_contract",
@@ -748,8 +780,19 @@ void write_provider_service_install(const SetupPaths& paths,
                  {"manager_operations_path", operations_relative},
                  {"manager_operations_sha256", digest_for(operations_relative)},
                  {"credential_gated_startup", true}}},
-           }
-               .dump(2);
+           };
+    if (startup_active) {
+        fs::create_directories(paths.workspace_root / "replaceable-provider");
+        receipt["state"] = "installed_managed";
+        receipt["startup"] = {
+            {"installed", true},
+            {"matchesCurrentConfiguration", true},
+            {"active", true},
+        };
+    }
+    std::ofstream(paths.data_root / "receipts" / "replaceable.provider.json",
+                  std::ios::binary)
+        << receipt.dump(2);
 }
 
 TEST_CASE("setup planner applies catalog roles without product identity knowledge") {
@@ -1036,6 +1079,14 @@ TEST_CASE("typed provider service and installation contracts are replaceable and
     write_provider_service_install(valid_paths);
     REQUIRE(SetupEngine::verify(valid_paths).at("ok") == true);
     fs::remove_all(valid_root);
+
+    const fs::path active_root = temporary_directory();
+    const SetupPaths active_paths = paths_under(active_root);
+    write_provider_service_install(active_paths, "1.0", true);
+    const json active_verified = SetupEngine::verify(active_paths);
+    INFO(active_verified.dump(2));
+    REQUIRE(active_verified.at("ok") == true);
+    fs::remove_all(active_root);
 
     const fs::path missing_root = temporary_directory();
     const SetupPaths missing_paths = paths_under(missing_root);

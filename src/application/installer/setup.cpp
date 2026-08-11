@@ -868,6 +868,21 @@ void validate_manager_operation_catalog(const fs::path& path,
             }
         }
     }
+    if (!catalog.at("operations").contains("provider_status")) {
+        throw std::runtime_error(
+            "provider Manager operation catalog has no provider status operation");
+    }
+    const json& provider_status = catalog.at("operations").at("provider_status");
+    if (!provider_status.contains("mutates") ||
+        !provider_status.at("mutates").is_boolean() ||
+        provider_status.at("mutates").get<bool>() ||
+        provider_status.value("credential", "") != "forbidden" ||
+        !provider_status.contains("response") ||
+        !provider_status.at("response").is_string() ||
+        !valid_identifier(provider_status.at("response").get<std::string>())) {
+        throw std::runtime_error(
+            "provider Manager status operation contract is incompatible");
+    }
 }
 
 json validate_provider_service_contract(const fs::path& root, const json& manifest,
@@ -4430,11 +4445,20 @@ json invoke_provider_startup(
 
 void verify_provider_service_health(const SetupPaths& paths, const json& receipt,
                                     const ValidatedComponentPayload& validated) {
-    if (!validated.service_contract.has_value() ||
-        validated.service_contract->value("schema", "") !=
-            "uci_arena_standalone_service_contract_v1") {
+    if (!validated.service_contract.has_value()) {
         throw std::runtime_error(
-            "installed startup authority has no standalone service health contract: " +
+            "installed startup authority has no public service health contract: " +
+            receipt.at("component_id").get<std::string>());
+    }
+    const json& service_contract = *validated.service_contract;
+    const std::string service_contract_schema =
+        service_contract.value("schema", "");
+    const bool provider_service =
+        service_contract_schema == "uci_arena_service_contract_v1";
+    if (!provider_service &&
+        service_contract_schema != "uci_arena_standalone_service_contract_v1") {
+        throw std::runtime_error(
+            "installed startup authority has no compatible public service health contract: " +
             receipt.at("component_id").get<std::string>());
     }
     const json& manifest = validated.manifest;
@@ -4454,35 +4478,65 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
     fs::path executable = cli;
     std::vector<std::string> arguments;
     const json* startup_control = nullptr;
+    const json* installer_integration = nullptr;
     if (manifest.contains("installer_integration") &&
         manifest.at("installer_integration").is_object()) {
-        const json& integration = manifest.at("installer_integration");
-        const json& invocation = integration.at("invocation");
-        executable = installed_entrypoint(
-            receipts_root,
-            invocation.at("runtime_component_id").get<std::string>(),
-            invocation.at("runtime_entrypoint").get<std::string>());
-        arguments.push_back(cli.string());
-        if (integration.contains("startup_control")) {
-            startup_control = &integration.at("startup_control");
+        installer_integration = &manifest.at("installer_integration");
+        if (installer_integration->contains("startup_control")) {
+            startup_control = &installer_integration->at("startup_control");
         }
     }
 
-    const json& service_contract = *validated.service_contract;
-    const bool manager_integrated =
-        service_contract.contains("manager_integration_api");
-    if (manager_integrated) {
+    std::string expected_status_schema;
+    const bool manager_integrated = !provider_service &&
+                                    service_contract.contains("manager_integration_api");
+    if (provider_service) {
+        const fs::path contract_path =
+            active_root / fs::path(service_contract.at("path").get<std::string>());
+        const json provider_contract = read_json(contract_path);
+        const json& invocation = provider_contract.at("invocation");
+        if (invocation.value("kind", "") == "dependency_runtime") {
+            executable = installed_entrypoint(
+                receipts_root,
+                invocation.at("runtime_component_id").get<std::string>(),
+                invocation.at("runtime_entrypoint").get<std::string>());
+            arguments.push_back(cli.string());
+        }
+        const fs::path operations_path = active_root /
+            fs::path(service_contract.at("manager_operations_path")
+                         .get<std::string>());
+        const json operations = read_json(operations_path);
+        const json& status_operation =
+            operations.at("operations").at("provider_status");
+        for (const auto& argument : status_operation.at("arguments")) {
+            arguments.push_back(argument.get<std::string>());
+        }
+        expected_status_schema =
+            status_operation.at("response").get<std::string>();
+    } else if (manager_integrated) {
+        if (installer_integration != nullptr) {
+            const json& invocation = installer_integration->at("invocation");
+            executable = installed_entrypoint(
+                receipts_root,
+                invocation.at("runtime_component_id").get<std::string>(),
+                invocation.at("runtime_entrypoint").get<std::string>());
+            arguments.push_back(cli.string());
+        }
         const json& api = service_contract.at("manager_integration_api");
         for (const auto& argument : api.at("arguments")) {
             arguments.push_back(argument.get<std::string>());
         }
         arguments.emplace_back("status");
+        expected_status_schema =
+            service_contract.at("status_schema").get<std::string>();
     } else {
         const fs::path contract_path =
             active_root / fs::path(manifest.at("contract_manifest").get<std::string>());
         const json contract = read_json(contract_path);
         arguments.push_back(
             contract.at("health_smoke").at("command").get<std::string>());
+        expected_status_schema =
+            service_contract.at("status_schema").get<std::string>();
     }
 
     if (startup_control != nullptr) {
@@ -4512,8 +4566,14 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
     arena::application::ProcessSupervisor process;
     const json response =
         process.run_json(executable, active_root, arguments, std::chrono::seconds(30));
-    const std::string expected_status_schema =
-        service_contract.at("status_schema").get<std::string>();
+    if (provider_service) {
+        if (!response.is_object() ||
+            response.value("schema", "") != expected_status_schema) {
+            throw std::runtime_error(
+                "provider status failed contract validation: " + component_id);
+        }
+        return;
+    }
     if (manager_integrated) {
         const json& api = service_contract.at("manager_integration_api");
         if (!response.is_object()) {
