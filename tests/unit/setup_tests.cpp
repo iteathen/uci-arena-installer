@@ -2310,7 +2310,7 @@ TEST_CASE("provider startup control accepts the provider workspace root") {
     fs::remove_all(root);
 }
 
-TEST_CASE("staged startup control v2 preserves startup across same-version replacement") {
+TEST_CASE("staged startup control v2 quiesces startup without receipt-owned state") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const std::string component_id = "replaceable.staged-lifecycle.consumer";
@@ -2320,7 +2320,8 @@ TEST_CASE("staged startup control v2 preserves startup across same-version repla
     const fs::path receipt_path =
         paths.data_root / "receipts" / (component_id + ".json");
     json previous_receipt = json::parse(std::ifstream(receipt_path));
-    previous_receipt["startup"] = {{"installed", true}};
+    REQUIRE_FALSE(previous_receipt.contains("startup"));
+    previous_receipt["service_contract"] = {{"credential_gated_startup", true}};
     std::ofstream(receipt_path, std::ios::binary | std::ios::trunc)
         << previous_receipt.dump(2);
 
