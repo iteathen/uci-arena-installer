@@ -34,6 +34,30 @@ function Assert-Command {
     return $command.Source
 }
 
+function Invoke-GitHubJson {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$FailureMessage
+    )
+    for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        $output = & gh @Arguments 2>$null
+        if ($LASTEXITCODE -eq 0 -and $output) {
+            try { return $output | ConvertFrom-Json -ErrorAction Stop } catch {}
+        }
+        if ($attempt -lt 3) { Start-Sleep -Milliseconds 500 }
+    }
+    throw $FailureMessage
+}
+
+function Assert-GitHubAuthentication {
+    for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        & gh auth status --hostname github.com *> $null
+        if ($LASTEXITCODE -eq 0) { return }
+        if ($attempt -lt 3) { Start-Sleep -Milliseconds 500 }
+    }
+    throw 'GitHub CLI authentication is unavailable.'
+}
+
 function Import-VisualStudioEnvironment {
     $vswhereCandidates = @(@(
         (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'),
@@ -142,8 +166,7 @@ $bash = (Get-Command bash.exe).Source
 & $bash -lc 'powershell.exe -NoProfile -NonInteractive -Command "Get-Command Get-FileHash -ErrorAction Stop | Out-Null"' *> $null
 if ($LASTEXITCODE -ne 0) { throw 'Git Bash cannot resolve the required PowerShell modules.' }
 
-& gh auth status --hostname github.com *> $null
-if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI authentication is unavailable.' }
+Assert-GitHubAuthentication
 $remoteHead = (& git -C $repositoryRoot ls-remote origin "refs/heads/$Ref").Trim()
 if ($LASTEXITCODE -ne 0 -or -not $remoteHead) {
     throw "Remote release ref is unavailable: $Ref"
@@ -229,6 +252,7 @@ $runnerProcess = $null
 $configured = $false
 $runId = $null
 $completed = $false
+$cleanupAuthorized = $true
 try {
     New-Item -ItemType Directory -Path $runnerRoot | Out-Null
     Expand-Archive -LiteralPath $runnerArchive -DestinationPath $runnerRoot
@@ -272,11 +296,11 @@ try {
             throw 'Runner stderr exceeded the bounded log limit.'
         }
         if (-not $runId) {
-            $runsJson = & gh run list --repo $Repository --workflow $Workflow `
-                --branch $Ref --event workflow_dispatch --limit 10 `
-                --json databaseId,headSha,status,conclusion,createdAt
-            if ($LASTEXITCODE -ne 0) { throw 'Could not query the dispatched workflow.' }
-            $runs = @($runsJson | ConvertFrom-Json)
+            $runs = @(Invoke-GitHubJson -Arguments @(
+                'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
+                '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
+                '--json', 'databaseId,headSha,status,conclusion,createdAt'
+            ) -FailureMessage 'Could not query the dispatched workflow after three attempts.')
             $matching = @($runs | Where-Object {
                 $_.headSha -eq $head -and
                 [DateTimeOffset]::Parse($_.createdAt) -ge $dispatchTime.AddSeconds(-5)
@@ -286,10 +310,10 @@ try {
             }
             if ($matching.Count -eq 1) { $runId = [string]$matching[0].databaseId }
         } else {
-            $runJson = & gh run view $runId --repo $Repository `
-                --json databaseId,headSha,status,conclusion
-            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the dispatched workflow.' }
-            $run = $runJson | ConvertFrom-Json
+            $run = Invoke-GitHubJson -Arguments @(
+                'run', 'view', $runId, '--repo', $Repository,
+                '--json', 'databaseId,headSha,status,conclusion'
+            ) -FailureMessage 'Could not inspect the dispatched workflow after three attempts.'
             if ($run.headSha -ne $head) { throw 'Dispatched workflow head changed unexpectedly.' }
             if ($run.status -eq 'completed') {
                 $completed = $true
@@ -315,16 +339,39 @@ try {
         stderr_log = $stderrLog
     } | ConvertTo-Json -Compress
 } catch {
+    $releaseFailure = $_
     if ($runId -and -not $completed) {
         & gh run cancel $runId --repo $Repository *> $null
+        $drainDeadline = [DateTimeOffset]::UtcNow.AddMinutes(5)
+        $runDrained = $false
+        while ([DateTimeOffset]::UtcNow -lt $drainDeadline) {
+            try {
+                $drain = Invoke-GitHubJson -Arguments @(
+                    'run', 'view', $runId, '--repo', $Repository,
+                    '--json', 'status,conclusion'
+                ) -FailureMessage 'Could not inspect cancellation state.'
+                $runDrained = $drain.status -eq 'completed'
+            } catch {
+                $runDrained = $false
+            }
+            $runnerDrained = -not $runnerProcess -or $runnerProcess.HasExited
+            if ($runDrained -and $runnerDrained) { break }
+            Start-Sleep -Seconds 2
+        }
+        if (-not $runDrained -or ($runnerProcess -and -not $runnerProcess.HasExited)) {
+            $cleanupAuthorized = $false
+            Write-Error "Release cancellation did not drain; preserving ephemeral runner root for the active job: $runnerRoot"
+        }
     }
-    throw
+    Write-Error "Local ephemeral release failed: $($releaseFailure.Exception.Message)"
+    throw $releaseFailure
 } finally {
-    if ($runnerProcess -and -not $runnerProcess.HasExited) {
+    if ($cleanupAuthorized -and $runnerProcess -and -not $runnerProcess.HasExited) {
         Stop-Process -Id $runnerProcess.Id -Force -ErrorAction SilentlyContinue
         $runnerProcess.WaitForExit(5000)
     }
-    if ($configured -and (Test-Path -LiteralPath (Join-Path $runnerRoot 'config.cmd'))) {
+    if ($cleanupAuthorized -and $configured -and
+        (Test-Path -LiteralPath (Join-Path $runnerRoot 'config.cmd'))) {
         $removeToken = (& gh api --method POST `
             "repos/$Repository/actions/runners/remove-token" --jq .token 2>$null)
         if ($LASTEXITCODE -eq 0 -and $removeToken) {
@@ -334,7 +381,8 @@ try {
     }
     $resolvedRunnerBase = [System.IO.Path]::GetFullPath($runnerBase).TrimEnd('\') + '\'
     $resolvedRunnerRoot = [System.IO.Path]::GetFullPath($runnerRoot)
-    if ($resolvedRunnerRoot.StartsWith($resolvedRunnerBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($cleanupAuthorized -and
+        $resolvedRunnerRoot.StartsWith($resolvedRunnerBase, [System.StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $resolvedRunnerRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
