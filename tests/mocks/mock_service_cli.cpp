@@ -74,12 +74,18 @@ int main(int argc, char** argv) {
     const std::string operation = argv[3];
     if (cli.find("installer-integration.fixture") != std::string::npos &&
         command == "lifecycle" &&
-        (operation == "enable" || operation == "disable")) {
+        (operation == "enable" || operation == "disable" ||
+         operation == "prepare_replace" || operation == "complete_replace")) {
+        const bool installed = operation == "enable" ||
+                               operation == "prepare_replace" ||
+                               operation == "complete_replace";
+        const bool active = operation == "enable" || operation == "complete_replace";
         std::cout
             << nlohmann::json{
-                   {"installed", operation == "enable"},
+                   {"installed", installed},
                    {"matchesCurrentConfiguration", true},
-                   {"active", operation == "enable"},
+                   {"active", active},
+                   {"replacementReady", operation == "prepare_replace"},
                }
                    .dump()
             << '\n';

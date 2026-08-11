@@ -222,6 +222,9 @@ interfaces:
   standalone_service_contract: uci_arena_standalone_service_contract_v1
   provider_service_contract: uci_arena_service_contract_v1
   provider_installer_integration: arena_provider_installer_integration_v1
+  provider_startup_control:
+    - arena_provider_startup_control_v1
+    - arena_provider_startup_control_v2
   provider_install_context: arena_provider_install_context_v1
   provider_install_result: arena_provider_install_result_v1
   provider_result: arena_provider_release_result_v1
@@ -558,6 +561,21 @@ provider_installer_integration:
       arrays, workspace/configuration flags, result envelope, and required
       configuration-match/live evidence. Installer never guesses these values
       from component identity, entrypoint names, or implementation language.
+    - Startup-control v2 adds required pre_replace and post_replace actions plus
+      exact previous-root and replacement-root flags. During repair or upgrade,
+      Installer invokes pre_replace from the validated staged payload against
+      the exact prior receipt-owned workspace before any old payload path is
+      renamed. The provider stops and retargets its existing credential-bearing
+      startup registration without opening or copying credential contents.
+    - A successful pre_replace response proves the registration remains
+      installed, is inactive, and is replacement-ready. After receipt and
+      configuration commit, Installer invokes post_replace from the installed
+      replacement and requires the declared live result. It journals both
+      transitions and never invokes the older payload's uninstall action.
+    - Rollback uses the staged v2 adapter to retarget the stopped registration
+      to the restored prior root, restores files and receipts, then invokes the
+      staged post_replace action. V1 remains accepted for providers that require
+      no staged replacement behavior.
     - A startup-control workspace relative path of `.` denotes the provider
       workspace itself; another safe relative path denotes one of its
       descendants. Installer accepts exactly those two bounded shapes, rejects
@@ -811,6 +829,36 @@ packaging:
         - manager.core-<version>-windows-x86_64.tar.gz
       linux-x86_64:
         - manager.core-<version>-linux-x86_64.tar.gz
+  routine_component_update:
+    owner: uci_arena_installer_release_tooling
+    command: >
+      node tools/release/build-suite-update-package.mjs --component <id>
+      --platform windows-x86_64 --lock <reviewed-lock> --asset-root <assets>
+    outputs:
+      - deterministic_suite_update_archive
+      - digest_bound_suite_update_result
+      - fixed_apply_update_script
+      - exact_catalog_and_component_payloads
+    rules:
+      - A provider, Engine payload, knowledge, or other ordinary component
+        release does not configure, compile, test, or recompose native
+        Installer, Manager MSI, Burn bundle, or launcher sources.
+      - Package construction runs every lock, composition, source-commit,
+        manifest, version, artifact, and provenance check before writing the
+        update archive. A failed cheap check cannot start a native build.
+      - The fixed deployment script verifies its own package manifest and the
+        installed arena-setup runtime version before invoking one typed custom
+        upgrade transaction for the declared component roots and dependency
+        closure. It never accepts an executable or arbitrary command from the
+        package manifest.
+      - Official packages require matching signed TUF metadata. Explicit
+        diagnostic-review packages remain unsigned development candidates and
+        pass the existing narrowly scoped development-catalog flag.
+      - Changes to Installer runtime protocol, Manager MSI payload, Burn
+        integration, fixed-scope launcher, or trust bootstrap remain explicit
+        full-installer-build exceptions. The exception is recorded in the
+        update result rather than silently falling back to the heavyweight
+        path.
   windows_manager_msi:
     owner: uci-arena-installer
     payload_source: immutable_manager_component_artifact
@@ -1451,6 +1499,32 @@ local_import:
     - Restaurant remains visible as detect-only and is never registered, copied, installed, started, or controlled.
 
 vm_mounts:
+  local_ephemeral_component_runner:
+    implementation: tools/release/invoke-local-ephemeral-release.ps1
+    scope: manually_dispatched_private_component_candidate_only
+    official_suite_release_authority: false
+    rules:
+      - One command performs clean-tree, exact-head, component-version,
+        workflow trigger, runner-label, Visual Studio environment, CMake, Git,
+        Git Bash, PowerShell module-path, GitHub authentication, and signing-
+        workflow prerequisite checks before obtaining a registration token or
+        dispatching work.
+      - Normal component releases require Ref main and the local source commit
+        to equal the exact remote main head. An unmerged ref is rejected before
+        runner registration unless the operator explicitly selects the
+        diagnostic-only override; diagnostic output has no publication,
+        composition-lock, or stable-suite authority.
+      - The runner is repository-scoped, ephemeral, update-disabled, and
+        removed after exactly one bounded workflow attempt. Registration tokens
+        are obtained just in time, suppressed from output, and never written to
+        tracked files or retained logs.
+      - Runner and workflow output is redirected to an ignored bounded local
+        log directory; conversational or pull-request evidence contains only
+        status, paths, sizes, counts, and digests.
+      - A physical developer host may produce a private attested component
+        candidate through this explicit diagnostic transport. It is never a
+        protected suite acceptance runner, stable promotion authority, or
+        substitute for the official Installer release workflow.
   protected_runner_provisioning:
     implementation: tools/release/provision-hyperv-runner.ps1
     physical_host_registration: forbidden
@@ -1762,6 +1836,10 @@ transaction:
         exact verified provider's startup_uninstall entrypoint. Payload rename
         waits for bounded operating-system process teardown and fails closed
         if the version root remains locked.
+      - When the validated replacement publishes startup-control v2,
+        arena-setup instead invokes its staged pre_replace action against the
+        exact prior receipt-owned workspace. Success must prove startup is no
+        longer installed before the old component root can be renamed.
       - If a later transaction step fails, rollback restores the prior payload,
         receipt, generated configuration, and active-model pointer before
         invoking the prior receipt's startup_install entrypoint. Failure to
@@ -1902,6 +1980,19 @@ acceptance:
     unrelated option or positional value as provider-owned output identity.
   - Offline installation uses the same verified component bytes as stable online installation.
   - Interrupted apply, repair, upgrade, and uninstall preserve a recoverable transaction state.
+  - A startup-control-v2 replacement quiesces and retargets an installed v1
+    provider through the staged replacement payload, replaces a same-version
+    root, resumes the live startup registration, and requires no manual Task
+    Scheduler intervention or credential re-entry.
+  - A routine component update test emits and applies a verified package while
+    proving that no CMake configure, native compilation, MSI build, Burn build,
+    or installer-envelope composition entrypoint was invoked.
+  - Local component-release preflight rejects version drift, a missing runner
+    label, Git Bash or PowerShell module-path breakage, and an unclean or stale
+    source head before runner registration or workflow dispatch.
+  - Local component-release preflight rejects an unmerged release ref by
+    default, rejects a stale local main, and labels the explicit unmerged
+    override diagnostic-only.
 
 release_gate_order:
   - provider_attestations

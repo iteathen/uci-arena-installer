@@ -10,6 +10,29 @@ compatible versions and installs them without importing provider source trees.
 Automatic CI is disabled. Validation runs locally and release workflows, when
 added, must remain explicit `workflow_dispatch` operations.
 
+Routine provider and Engine component releases use the package-only path and
+do not rebuild Manager MSI, Burn, or the native Installer runtime:
+
+```powershell
+npm run release:package-update -- --platform windows-x86_64 --component COMPONENT_ID --lock LOCK --asset-root ASSETS --output-root OUTPUT
+```
+
+The output archive contains a fixed `apply-update.ps1`, the exact catalog, and
+digest-verified payloads. Full installer composition is reserved for Installer
+protocol, Manager MSI, launcher, or trust-bootstrap changes.
+
+On private repositories without hosted-runner capacity, the checked-in local
+ephemeral runner command performs all version, workflow, toolchain, Git Bash,
+PowerShell module, signing, label, clean-tree, and exact-remote-head checks
+before registering one update-disabled runner and dispatching exactly one
+workflow attempt. Use `-PreflightOnly` first; logs remain under ignored
+`build/release-runner-logs`.
+
+Normal releases require `-Ref main` and the exact remote `main` head. A branch
+is rejected unless `-AllowUnmergedDiagnostic` is explicit; that override marks
+the result diagnostic-only and gives it no publication or composition authority.
+Review and merge the exact PR head before running a normal component release.
+
 Normal uninstall removes installed software authority while preserving valuable
 state. Preview it with `arena-setup uninstall-plan --all`; apply it with
 `arena-setup uninstall --all --yes`. Destructive removal is a separate flow:

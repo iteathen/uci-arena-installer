@@ -5,6 +5,8 @@
   "scripts": {
     "spec:check": "node tools/spec-check.mjs",
     "test": "node --test tools/release/*.test.mjs",
-    "check": "npm run spec:check && npm test"
+    "check": "npm run spec:check && npm test",
+    "release:package-update": "node tools/release/build-suite-update-package.mjs",
+    "release:local-ephemeral": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/release/invoke-local-ephemeral-release.ps1"
   }
 }

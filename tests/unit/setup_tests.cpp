@@ -2310,6 +2310,85 @@ TEST_CASE("provider startup control accepts the provider workspace root") {
     fs::remove_all(root);
 }
 
+TEST_CASE("staged startup control v2 preserves startup across same-version replacement") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "replaceable.staged-lifecycle.consumer";
+    static_cast<void>(write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile"));
+
+    const fs::path receipt_path =
+        paths.data_root / "receipts" / (component_id + ".json");
+    json previous_receipt = json::parse(std::ifstream(receipt_path));
+    previous_receipt["startup"] = {{"installed", true}};
+    std::ofstream(receipt_path, std::ios::binary | std::ios::trunc)
+        << previous_receipt.dump(2);
+
+    const fs::path previous_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    json previous_manifest = json::parse(
+        std::ifstream(previous_root / "arena-component.json"));
+    previous_manifest["installer_integration"]["startup_control"]["actions"]
+                     ["uninstall"] = json::array({"lifecycle", "legacy_disable"});
+    std::ofstream(previous_root / "arena-component.json",
+                  std::ios::binary | std::ios::trunc)
+        << previous_manifest.dump(2);
+
+    const fs::path package_root = root / "staged-provider-package";
+    fs::create_directories(package_root);
+    fs::copy_file(previous_root / "installer-integration.fixture",
+                  package_root / "installer-integration.fixture");
+    json replacement_manifest = previous_manifest;
+    replacement_manifest["component_version"] = "1.0.0";
+    auto& startup =
+        replacement_manifest["installer_integration"]["startup_control"];
+    startup["schema"] = "arena_provider_startup_control_v2";
+    startup["schema_version"] = 2;
+    startup["actions"]["pre_replace"] =
+        json::array({"lifecycle", "prepare_replace"});
+    startup["actions"]["post_replace"] =
+        json::array({"lifecycle", "complete_replace"});
+    startup["replacement_arguments"] = {
+        {"previous_root", "--previous-root"},
+        {"replacement_root", "--replacement-root"}};
+    startup["result"]["require_live_on_post_replace"] = true;
+    std::ofstream(package_root / "arena-component.json", std::ios::binary)
+        << replacement_manifest.dump(2);
+    const fs::path archive = root / "staged-provider-1.0.0.tar.gz";
+    write_component_archive(package_root, archive);
+
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array({{{"action", "install"},
+                       {"component_id", component_id},
+                       {"version", "1.0.0"},
+                       {"dependencies", json::array({"runtime.host"})},
+                       {"enabled", false},
+                       {"artifact",
+                        {{"type", "archive"},
+                         {"source", archive.filename().string()},
+                         {"sha256", sha256_path(archive)},
+                         {"size_bytes", fs::file_size(archive)}}}}})},
+    };
+    const json applied =
+        SetupEngine::apply(json::object(), plan, paths, true, true);
+    INFO(applied.dump(2));
+    REQUIRE(applied.at("state") == "committed");
+    REQUIRE(json::parse(std::ifstream(receipt_path)).at("component_version") ==
+            "1.0.0");
+    REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("installed") ==
+            true);
+    REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("active") ==
+            true);
+    REQUIRE(fs::is_directory(paths.install_root / "components" / component_id /
+                             "1.0.0"));
+    fs::remove_all(root);
+}
+
 TEST_CASE("timing profile imports derive only additive permissions from complete gates") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
