@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -166,4 +166,13 @@ test("dynamic Manager releases bind one dispatch version through build artifact 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("PowerShell runner preflight keeps filtered tool candidates array-shaped", () => {
+  const source = readFileSync(
+    new URL("./invoke-local-ephemeral-release.ps1", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /\$vswhereCandidates\s*=\s*@\(@\([\s\S]*?Where-Object[\s\S]*?\}\)/u);
+  assert.match(source, /\$vswhereCandidates\.Count\s*-lt\s*1/u);
 });
