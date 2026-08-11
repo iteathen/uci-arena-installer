@@ -1514,6 +1514,13 @@ vm_mounts:
         runner registration unless the operator explicitly selects the
         diagnostic-only override; diagnostic output has no publication,
         composition-lock, or stable-suite authority.
+      - A component workflow that uploads to a pre-provisioned candidate passes
+        one explicit version-bound release tag. Before obtaining a runner token,
+        the operator-authenticated coordinator creates the missing prerelease at
+        the exact source head or verifies the existing release is non-draft,
+        prerelease, exact-head, and empty. Existing assets fail closed before
+        dispatch; an empty candidate left by an earlier pre-upload failure is
+        safely reusable. Preflight-only reports intent and never creates it.
       - A component may declare its immutable version statically or bind the
         workflow_dispatch version through the release build, component-artifact
         construction, and immutable release tag. Dynamic-version preflight
@@ -1542,9 +1549,9 @@ vm_mounts:
       - Runner and workflow output is redirected to an ignored bounded local
         log directory; conversational or pull-request evidence contains only
         status, paths, sizes, counts, and digests.
-        - Preflight projects both native CMake scratch and deep Manager vcpkg/MSVC
-          file-tracker paths under the configured runner work root and rejects
-          more than 240 characters before registration. The default uses C:\ar, a
+      - Preflight projects both native CMake scratch and deep Manager vcpkg/MSVC
+        file-tracker paths under the configured runner work root and rejects
+        more than 240 characters before registration. The default uses C:\ar, a
         sixteen-character ephemeral directory id, and work directory `w`; the
         runner remains ephemeral and is removed after the attempt.
       - A physical developer host may produce a private attested component

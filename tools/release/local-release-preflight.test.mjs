@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   validateReleaseIntegration,
+  validateCandidateReleaseTag,
   validateRunnerPathBudget,
   validateReleaseSource,
 } from "./local-release-preflight.mjs";
@@ -190,6 +191,25 @@ test("runner preflight reserves an MSVC-safe build path budget", () => {
   }), /240-character budget/u);
 });
 
+test("candidate prerelease tags are optional and version-bound", () => {
+  assert.equal(validateCandidateReleaseTag({
+    candidateReleaseTag: "",
+    expectedVersion: "0.3.18",
+  }), null);
+  assert.equal(validateCandidateReleaseTag({
+    candidateReleaseTag: "component/manager-core/v0.3.18/windows-x86_64",
+    expectedVersion: "0.3.18",
+  }), "component/manager-core/v0.3.18/windows-x86_64");
+  assert.throws(() => validateCandidateReleaseTag({
+    candidateReleaseTag: "component/manager-core/v0.3.17/windows-x86_64",
+    expectedVersion: "0.3.18",
+  }), /not bound to the requested version/u);
+  assert.throws(() => validateCandidateReleaseTag({
+    candidateReleaseTag: "../component/v0.3.18/windows-x86_64",
+    expectedVersion: "0.3.18",
+  }), /invalid/u);
+});
+
 test("PowerShell runner preflight keeps filtered tool candidates array-shaped", () => {
   const source = readFileSync(
     new URL("./invoke-local-ephemeral-release.ps1", import.meta.url),
@@ -201,6 +221,12 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /Substring\(0, 16\)/u);
   assert.match(source, /--work 'w'/u);
   assert.match(source, /projected_path_characters = \$contract\.projected_path_characters/u);
+  assert.match(source, /function Ensure-EmptyCandidateRelease/u);
+  assert.match(source, /gh release create \$Tag[\s\S]*?--target \$Head --prerelease/u);
+  assert.match(source, /Candidate prerelease already contains assets/u);
+  assert.match(source, /candidate_release_action/u);
+  assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")
+    < source.indexOf("actions/runners/registration-token"));
   assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
   assert.match(source, /drainDeadline[\s\S]*?AddMinutes\(5\)/u);
   assert.match(source, /\$cleanupAuthorized\s*=\s*\$false/u);
