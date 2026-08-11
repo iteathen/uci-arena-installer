@@ -1,0 +1,91 @@
+{
+  "schema": "arena_product_composition_v1",
+  "product_release": "0.3.21",
+  "installer": {
+    "repository": "iteathen/uci-arena-installer",
+    "minimum_version": "0.1.0"
+  },
+  "components": [
+    {
+      "role": "manager",
+      "component_id": "manager.core",
+      "version": "0.3.18",
+      "repository": "iteathen/uci-arena-manager",
+      "required": true,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "engine",
+      "component_id": "uci_arena.engine",
+      "version": "0.1.10",
+      "repository": "iteathen/UCI_Arena",
+      "required": true,
+      "default_enabled": true,
+      "requires": ["node_runtime.private"]
+    },
+    {
+      "role": "evidence_runtime",
+      "component_id": "uci_arena_evidence.runtime",
+      "version": "0.3.4",
+      "repository": "iteathen/UCI_Arena",
+      "required": true,
+      "default_enabled": true,
+      "requires": ["uci_arena.engine", "node_runtime.private"]
+    },
+    {
+      "role": "lichess_bot",
+      "component_id": "lichess.adapter",
+      "version": "1.0.10",
+      "repository": "iteathen/uci-arena-lichess-bot",
+      "required": false,
+      "default_enabled": true,
+      "requires": ["uci_arena.engine", "node_runtime.private"]
+    },
+    {
+      "role": "book_forge",
+      "component_id": "book_forge.service",
+      "version": "0.4.3",
+      "repository": "iteathen/uci-arena-book-forge",
+      "required": false,
+      "default_enabled": true,
+      "requires": ["node_runtime.private", "stockfish.engine"]
+    },
+    {
+      "role": "opening_book",
+      "component_id": "opening_book.standard",
+      "version": "0.4.0",
+      "repository": "iteathen/uci-arena-book-forge",
+      "required": false,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "evidence_service",
+      "component_id": "uci_arena_evidence.service",
+      "version": "0.3.13",
+      "repository": "iteathen/uci-arena-evidence-service",
+      "required": false,
+      "default_enabled": true,
+      "requires": ["uci_arena.engine", "uci_arena_evidence.runtime", "node_runtime.private", "stockfish.engine"]
+    },
+    {
+      "role": "node_runtime",
+      "component_id": "node_runtime.private",
+      "version": "24.15.0",
+      "repository": "iteathen/uci-arena-installer",
+      "required": false,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "stockfish",
+      "component_id": "stockfish.engine",
+      "version": "15.1",
+      "repository": "iteathen/uci-arena-installer",
+      "required": false,
+      "default_enabled": true,
+      "requires": []
+    }
+  ]
+}
