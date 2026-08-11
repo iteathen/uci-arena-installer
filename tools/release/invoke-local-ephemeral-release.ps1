@@ -275,7 +275,12 @@ try {
     $runnerProcess = Start-Process -FilePath (Join-Path $runnerRoot 'run.cmd') `
         -WorkingDirectory $runnerRoot -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
-    $dispatchTime = [DateTimeOffset]::UtcNow
+    $priorRuns = @(Invoke-GitHubJson -Arguments @(
+        'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
+        '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
+        '--json', 'databaseId,headSha,status,conclusion,createdAt'
+    ) -FailureMessage 'Could not snapshot workflow runs before dispatch.')
+    $priorRunIds = @($priorRuns | ForEach-Object { [string]$_.databaseId })
     $dispatchArguments = @(
         'workflow', 'run', $Workflow, '--repo', $Repository, '--ref', $Ref,
         '-f', "version=$Version", '-f', "target=$Target",
@@ -303,10 +308,11 @@ try {
             ) -FailureMessage 'Could not query the dispatched workflow after three attempts.')
             $matching = @($runs | Where-Object {
                 $_.headSha -eq $head -and
-                [DateTimeOffset]::Parse($_.createdAt) -ge $dispatchTime.AddSeconds(-5)
-            } | Sort-Object { [DateTimeOffset]::Parse($_.createdAt) })
+                -not ($priorRunIds -contains [string]$_.databaseId)
+            } | Sort-Object { [int64]$_.databaseId })
             if ($matching.Count -gt 1) {
-                throw 'More than one matching workflow run exists; refusing ambiguous monitoring.'
+                $cleanupAuthorized = $false
+                throw 'More than one new matching workflow run exists; preserving the runner and refusing ambiguous monitoring.'
             }
             if ($matching.Count -eq 1) { $runId = [string]$matching[0].databaseId }
         } else {
@@ -368,7 +374,7 @@ try {
 } finally {
     if ($cleanupAuthorized -and $runnerProcess -and -not $runnerProcess.HasExited) {
         Stop-Process -Id $runnerProcess.Id -Force -ErrorAction SilentlyContinue
-        $runnerProcess.WaitForExit(5000)
+        [void]$runnerProcess.WaitForExit(5000)
     }
     if ($cleanupAuthorized -and $configured -and
         (Test-Path -LiteralPath (Join-Path $runnerRoot 'config.cmd'))) {

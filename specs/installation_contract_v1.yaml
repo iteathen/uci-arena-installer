@@ -1529,6 +1529,11 @@ vm_mounts:
         process must drain before the work root is removed. If drain cannot be
         proved within five minutes, the root is preserved and reported rather
         than deleted beneath an active action.
+      - Before dispatch, the wrapper snapshots recent workflow run ids. It binds
+        monitoring only to the one exact new id for the requested source head;
+        timestamps are not identity. If more than one new matching run appears,
+        the wrapper refuses ambiguity and preserves the runner rather than
+        deleting files that an unowned active job may be using.
       - Runner and workflow output is redirected to an ignored bounded local
         log directory; conversational or pull-request evidence contains only
         status, paths, sizes, counts, and digests.
