@@ -1514,6 +1514,11 @@ vm_mounts:
         runner registration unless the operator explicitly selects the
         diagnostic-only override; diagnostic output has no publication,
         composition-lock, or stable-suite authority.
+      - A component may declare its immutable version statically or bind the
+        workflow_dispatch version through the release build, component-artifact
+        construction, and immutable release tag. Dynamic-version preflight
+        requires that complete chain plus a checked-in component definition;
+        an unconstrained workflow input is not version authority.
       - The runner is repository-scoped, ephemeral, update-disabled, and
         removed after exactly one bounded workflow attempt. Registration tokens
         are obtained just in time, suppressed from output, and never written to
@@ -1993,6 +1998,10 @@ acceptance:
   - Local component-release preflight rejects an unmerged release ref by
     default, rejects a stale local main, and labels the explicit unmerged
     override diagnostic-only.
+  - Local component-release preflight accepts a dynamic Manager version only
+    when one workflow input is bound through ARENA_VERSION, artifact generation,
+    and the immutable release tag, and its component definition identifies
+    manager.core.
 
 release_gate_order:
   - provider_attestations
