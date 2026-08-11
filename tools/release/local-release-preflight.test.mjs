@@ -11,7 +11,7 @@ import {
 } from "./local-release-preflight.mjs";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
-const RUNNER_ROOT = path.join(path.parse(path.resolve(".")).root, "arena-release-runners");
+const RUNNER_ROOT = path.join(path.parse(path.resolve(".")).root, "ar");
 
 function fixture() {
   const root = mkdtempSync(path.join(os.tmpdir(), "arena-release-preflight-"));
@@ -197,6 +197,10 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   );
   assert.match(source, /\$vswhereCandidates\s*=\s*@\(@\([\s\S]*?Where-Object[\s\S]*?\}\)/u);
   assert.match(source, /\$vswhereCandidates\.Count\s*-lt\s*1/u);
+  assert.match(source, /RunnerWorkRoot = 'C:\\ar'/u);
+  assert.match(source, /Substring\(0, 16\)/u);
+  assert.match(source, /--work 'w'/u);
+  assert.match(source, /projected_path_characters = \$contract\.projected_path_characters/u);
   assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
   assert.match(source, /drainDeadline[\s\S]*?AddMinutes\(5\)/u);
   assert.match(source, /\$cleanupAuthorized\s*=\s*\$false/u);

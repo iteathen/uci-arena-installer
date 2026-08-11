@@ -39,26 +39,27 @@ export function validateRunnerPathBudget({ runnerWorkRoot, repositorySlug }) {
   if (resolved === path.parse(resolved).root) {
     throw new Error("runner work root cannot be a filesystem root");
   }
-  const projected = path.join(
-    resolved,
-    "0".repeat(32),
-    "_work",
-    repositoryName,
-    repositoryName,
-    "native",
-    "build-repro",
-    "CMakeFiles",
-    "CMakeScratch",
-    "TryCompile-abcdefgh",
-    "cmTC_abcdefgh.dir",
-    "Debug",
-    "cmTC_abcdefgh.tlog",
-    "link-cvtres.write.1.tlog",
-  );
-  if (projected.length > 240) {
-    throw new Error(`projected release build path exceeds the 240-character budget (${projected.length})`);
+  const common = [resolved, "0".repeat(16), "w", repositoryName, repositoryName];
+  const projectedPaths = [
+    path.join(
+      ...common,
+      "native", "build-repro", "CMakeFiles", "CMakeScratch",
+      "TryCompile-abcdefgh", "cmTC_abcdefgh.dir", "Debug",
+      "cmTC_abcdefgh.tlog", "link-cvtres.write.1.tlog",
+    ),
+    path.join(
+      ...common,
+      "vcpkg", "buildtrees", "libsodium", "x64-windows-release-rel",
+      "builds", "msvc", "vs2022", "libsodium", "x64", "Release",
+      "libsodium.dir", "Release", "libsodium-file-tracker.tlog",
+      "link-cvtres.write.1.tlog",
+    ),
+  ];
+  const projectedLength = Math.max(...projectedPaths.map((entry) => entry.length));
+  if (projectedLength > 240) {
+    throw new Error(`projected release build path exceeds the 240-character budget (${projectedLength})`);
   }
-  return { runner_work_root: resolved, projected_path_characters: projected.length };
+  return { runner_work_root: resolved, projected_path_characters: projectedLength };
 }
 
 function readJson(filename, label) {
