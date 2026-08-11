@@ -4084,6 +4084,25 @@ json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
     }
 }
 
+void rename_tree_with_retry(const fs::path& source, const fs::path& destination,
+                            const std::string_view failure_prefix) {
+    constexpr int attempts = 100;
+    constexpr auto retry_delay = std::chrono::milliseconds(100);
+    std::string failure = "rename did not complete";
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        std::error_code rename_error;
+        fs::rename(source, destination, rename_error);
+        if (!rename_error) {
+            return;
+        }
+        failure = rename_error.message();
+        if (attempt + 1 < attempts) {
+            std::this_thread::sleep_for(retry_delay);
+        }
+    }
+    throw std::runtime_error(std::string(failure_prefix) + ": " + failure);
+}
+
 void migrate_provider_workspace(
     const SetupPaths& paths, const json& previous_receipt,
     const fs::path& destination, const std::string& transaction_id,
@@ -4129,13 +4148,9 @@ void migrate_provider_workspace(
         {"locator_writes", json::array()},
     };
     checkpoint();
-    std::error_code move_error;
-    fs::rename(source, destination, move_error);
-    if (move_error) {
-        throw std::runtime_error(
-            "provider workspace migration requires an atomic same-volume move: " +
-            move_error.message());
-    }
+    rename_tree_with_retry(
+        source, destination,
+        "provider workspace migration requires an atomic same-volume move");
     migration["state"] = "moved";
     checkpoint();
 
@@ -4489,22 +4504,9 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
 void rename_managed_component_tree_with_retry(const fs::path& source,
                                                const fs::path& destination,
                                                const std::string& component_id) {
-    constexpr int attempts = 100;
-    constexpr auto retry_delay = std::chrono::milliseconds(100);
-    std::string failure = "rename did not complete";
-    for (int attempt = 0; attempt < attempts; ++attempt) {
-        std::error_code rename_error;
-        fs::rename(source, destination, rename_error);
-        if (!rename_error) {
-            return;
-        }
-        failure = rename_error.message();
-        if (attempt + 1 < attempts) {
-            std::this_thread::sleep_for(retry_delay);
-        }
-    }
-    throw std::runtime_error("cannot replace managed component " + component_id +
-                             " after shutdown: " + failure);
+    rename_tree_with_retry(source, destination,
+                           "cannot replace managed component " + component_id +
+                               " after shutdown");
 }
 
 void remove_managed_component_tree_with_retry(const fs::path& target,

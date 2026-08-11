@@ -623,6 +623,9 @@ setup:
         atomic rename before rendering replacement configuration.
       - Workspace migration rejects links, an occupied destination, an
         unverified receipt/configuration relationship, and cross-volume moves.
+        After provider startup removal, the same-volume atomic rename tolerates
+        only bounded operating-system handle teardown through retry and fails
+        closed into the journaled rollback path when that bound is exhausted.
         It journals the directory move, rebases only saved locators whose
         validated paths are descendants of that exact workspace, regenerates
         every declared consumer, and reverses locator and directory changes
