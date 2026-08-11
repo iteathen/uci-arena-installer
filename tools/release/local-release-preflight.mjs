@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -76,8 +76,29 @@ export function collectReleaseVersions(repositoryRoot) {
     const match = source.match(/\bproject\s*\([\s\S]{0,512}?\bVERSION\s+([0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?)/iu);
     if (match) addVersion("CMakeLists.txt", match[1]);
   }
-  if (versions.length < 1) throw new Error("no authoritative component version source was found");
+  const componentDefinitionRoot = path.join(repositoryRoot, "release", "components");
+  if (existsSync(componentDefinitionRoot)) {
+    const definitions = readdirSync(componentDefinitionRoot, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => entry.name)
+      .sort();
+    if (definitions.length > 64) throw new Error("component definition inventory is unbounded");
+    for (const filename of definitions) {
+      const definition = readJson(
+        path.join(componentDefinitionRoot, filename),
+        `release component definition ${filename}`,
+      );
+      addComponent(`release/components/${filename}`, definition.component_id);
+    }
+  }
   return { versions, componentIds };
+}
+
+function bindsDynamicWorkflowVersion(workflow) {
+  return /^\s+RELEASE_VERSION:\s*\$\{\{\s*inputs\.version\s*\}\}\s*$/mu.test(workflow)
+    && workflow.includes("-DARENA_VERSION=$env:RELEASE_VERSION")
+    && workflow.includes("--version $env:RELEASE_VERSION")
+    && workflow.includes("v$env:RELEASE_VERSION");
 }
 
 export function validateReleaseSource({
@@ -93,6 +114,16 @@ export function validateReleaseSource({
 }) {
   if (!SEMVER.test(expectedVersion ?? "")) throw new Error("expected version is invalid");
   const { versions, componentIds } = collectReleaseVersions(repositoryRoot);
+  const workflow = readFileSync(workflowPath, "utf8");
+  if (versions.length < 1) {
+    if (!bindsDynamicWorkflowVersion(workflow)) {
+      throw new Error("no authoritative component version source was found");
+    }
+    versions.push({
+      source: "workflow_dispatch.inputs.version->ARENA_VERSION/artifact/tag",
+      value: expectedVersion,
+    });
+  }
   const mismatches = versions.filter((entry) => entry.value !== expectedVersion);
   if (mismatches.length > 0) {
     throw new Error(`release version drift: ${mismatches.map(
@@ -108,7 +139,6 @@ export function validateReleaseSource({
       throw new Error(`release component identity differs from ${expectedComponentId}`);
     }
   }
-  const workflow = readFileSync(workflowPath, "utf8");
   if (!/^\s{2}workflow_dispatch:\s*$/mu.test(workflow)) {
     throw new Error("release workflow is not explicitly dispatchable");
   }

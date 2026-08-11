@@ -115,3 +115,55 @@ test("normal releases require integrated remote main and branches are diagnostic
     allowUnmergedDiagnostic: true,
   }), { authority: "diagnostic_only", integrated_main: false });
 });
+
+test("dynamic Manager releases bind one dispatch version through build artifact and tag", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "arena-dynamic-release-preflight-"));
+  try {
+    const workflowRoot = path.join(root, ".github", "workflows");
+    const definitionRoot = path.join(root, "release", "components");
+    mkdirSync(workflowRoot, { recursive: true });
+    mkdirSync(definitionRoot, { recursive: true });
+    writeFileSync(path.join(definitionRoot, "manager-core.json"), JSON.stringify({
+      component_id: "manager.core",
+    }));
+    const workflowPath = path.join(workflowRoot, "component-release.yml");
+    writeFileSync(workflowPath, [
+      "on:",
+      "  workflow_dispatch:",
+      "    inputs:",
+      "      version:",
+      "      runner:",
+      "        default: ephemeral-self-hosted-windows",
+      "permissions:",
+      "  id-token: write",
+      "jobs:",
+      "  release:",
+      "    runs-on: '[\"self-hosted\",\"Windows\",\"X64\",\"ephemeral\",\"uci-suite\",\"manager-release\"]'",
+      "    env:",
+      "      RELEASE_VERSION: ${{ inputs.version }}",
+      "    steps:",
+      "      - run: cmake --preset release -DARENA_VERSION=$env:RELEASE_VERSION",
+      "      - run: node build.mjs --version $env:RELEASE_VERSION",
+      "      - run: gh release create component/manager/v$env:RELEASE_VERSION",
+      "      - run: cosign attest-blob artifact",
+      "      - run: cosign verify-blob-attestation artifact",
+      "",
+    ].join("\n"));
+    const result = validateReleaseSource({
+      repositoryRoot: root,
+      expectedVersion: "0.3.18",
+      expectedComponentId: "manager.core",
+      workflowPath,
+      requiredRunnerLabels: [
+        "self-hosted", "Windows", "X64", "ephemeral", "uci-suite", "manager-release",
+      ],
+      releaseRef: "main",
+      localHead: HEAD,
+      remoteMainHead: HEAD,
+    });
+    assert.equal(result.version_sources, 1);
+    assert.equal(result.component_id, "manager.core");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
