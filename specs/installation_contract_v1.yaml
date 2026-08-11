@@ -474,6 +474,16 @@ provider_service_contracts:
     - Installer records only the exact contract paths, schemas, digests,
       operation-catalog identity, and credential gate in the receipt. It never
       synthesizes provider operations or reads a credential.
+    - A provider Manager operation catalog declares one credential-free,
+      non-mutating provider_status operation with fixed arguments and the exact
+      public status-schema identifier. When a validated receipt records active
+      startup authority, verify invokes that operation through the contract's
+      declared direct or dependency-runtime transport, supplies only the
+      manifest-declared workspace and configuration arguments, and requires an
+      exit-zero response with that exact status schema.
+    - Provider health verification never substitutes a standalone-service
+      contract, a startup-control action, or component-identity branching for
+      the validated provider service operation.
     - An unknown contract major, missing referenced contract, unlisted file,
       identity drift, unsafe path, or digest mismatch fails before mutation.
   receipt:

@@ -39,6 +39,12 @@ bool has_option(const int argc, char** argv, const std::string_view option) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc >= 3 &&
+        std::string_view(argv[1]).find("provider.mjs") != std::string_view::npos &&
+        std::string_view(argv[2]) == "status") {
+        std::cout << R"({"schema":"replaceable_provider_status_v1"})" << '\n';
+        return 0;
+    }
     if (argc < 4) {
         return 2;
     }
