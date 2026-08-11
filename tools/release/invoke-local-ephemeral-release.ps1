@@ -10,6 +10,7 @@ param(
     [string]$WorkflowComponent = '',
     [string[]]$RunnerLabel = @('self-hosted', 'Windows', 'X64', 'ephemeral', 'uci-suite'),
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
+    [string]$CandidateReleaseTag = '',
     [string]$RunnerCacheRoot = 'C:\chess_engine\.actions-runner-cache',
     [string]$RunnerWorkRoot = 'C:\ar',
     [string]$LogRoot = '',
@@ -56,6 +57,49 @@ function Assert-GitHubAuthentication {
         if ($attempt -lt 3) { Start-Sleep -Milliseconds 500 }
     }
     throw 'GitHub CLI authentication is unavailable.'
+}
+
+function Get-CandidateRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Tag
+    )
+    for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        $output = & gh release view $Tag --repo $Repository `
+            --json assets,isDraft,isPrerelease,targetCommitish,tagName 2>$null
+        if ($LASTEXITCODE -eq 0 -and $output) {
+            try { return $output | ConvertFrom-Json -ErrorAction Stop } catch {}
+        }
+        if ($attempt -lt 3) { Start-Sleep -Milliseconds 500 }
+    }
+    return $null
+}
+
+function Ensure-EmptyCandidateRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$Head,
+        [Parameter(Mandatory = $true)][string]$ComponentId,
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+    $release = Get-CandidateRelease -Repository $Repository -Tag $Tag
+    $state = 'verified'
+    if (-not $release) {
+        & gh release create $Tag --repo $Repository --target $Head --prerelease `
+            --title "$ComponentId $Version $Target" `
+            --notes 'Private immutable component candidate; verified workflow assets only.' *> $null
+        if ($LASTEXITCODE -eq 0) { $state = 'created' }
+        $release = Get-CandidateRelease -Repository $Repository -Tag $Tag
+        if (-not $release) { throw 'Candidate prerelease could not be created or verified.' }
+    }
+    if ($release.tagName -ne $Tag) { throw 'Candidate prerelease tag changed unexpectedly.' }
+    if ($release.isDraft) { throw 'Candidate prerelease must not be a draft.' }
+    if (-not $release.isPrerelease) { throw 'Candidate release must remain a prerelease.' }
+    if ($release.targetCommitish -ne $Head) { throw 'Candidate prerelease targets a different source head.' }
+    if (@($release.assets).Count -ne 0) { throw 'Candidate prerelease already contains assets.' }
+    return $state
 }
 
 function Import-VisualStudioEnvironment {
@@ -193,7 +237,8 @@ $preflightArguments = @(
     '--remote-main-head', $remoteMainCommit,
     '--allow-unmerged-diagnostic', $AllowUnmergedDiagnostic.IsPresent.ToString().ToLowerInvariant(),
     '--runner-work-root', $RunnerWorkRoot,
-    '--repository', $Repository
+    '--repository', $Repository,
+    '--candidate-release-tag', $CandidateReleaseTag
 )
 foreach ($label in $RunnerLabel) {
     $preflightArguments += @('--runner-label', $label)
@@ -237,8 +282,17 @@ if ($PreflightOnly) {
         authority = $contract.authority
         runner_work_root = $contract.runner_work_root
         projected_path_characters = $contract.projected_path_characters
+        candidate_release_tag = $contract.candidate_release_tag
+        candidate_release_action = $(if ($contract.candidate_release_tag) { 'would_create_or_verify' } else { 'not_requested' })
     } | ConvertTo-Json -Compress
     return
+}
+
+$candidateReleaseState = 'not_requested'
+if ($contract.candidate_release_tag) {
+    $candidateReleaseState = Ensure-EmptyCandidateRelease `
+        -Repository $Repository -Tag $contract.candidate_release_tag -Head $head `
+        -ComponentId $ComponentId -Version $Version -Target $Target
 }
 
 if (-not $LogRoot) { $LogRoot = Join-Path $PSScriptRoot '..\..\build\release-runner-logs' }
@@ -363,6 +417,8 @@ try {
         head = $head
         workflow_run_id = $runId
         runner_version = $runnerVersion
+        candidate_release_tag = $contract.candidate_release_tag
+        candidate_release_state = $candidateReleaseState
         stdout_log = $stdoutLog
         stderr_log = $stderrLog
     } | ConvertTo-Json -Compress

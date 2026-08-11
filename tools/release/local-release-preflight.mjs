@@ -62,6 +62,20 @@ export function validateRunnerPathBudget({ runnerWorkRoot, repositorySlug }) {
   return { runner_work_root: resolved, projected_path_characters: projectedLength };
 }
 
+export function validateCandidateReleaseTag({ candidateReleaseTag, expectedVersion }) {
+  if (!candidateReleaseTag) return null;
+  if (candidateReleaseTag.length > 200
+      || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/u.test(candidateReleaseTag)
+      || candidateReleaseTag.endsWith("/")
+      || candidateReleaseTag.includes("..")) {
+    throw new Error("candidate release tag is invalid");
+  }
+  if (!candidateReleaseTag.includes(`/v${expectedVersion}/`)) {
+    throw new Error("candidate release tag is not bound to the requested version");
+  }
+  return candidateReleaseTag;
+}
+
 function readJson(filename, label) {
   try {
     return JSON.parse(readFileSync(filename, "utf8"));
@@ -148,6 +162,7 @@ export function validateReleaseSource({
   allowUnmergedDiagnostic = false,
   runnerWorkRoot,
   repositorySlug,
+  candidateReleaseTag = "",
 }) {
   if (!SEMVER.test(expectedVersion ?? "")) throw new Error("expected version is invalid");
   const { versions, componentIds } = collectReleaseVersions(repositoryRoot);
@@ -207,6 +222,7 @@ export function validateReleaseSource({
     allowUnmergedDiagnostic,
   });
   const pathBudget = validateRunnerPathBudget({ runnerWorkRoot, repositorySlug });
+  const releaseTag = validateCandidateReleaseTag({ candidateReleaseTag, expectedVersion });
   return {
     schema: "arena_local_release_preflight_v1",
     version: expectedVersion,
@@ -214,6 +230,7 @@ export function validateReleaseSource({
     version_sources: versions.length,
     runner_labels: requiredRunnerLabels.length,
     workflow: path.relative(repositoryRoot, workflowPath).split(path.sep).join("/"),
+    candidate_release_tag: releaseTag,
     ...integration,
     ...pathBudget,
   };
@@ -243,6 +260,7 @@ function parse(argv) {
     allowUnmergedDiagnostic: values["allow-unmerged-diagnostic"] === "true",
     runnerWorkRoot: values["runner-work-root"],
     repositorySlug: values.repository,
+    candidateReleaseTag: values["candidate-release-tag"] ?? "",
   };
 }
 
