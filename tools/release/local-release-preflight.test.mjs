@@ -222,7 +222,9 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /--work 'w'/u);
   assert.match(source, /projected_path_characters = \$contract\.projected_path_characters/u);
   assert.match(source, /function Ensure-EmptyCandidateRelease/u);
-  assert.match(source, /gh release create \$Tag[\s\S]*?--target \$Head --prerelease/u);
+  assert.match(source, /'api', '--method', 'POST', "repos\/\$Repository\/releases"/u);
+  assert.match(source, /"tag_name=\$Tag"[\s\S]*?"target_commitish=\$Head"/u);
+  assert.match(source, /'draft=false'[\s\S]*?'prerelease=true'[\s\S]*?'make_latest=false'/u);
   assert.match(source, /Candidate prerelease already contains assets/u);
   assert.match(source, /candidate_release_action/u);
   assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")
