@@ -201,4 +201,8 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /drainDeadline[\s\S]*?AddMinutes\(5\)/u);
   assert.match(source, /\$cleanupAuthorized\s*=\s*\$false/u);
   assert.match(source, /preserving ephemeral runner root for the active job/u);
+  assert.match(source, /\$priorRunIds\s*=\s*@\(\$priorRuns[\s\S]*?databaseId/u);
+  assert.match(source, /-not \(\$priorRunIds -contains \[string\]\$_\.databaseId\)/u);
+  assert.doesNotMatch(source, /dispatchTime\.AddSeconds/u);
+  assert.match(source, /\[void\]\$runnerProcess\.WaitForExit/u);
 });
