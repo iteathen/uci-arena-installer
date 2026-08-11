@@ -3,9 +3,26 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { gunzipSync } from "node:zlib";
 
 import { assembleSuiteUpdatePackage } from "./build-suite-update-package.mjs";
 import { sha256File } from "./release-lock.mjs";
+
+function tarEntryNames(filename) {
+  const archive = gunzipSync(readFileSync(filename));
+  const names = [];
+  let offset = 0;
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((value) => value === 0)) break;
+    const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/u, "");
+    const sizeText = header.subarray(124, 136).toString("ascii").replace(/\0.*$/u, "").trim();
+    const size = Number.parseInt(sizeText || "0", 8);
+    names.push(name);
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return names;
+}
 
 function fixture(root) {
   const definitions = [
@@ -90,6 +107,10 @@ test("routine suite update is deterministic and has no native build path", () =>
     assert.deepEqual(first.selected_components, ["lichess.adapter"]);
     assert.deepEqual(first.dependency_closure, ["lichess.adapter", "node_runtime.private"]);
     assert.equal(first.artifact.sha256, second.artifact.sha256);
+    const entries = tarEntryNames(path.join(root, "first", first.artifact.name));
+    assert.ok(entries.includes("release/payloads/lichess.adapter.tar.gz"));
+    assert.ok(entries.includes("release/payloads/node_runtime.private.tar.gz"));
+    assert.equal(entries.includes("release/payloads/manager.core.tar.gz"), false);
     assert.equal(
       readFileSync(path.join(root, "first", "suite-update-result.json"), "utf8")
         .includes("cmake"),
