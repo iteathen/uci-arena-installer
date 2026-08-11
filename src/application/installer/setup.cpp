@@ -5651,11 +5651,150 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     json results = json::array();
     std::set<std::string> migrated_locator_kinds;
     journal["consumer_refresh_writes"] = json::array();
+    journal["startup_quiescence"] = json::array();
+    std::map<std::string, fs::path> staged_roots;
+    std::map<std::string, std::string> staged_versions;
+    std::set<std::string> quiesced_startup_components;
     json superseded_component_cleanup{
         {"schema", "arena_superseded_component_cleanup_v1"},
         {"roots", json::array()}};
     try {
         const fs::path catalog_directory = fs::path(plan.value("catalog_directory", "."));
+        std::set<std::string> replaced_component_ids;
+        for (const auto& action : plan.at("actions")) {
+            if (action.value("action", "install") == "keep") continue;
+            const std::string id = action.at("component_id").get<std::string>();
+            const std::string version = action.at("version").get<std::string>();
+            if (!valid_identifier(id) || !valid_identifier(version) ||
+                !replaced_component_ids.insert(id).second) {
+                throw std::runtime_error(
+                    "plan contains an unsafe or duplicate component identity");
+            }
+            const fs::path artifact = acquire_artifact(
+                action.at("artifact"), catalog_directory, paths,
+                plan.value("offline", false));
+            const fs::path stage = staging_root / transaction_id / id;
+            std::error_code ignored;
+            fs::remove_all(stage, ignored);
+            if (action.at("artifact").value("type", "archive") == "file_set") {
+                static_cast<void>(stage_file_set(
+                    artifact, action.at("artifact"), catalog_directory, paths,
+                    plan.value("offline", false), stage, id, version));
+            } else {
+                extract_archive(artifact, stage);
+            }
+            static_cast<void>(validate_component_payload(stage, id, version));
+            staged_roots.emplace(id, stage);
+            staged_versions.emplace(id, version);
+        }
+
+        std::map<std::string, json> affected_startup_receipts;
+        for (const auto& receipt_entry : fs::directory_iterator(receipts_root)) {
+            if (!receipt_entry.is_regular_file() || receipt_entry.is_symlink() ||
+                receipt_entry.path().extension() != ".json") {
+                continue;
+            }
+            const json receipt = read_json(receipt_entry.path());
+            if (!receipt.contains("component_id") ||
+                !receipt.at("component_id").is_string()) {
+                continue;
+            }
+            const std::string id = receipt.at("component_id").get<std::string>();
+            const bool startup_installed =
+                receipt.contains("startup") && receipt.at("startup").is_object() &&
+                receipt.at("startup").value("installed", false);
+            bool affected = replaced_component_ids.contains(id);
+            for (const auto& dependency : receipt.value("dependencies", json::array())) {
+                if (dependency.is_string() &&
+                    replaced_component_ids.contains(dependency.get<std::string>())) {
+                    affected = true;
+                }
+            }
+            if (!startup_installed || !affected) continue;
+            if (!supports_startup_capability(receipt, "startup_uninstall")) {
+                throw std::runtime_error(
+                    "installed provider startup cannot be stopped before dependency replacement: " +
+                    id);
+            }
+            affected_startup_receipts.emplace(id, receipt);
+        }
+
+        std::vector<std::string> quiescence_order;
+        std::set<std::string> ordered_startup_components;
+        while (quiescence_order.size() < affected_startup_receipts.size()) {
+            bool selected = false;
+            for (const auto& [id, receipt] : affected_startup_receipts) {
+                if (ordered_startup_components.contains(id)) continue;
+                bool has_unordered_dependent = false;
+                for (const auto& [other_id, other_receipt] : affected_startup_receipts) {
+                    if (id == other_id || ordered_startup_components.contains(other_id)) continue;
+                    const json dependencies =
+                        other_receipt.value("dependencies", json::array());
+                    if (std::find(dependencies.begin(), dependencies.end(), id) !=
+                        dependencies.end()) {
+                        has_unordered_dependent = true;
+                        break;
+                    }
+                }
+                if (has_unordered_dependent) continue;
+                quiescence_order.push_back(id);
+                ordered_startup_components.insert(id);
+                selected = true;
+                break;
+            }
+            if (!selected) {
+                throw std::runtime_error(
+                    "startup dependency cycle prevents transaction-wide quiescence");
+            }
+        }
+
+        for (const std::string& id : quiescence_order) {
+            const json& previous = affected_startup_receipts.at(id);
+            const fs::path previous_root =
+                previous.at("active_root").get<std::string>();
+            const bool staged = staged_roots.contains(id);
+            const fs::path control_root = staged ? staged_roots.at(id) : previous_root;
+            const std::string control_version =
+                staged ? staged_versions.at(id)
+                       : previous.at("component_version").get<std::string>();
+            const json control_manifest =
+                validate_component_payload(control_root, id, control_version).manifest;
+            const bool startup_control_v2 =
+                control_manifest.contains("installer_integration") &&
+                control_manifest.at("installer_integration").contains("startup_control") &&
+                control_manifest.at("installer_integration")
+                        .at("startup_control")
+                        .value("schema", "") == "arena_provider_startup_control_v2";
+            const fs::path replacement_root = staged
+                                                  ? components_root / id / control_version
+                                                  : previous_root;
+            json transition{
+                {"component_id", id},
+                {"state", "transition_started"},
+                {"mode", startup_control_v2 ? "pre_replace" : "uninstall"},
+                {"previous_receipt", previous},
+                {"previous_root", previous_root.string()},
+                {"replacement_root", replacement_root.string()},
+                {"control_version", control_version},
+            };
+            if (staged) transition["staged_control_root"] = control_root.string();
+            journal["startup_quiescence"].push_back(std::move(transition));
+            write_json_atomic(journal_path, journal);
+            if (startup_control_v2) {
+                static_cast<void>(invoke_provider_startup(
+                    paths, previous, "pre_replace", true,
+                    staged ? control_root : fs::path{},
+                    staged ? control_version : std::string{}, previous_root,
+                    replacement_root));
+            } else {
+                static_cast<void>(
+                    invoke_provider_startup(paths, previous, "uninstall", true));
+            }
+            journal["startup_quiescence"].back()["state"] = "quiesced";
+            quiesced_startup_components.insert(id);
+            write_json_atomic(journal_path, journal);
+        }
+
         for (const auto& action : plan.at("actions")) {
             if (action.value("action", "install") == "keep") {
                 results.push_back({{"component_id", action.at("component_id")},
@@ -5673,18 +5812,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["actions"].push_back(
                 {{"component_id", id}, {"version", version}, {"state", "staging"}});
             write_json_atomic(journal_path, journal);
-            const fs::path artifact = acquire_artifact(action.at("artifact"), catalog_directory,
-                                                       paths, plan.value("offline", false));
-            const fs::path stage = staging_root / transaction_id / id;
-            std::error_code ignored;
-            fs::remove_all(stage, ignored);
-            if (action.at("artifact").value("type", "archive") == "file_set") {
-                static_cast<void>(stage_file_set(
-                    artifact, action.at("artifact"), catalog_directory, paths,
-                    plan.value("offline", false), stage, id, version));
-            } else {
-                extract_archive(artifact, stage);
-            }
+            const fs::path stage = staged_roots.at(id);
             const ValidatedComponentPayload validated =
                 validate_component_payload(stage, id, version);
             const json& manifest = validated.manifest;
@@ -5702,44 +5830,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     previous_receipt->contains("startup") &&
                     previous_receipt->at("startup").is_object() &&
                     previous_receipt->at("startup").value("installed", false);
-                if (previous_startup_installed) {
-                    if (!supports_startup_capability(*previous_receipt,
-                                                     "startup_uninstall")) {
-                        throw std::runtime_error(
-                            "installed provider startup cannot be stopped before replacement: " +
-                            id);
-                    }
-                    journal["actions"].back()["previous_startup_receipt"] =
-                        *previous_receipt;
-                    journal["actions"].back()["previous_startup_transition_started"] = true;
-                    write_json_atomic(journal_path, journal);
-                    const bool staged_pre_replace =
-                        manifest.contains("installer_integration") &&
-                        manifest.at("installer_integration").contains("startup_control") &&
-                        manifest.at("installer_integration")
-                                .at("startup_control")
-                                .value("schema", "") ==
-                            "arena_provider_startup_control_v2";
-                    if (staged_pre_replace) {
-                        static_cast<void>(invoke_provider_startup(
-                            paths, *previous_receipt, "pre_replace", true, stage,
-                            version,
-                            previous_receipt->at("active_root").get<std::string>(),
-                            target));
-                        journal["actions"].back()["previous_startup_control"] =
-                            "staged_pre_replace";
-                        journal["actions"].back()["staged_startup_control_root"] =
-                            stage.string();
-                        journal["actions"].back()["staged_startup_control_version"] =
-                            version;
-                    } else {
-                        static_cast<void>(invoke_provider_startup(
-                            paths, *previous_receipt, "uninstall", true));
-                        journal["actions"].back()["previous_startup_control"] =
-                            "installed_uninstall";
-                    }
-                    journal["actions"].back()["previous_startup_uninstalled"] = true;
-                    write_json_atomic(journal_path, journal);
+                if (previous_startup_installed &&
+                    !quiesced_startup_components.contains(id)) {
+                    throw std::runtime_error(
+                        "installed provider startup escaped transaction-wide quiescence: " +
+                        id);
                 }
             }
 
@@ -5946,16 +6041,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             const bool credential_gated_startup =
                 validated.service_contract.has_value() &&
                 validated.service_contract->value("credential_gated_startup", false);
-            if (journal["actions"].back().value("previous_startup_control", "") ==
-                "staged_pre_replace") {
-                const json startup = invoke_provider_startup(
-                    paths, receipt, "post_replace", false, {}, {},
-                    previous_receipt->at("active_root").get<std::string>(), target);
-                journal["actions"].back()["startup_replacement_completed"] = true;
-                write_json_atomic(journal_path, journal);
-                receipt["startup"] = startup;
-                write_json_atomic(receipt_path, receipt);
-            } else if (action.value("enabled", true) && !credential_gated_startup &&
+            if (!quiesced_startup_components.contains(id) &&
+                action.value("enabled", true) && !credential_gated_startup &&
                 supports_startup_capability(receipt, "startup_install")) {
                 const json startup = invoke_provider_startup(paths, receipt, "install");
                 journal["actions"].back()["startup_installed"] = true;
@@ -5966,6 +6053,38 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["actions"].back()["state"] = "committed";
             write_json_atomic(journal_path, journal);
             results.push_back(receipt);
+        }
+        for (std::size_t offset = 0;
+             offset < journal.at("startup_quiescence").size(); ++offset) {
+            const std::size_t index =
+                journal.at("startup_quiescence").size() - 1 - offset;
+            json& transition = journal["startup_quiescence"][index];
+            if (transition.value("state", "") != "quiesced") continue;
+            const std::string id = transition.at("component_id").get<std::string>();
+            const fs::path receipt_path = receipts_root / (id + ".json");
+            if (!fs::is_regular_file(receipt_path)) {
+                throw std::runtime_error(
+                    "quiesced provider receipt is unavailable for restart: " + id);
+            }
+            json receipt = read_json(receipt_path);
+            transition["state"] = "resume_started";
+            write_json_atomic(journal_path, journal);
+            json startup;
+            if (transition.at("mode") == "pre_replace") {
+                startup = invoke_provider_startup(
+                    paths, receipt, "post_replace", true, {}, {},
+                    transition.at("previous_root").get<std::string>(),
+                    receipt.at("active_root").get<std::string>());
+            } else {
+                startup = invoke_provider_startup(paths, receipt, "install", true);
+            }
+            receipt["startup"] = startup;
+            write_json_atomic(receipt_path, receipt);
+            transition["state"] = "resumed";
+            write_json_atomic(journal_path, journal);
+            for (auto& result : results) {
+                if (result.value("component_id", "") == id) result["startup"] = startup;
+            }
         }
         json refreshed_locator_consumers = json::object();
         for (const std::string& kind : migrated_locator_kinds) {
@@ -6069,6 +6188,52 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 }
                 startup_rollback_failure += failure;
             };
+        for (auto& transition : journal["startup_quiescence"]) {
+            const std::string transition_state = transition.value("state", "");
+            const std::string id = transition.at("component_id").get<std::string>();
+            const bool restart_may_be_live = transition_state == "resumed" ||
+                                             transition_state == "resume_started";
+            const bool staged_v2 = transition.at("mode") == "pre_replace" &&
+                                   staged_roots.contains(id);
+            const fs::path replacement_root =
+                transition.at("replacement_root").get<std::string>();
+            const bool activated_staged_controller =
+                staged_v2 && !fs::exists(staged_roots.at(id)) &&
+                fs::exists(replacement_root);
+            if (!restart_may_be_live && !activated_staged_controller) continue;
+            try {
+                if (restart_may_be_live) {
+                    const fs::path receipt_path = receipts_root / (id + ".json");
+                    const json current = read_json(receipt_path);
+                    if (transition.at("mode") == "pre_replace") {
+                        const fs::path current_root =
+                            current.at("active_root").get<std::string>();
+                        static_cast<void>(invoke_provider_startup(
+                            paths, current, "pre_replace", true, {}, {}, current_root,
+                            transition.at("previous_root").get<std::string>()));
+                    } else {
+                        static_cast<void>(
+                            invoke_provider_startup(paths, current, "uninstall", true));
+                    }
+                }
+                if (activated_staged_controller) {
+                    const fs::path current_root =
+                        transition.at("replacement_root").get<std::string>();
+                    const fs::path rollback_control =
+                        current_root.string() + ".startup-rollback-" + transaction_id;
+                    rename_managed_component_tree_with_retry(
+                        current_root, rollback_control, id);
+                    transition["rollback_control_root"] =
+                        rollback_control.string();
+                }
+                transition["state"] = "rollback_quiesced";
+                write_json_atomic(journal_path, journal);
+            } catch (const std::exception& startup_error) {
+                transition["rollback_prepare_error"] = startup_error.what();
+                transition["state"] = "rollback_failed";
+                append_startup_rollback_failure(startup_error.what());
+            }
+        }
         const json consumer_refresh_writes =
             journal.value("consumer_refresh_writes", json::array());
         for (auto write = consumer_refresh_writes.rbegin();
@@ -6352,6 +6517,53 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     (*action)["previous_startup_restore_error"] = startup_error.what();
                     (*action)["state"] = "rollback_failed";
                 }
+            }
+        }
+        for (std::size_t offset = 0;
+             offset < journal.at("startup_quiescence").size(); ++offset) {
+            const std::size_t index =
+                journal.at("startup_quiescence").size() - 1 - offset;
+            json& transition = journal["startup_quiescence"][index];
+            if (transition.value("state", "") == "restored") continue;
+            try {
+                const json& previous = transition.at("previous_receipt");
+                const std::string id = transition.at("component_id").get<std::string>();
+                json startup;
+                if (transition.at("mode") == "pre_replace") {
+                    fs::path control_root;
+                    if (transition.contains("rollback_control_root")) {
+                        control_root = transition.at("rollback_control_root")
+                                           .get<std::string>();
+                    } else if (transition.contains("staged_control_root")) {
+                        control_root = transition.at("staged_control_root")
+                                           .get<std::string>();
+                    }
+                    const fs::path restored_root =
+                        previous.at("active_root").get<std::string>();
+                    startup = invoke_provider_startup(
+                        paths, previous, "post_replace", true, control_root,
+                        control_root.empty()
+                            ? std::string{}
+                            : transition.at("control_version").get<std::string>(),
+                        restored_root, restored_root);
+                } else {
+                    startup = invoke_provider_startup(paths, previous, "install", true);
+                }
+                json restored_receipt = previous;
+                restored_receipt["startup"] = startup;
+                write_json_atomic(receipts_root / (id + ".json"), restored_receipt);
+                transition["state"] = "restored";
+                if (transition.contains("rollback_control_root")) {
+                    fs::remove_all(
+                        transition.at("rollback_control_root").get<std::string>(),
+                        rollback_error);
+                    rollback_error.clear();
+                }
+                write_json_atomic(journal_path, journal);
+            } catch (const std::exception& startup_error) {
+                transition["restore_error"] = startup_error.what();
+                transition["state"] = "rollback_failed";
+                append_startup_rollback_failure(startup_error.what());
             }
         }
         fs::remove_all(staging_root / transaction_id, rollback_error);

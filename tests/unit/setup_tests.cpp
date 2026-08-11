@@ -2334,6 +2334,31 @@ TEST_CASE("staged startup control v2 preserves startup across same-version repla
                   std::ios::binary | std::ios::trunc)
         << previous_manifest.dump(2);
 
+    const fs::path runtime_package_root = root / "post-replace-runtime-package";
+    const fs::path runtime_relative =
+        fs::path("bin") /
+        (std::string("post-replace-only-runtime") +
+         fs::path(ARENA_MOCK_SERVICE_PATH).extension().string());
+    const fs::path runtime_executable = runtime_package_root / runtime_relative;
+    fs::create_directories(runtime_executable.parent_path());
+    fs::copy_file(ARENA_MOCK_SERVICE_PATH, runtime_executable);
+    std::ofstream(runtime_package_root / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", "runtime.host"},
+               {"component_version", "1.0.0"},
+               {"entrypoints", {{"execute", runtime_relative.generic_string()}}},
+               {"dependencies", json::array()},
+               {"files",
+                json::array({{{"path", runtime_relative.generic_string()},
+                              {"size_bytes", fs::file_size(runtime_executable)},
+                              {"sha256", sha256_path(runtime_executable)}}})},
+           }
+               .dump(2);
+    const fs::path runtime_archive = root / "runtime.host-1.0.0.tar.gz";
+    write_component_archive(runtime_package_root, runtime_archive);
+
     const fs::path package_root = root / "staged-provider-package";
     fs::create_directories(package_root);
     fs::copy_file(previous_root / "installer-integration.fixture",
@@ -2364,6 +2389,16 @@ TEST_CASE("staged startup control v2 preserves startup across same-version repla
         {"catalog_directory", root.string()},
         {"actions",
          json::array({{{"action", "install"},
+                       {"component_id", "runtime.host"},
+                       {"version", "1.0.0"},
+                       {"dependencies", json::array()},
+                       {"enabled", true},
+                       {"artifact",
+                        {{"type", "archive"},
+                         {"source", runtime_archive.filename().string()},
+                         {"sha256", sha256_path(runtime_archive)},
+                         {"size_bytes", fs::file_size(runtime_archive)}}}},
+                      {{"action", "install"},
                        {"component_id", component_id},
                        {"version", "1.0.0"},
                        {"dependencies", json::array({"runtime.host"})},
@@ -2384,6 +2419,14 @@ TEST_CASE("staged startup control v2 preserves startup across same-version repla
             true);
     REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("active") ==
             true);
+    const json transaction = json::parse(std::ifstream(
+        paths.data_root / "transactions" /
+        (applied.at("transaction_id").get<std::string>() + ".json")));
+    REQUIRE(transaction.at("startup_quiescence").size() == 1);
+    REQUIRE(transaction.at("startup_quiescence").at(0).at("component_id") ==
+            component_id);
+    REQUIRE(transaction.at("startup_quiescence").at(0).at("state") == "resumed");
+    REQUIRE(transaction.at("actions").at(0).at("component_id") == "runtime.host");
     REQUIRE(fs::is_directory(paths.install_root / "components" / component_id /
                              "1.0.0"));
     fs::remove_all(root);
