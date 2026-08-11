@@ -1534,6 +1534,11 @@ vm_mounts:
         timestamps are not identity. If more than one new matching run appears,
         the wrapper refuses ambiguity and preserves the runner rather than
         deleting files that an unowned active job may be using.
+      - After exact run-id discovery, the local ephemeral runner process and
+        bounded log sizes are the active-job lifecycle signals. GitHub is not
+        polled while that process is running. After it exits, transient final-
+        status read failures remain non-terminal until the overall deadline;
+        they never trigger cleanup beneath a running action.
       - Runner and workflow output is redirected to an ignored bounded local
         log directory; conversational or pull-request evidence contains only
         status, paths, sizes, counts, and digests.

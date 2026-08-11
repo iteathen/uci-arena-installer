@@ -205,4 +205,6 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /-not \(\$priorRunIds -contains \[string\]\$_\.databaseId\)/u);
   assert.doesNotMatch(source, /dispatchTime\.AddSeconds/u);
   assert.match(source, /\[void\]\$runnerProcess\.WaitForExit/u);
+  assert.match(source, /elseif \(\$runnerProcess\.HasExited\)[\s\S]*?'run', 'view'/u);
+  assert.match(source, /lastMonitorFailure[\s\S]*?Start-Sleep -Seconds 10/u);
 });
