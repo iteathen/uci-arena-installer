@@ -1523,6 +1523,12 @@ vm_mounts:
         removed after exactly one bounded workflow attempt. Registration tokens
         are obtained just in time, suppressed from output, and never written to
         tracked files or retained logs.
+      - Read-only GitHub run discovery and monitoring retry transient CLI/API
+        failures three times without ending the runner job. On a terminal local
+        wrapper failure, cancellation is requested and both workflow and runner
+        process must drain before the work root is removed. If drain cannot be
+        proved within five minutes, the root is preserved and reported rather
+        than deleted beneath an active action.
       - Runner and workflow output is redirected to an ignored bounded local
         log directory; conversational or pull-request evidence contains only
         status, paths, sizes, counts, and digests.

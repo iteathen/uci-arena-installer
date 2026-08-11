@@ -197,4 +197,8 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   );
   assert.match(source, /\$vswhereCandidates\s*=\s*@\(@\([\s\S]*?Where-Object[\s\S]*?\}\)/u);
   assert.match(source, /\$vswhereCandidates\.Count\s*-lt\s*1/u);
+  assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
+  assert.match(source, /drainDeadline[\s\S]*?AddMinutes\(5\)/u);
+  assert.match(source, /\$cleanupAuthorized\s*=\s*\$false/u);
+  assert.match(source, /preserving ephemeral runner root for the active job/u);
 });
