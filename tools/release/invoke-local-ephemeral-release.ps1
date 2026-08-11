@@ -87,11 +87,25 @@ function Ensure-EmptyCandidateRelease {
     $release = Get-CandidateRelease -Repository $Repository -Tag $Tag
     $state = 'verified'
     if (-not $release) {
-        & gh release create $Tag --repo $Repository --target $Head --prerelease `
-            --title "$ComponentId $Version $Target" `
-            --notes 'Private immutable component candidate; verified workflow assets only.' *> $null
-        if ($LASTEXITCODE -eq 0) { $state = 'created' }
-        $release = Get-CandidateRelease -Repository $Repository -Tag $Tag
+        try {
+            $created = Invoke-GitHubJson -Arguments @(
+                'api', '--method', 'POST', "repos/$Repository/releases",
+                '-f', "tag_name=$Tag", '-f', "target_commitish=$Head",
+                '-f', "name=$ComponentId $Version $Target",
+                '-f', 'body=Private immutable component candidate; verified workflow assets only.',
+                '-F', 'draft=false', '-F', 'prerelease=true', '-f', 'make_latest=false'
+            ) -FailureMessage 'Could not create the empty exact-head candidate prerelease.'
+            $release = [pscustomobject]@{
+                tagName = $created.tag_name
+                isDraft = $created.draft
+                isPrerelease = $created.prerelease
+                targetCommitish = $created.target_commitish
+                assets = @($created.assets)
+            }
+            $state = 'created'
+        } catch {
+            $release = Get-CandidateRelease -Repository $Repository -Tag $Tag
+        }
         if (-not $release) { throw 'Candidate prerelease could not be created or verified.' }
     }
     if ($release.tagName -ne $Tag) { throw 'Candidate prerelease tag changed unexpectedly.' }
