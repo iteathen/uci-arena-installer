@@ -127,7 +127,17 @@ export function assembleSuiteUpdatePackage({
     });
     const catalogPath = path.join(releaseRoot, "catalog.json");
     writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
-    for (const candidate of candidates) {
+    const closureSet = new Set(closure);
+    const packageCandidates = candidates.filter(
+      (candidate) => closureSet.has(candidate.lockRow.component_id),
+    );
+    const packagedIds = packageCandidates.map(
+      (candidate) => candidate.lockRow.component_id,
+    ).sort();
+    if (JSON.stringify(packagedIds) !== JSON.stringify(closure)) {
+      throw new Error("update package candidate closure is incomplete or ambiguous");
+    }
+    for (const candidate of packageCandidates) {
       copyFileSync(
         candidate.artifactPath,
         path.join(payloadRoot, candidate.lockRow.artifact_name),
