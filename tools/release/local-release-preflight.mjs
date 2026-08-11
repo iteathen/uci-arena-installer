@@ -27,6 +27,40 @@ export function validateReleaseIntegration({
   return { authority: "integrated_main", integrated_main: true };
 }
 
+export function validateRunnerPathBudget({ runnerWorkRoot, repositorySlug }) {
+  if (typeof runnerWorkRoot !== "string" || !runnerWorkRoot.trim()) {
+    throw new Error("runner work root is unavailable");
+  }
+  const repositoryName = /^(?:[A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/u.exec(
+    repositorySlug ?? "",
+  )?.[1];
+  if (!repositoryName) throw new Error("runner repository slug is invalid");
+  const resolved = path.resolve(runnerWorkRoot);
+  if (resolved === path.parse(resolved).root) {
+    throw new Error("runner work root cannot be a filesystem root");
+  }
+  const projected = path.join(
+    resolved,
+    "0".repeat(32),
+    "_work",
+    repositoryName,
+    repositoryName,
+    "native",
+    "build-repro",
+    "CMakeFiles",
+    "CMakeScratch",
+    "TryCompile-abcdefgh",
+    "cmTC_abcdefgh.dir",
+    "Debug",
+    "cmTC_abcdefgh.tlog",
+    "link-cvtres.write.1.tlog",
+  );
+  if (projected.length > 240) {
+    throw new Error(`projected release build path exceeds the 240-character budget (${projected.length})`);
+  }
+  return { runner_work_root: resolved, projected_path_characters: projected.length };
+}
+
 function readJson(filename, label) {
   try {
     return JSON.parse(readFileSync(filename, "utf8"));
@@ -111,6 +145,8 @@ export function validateReleaseSource({
   localHead,
   remoteMainHead,
   allowUnmergedDiagnostic = false,
+  runnerWorkRoot,
+  repositorySlug,
 }) {
   if (!SEMVER.test(expectedVersion ?? "")) throw new Error("expected version is invalid");
   const { versions, componentIds } = collectReleaseVersions(repositoryRoot);
@@ -169,6 +205,7 @@ export function validateReleaseSource({
     remoteMainHead,
     allowUnmergedDiagnostic,
   });
+  const pathBudget = validateRunnerPathBudget({ runnerWorkRoot, repositorySlug });
   return {
     schema: "arena_local_release_preflight_v1",
     version: expectedVersion,
@@ -177,6 +214,7 @@ export function validateReleaseSource({
     runner_labels: requiredRunnerLabels.length,
     workflow: path.relative(repositoryRoot, workflowPath).split(path.sep).join("/"),
     ...integration,
+    ...pathBudget,
   };
 }
 
@@ -202,6 +240,8 @@ function parse(argv) {
     localHead: values.head,
     remoteMainHead: values["remote-main-head"],
     allowUnmergedDiagnostic: values["allow-unmerged-diagnostic"] === "true",
+    runnerWorkRoot: values["runner-work-root"],
+    repositorySlug: values.repository,
   };
 }
 
