@@ -236,6 +236,11 @@
           "maxItems": 1
         },
         "workspace_name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "workspace_placement": {
+          "type": "string",
+          "enum": ["workspace_root", "product_data"],
+          "default": "workspace_root"
+        },
         "configure_when_disabled": {"type": "boolean"},
         "dependency_bindings": {
           "type": "array",

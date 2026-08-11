@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <archive.h>
+#include <archive_entry.h>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cctype>
@@ -89,6 +91,42 @@ std::string sha256_path(const fs::path& path) {
     const std::string contents{
         std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     return sha256_text(contents);
+}
+
+void write_component_archive(const fs::path& source_root,
+                             const fs::path& archive_path) {
+    archive* writer = archive_write_new();
+    REQUIRE(writer != nullptr);
+    REQUIRE(archive_write_add_filter_gzip(writer) == ARCHIVE_OK);
+    REQUIRE(archive_write_set_format_pax_restricted(writer) == ARCHIVE_OK);
+    REQUIRE(archive_write_open_filename(writer, archive_path.string().c_str()) ==
+            ARCHIVE_OK);
+    for (const auto& source : fs::recursive_directory_iterator(source_root)) {
+        if (!source.is_regular_file()) continue;
+        const fs::path relative = source.path().lexically_relative(source_root);
+        archive_entry* entry = archive_entry_new();
+        REQUIRE(entry != nullptr);
+        archive_entry_set_pathname(entry, relative.generic_string().c_str());
+        archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_perm(entry, 0644);
+        archive_entry_set_size(
+            entry, static_cast<la_int64_t>(fs::file_size(source.path())));
+        REQUIRE(archive_write_header(writer, entry) == ARCHIVE_OK);
+        std::ifstream input(source.path(), std::ios::binary);
+        std::array<char, 4096> buffer{};
+        while (input) {
+            input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            const std::streamsize count = input.gcount();
+            if (count > 0) {
+                REQUIRE(archive_write_data(writer, buffer.data(),
+                                           static_cast<std::size_t>(count)) ==
+                        static_cast<la_ssize_t>(count));
+            }
+        }
+        archive_entry_free(entry);
+    }
+    REQUIRE(archive_write_close(writer) == ARCHIVE_OK);
+    REQUIRE(archive_write_free(writer) == ARCHIVE_OK);
 }
 
 void write_mock_renderer_runtime(const SetupPaths& paths) {
@@ -1946,6 +1984,119 @@ TEST_CASE("provider locator source policy keeps managed receipts out of saved ov
                 .at("locators")
                 .at("selected") ==
             fs::absolute(operator_selected).lexically_normal().string());
+    fs::remove_all(root);
+}
+
+TEST_CASE("provider upgrade migrates its workspace and active locators into product data") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    constexpr std::string_view component_id = "replaceable.product-data.provider";
+    const std::string id(component_id);
+    const fs::path legacy_configuration = write_mock_renderer_consumer(
+        paths, id, "opening_book");
+    const fs::path legacy_workspace = legacy_configuration.parent_path();
+    const fs::path legacy_book = legacy_workspace / "published" / "live.book";
+    fs::create_directories(legacy_book.parent_path());
+    std::ofstream(legacy_book, std::ios::binary) << "provider-published-book";
+    static_cast<void>(
+        SetupEngine::import_path(paths, "opening_book", legacy_book, false));
+
+    const fs::path package_root = root / "provider-package";
+    fs::create_directories(package_root);
+    fs::copy_file(
+        paths.install_root / "components" / id / "1.0.0" /
+            "installer-integration.fixture",
+        package_root / "installer-integration.fixture");
+    json manifest = json::parse(std::ifstream(
+        paths.install_root / "components" / id / "1.0.0" /
+        "arena-component.json"));
+    manifest["component_version"] = "2.0.0";
+    manifest["installer_integration"]["workspace_placement"] = "product_data";
+    std::ofstream(package_root / "arena-component.json", std::ios::binary)
+        << manifest.dump(2);
+    const fs::path archive = root / "provider-2.0.0.tar.gz";
+    write_component_archive(package_root, archive);
+
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array({{{"action", "install"},
+                       {"component_id", id},
+                       {"version", "2.0.0"},
+                       {"dependencies", json::array({"runtime.host"})},
+                       {"enabled", false},
+                       {"artifact",
+                        {{"type", "archive"},
+                         {"source", archive.filename().string()},
+                         {"sha256", sha256_path(archive)},
+                         {"size_bytes", fs::file_size(archive)}}}}})},
+    };
+    const json applied =
+        SetupEngine::apply(json::object(), plan, paths, true, false);
+    INFO(applied.dump(2));
+    REQUIRE(applied.at("state") == "committed");
+
+    const fs::path product_workspace =
+        paths.data_root / "provider-data" / id;
+    const fs::path product_book = product_workspace / "published" / "live.book";
+    REQUIRE_FALSE(fs::exists(legacy_workspace));
+    REQUIRE(fs::is_regular_file(product_book));
+    REQUIRE(json::parse(std::ifstream(paths.data_root / "locators" /
+                                      "opening_book.json"))
+                .at("path") == fs::absolute(product_book).lexically_normal().string());
+    REQUIRE(json::parse(std::ifstream(product_workspace / "manager-config.json"))
+                .at("locators")
+                .at("selected") ==
+            fs::absolute(product_book).lexically_normal().string());
+    const json receipt = json::parse(std::ifstream(
+        paths.data_root / "receipts" / (id + ".json")));
+    REQUIRE(receipt.at("data_paths") == json::array({product_workspace.string()}));
+    REQUIRE(receipt.at("configuration_path") ==
+            (product_workspace / "manager-config.json").string());
+    REQUIRE(SetupEngine::verify(paths).at("ok") == true);
+
+    const fs::path failing_package_root = root / "provider-package-failing";
+    fs::create_directories(failing_package_root);
+    fs::copy_file(
+        paths.install_root / "components" / id / "2.0.0" /
+            "installer-integration.fixture",
+        failing_package_root / "installer-integration.fixture");
+    json failing_manifest = json::parse(std::ifstream(
+        paths.install_root / "components" / id / "2.0.0" /
+        "arena-component.json"));
+    failing_manifest["component_version"] = "3.0.0";
+    failing_manifest["installer_integration"]["workspace_placement"] =
+        "workspace_root";
+    failing_manifest["installer_integration"]["locator_bindings"][0]["kind"] =
+        "timing_profile";
+    failing_manifest["installer_integration"]["locator_bindings"][0]["required"] =
+        true;
+    std::ofstream(failing_package_root / "arena-component.json", std::ios::binary)
+        << failing_manifest.dump(2);
+    const fs::path failing_archive = root / "provider-3.0.0.tar.gz";
+    write_component_archive(failing_package_root, failing_archive);
+    json failing_plan = plan;
+    failing_plan["actions"][0]["version"] = "3.0.0";
+    failing_plan["actions"][0]["artifact"] = {
+        {"type", "archive"},
+        {"source", failing_archive.filename().string()},
+        {"sha256", sha256_path(failing_archive)},
+        {"size_bytes", fs::file_size(failing_archive)},
+    };
+    REQUIRE_THROWS(
+        SetupEngine::apply(json::object(), failing_plan, paths, true, false));
+    REQUIRE_FALSE(fs::exists(legacy_workspace));
+    REQUIRE(fs::is_regular_file(product_book));
+    REQUIRE(json::parse(std::ifstream(paths.data_root / "locators" /
+                                      "opening_book.json"))
+                .at("path") == fs::absolute(product_book).lexically_normal().string());
+    REQUIRE(json::parse(std::ifstream(
+                paths.data_root / "receipts" / (id + ".json")))
+                .at("component_version") == "2.0.0");
+    REQUIRE(SetupEngine::verify(paths).at("ok") == true);
     fs::remove_all(root);
 }
 

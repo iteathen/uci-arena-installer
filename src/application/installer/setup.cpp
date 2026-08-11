@@ -1153,8 +1153,7 @@ void validate_provider_installer_integration(const json& manifest,
         return;
     }
     const json& integration = manifest.at("installer_integration");
-    if (!integration.is_object() ||
-        (integration.size() != 9 && integration.size() != 10) ||
+    if (!integration.is_object() || integration.size() < 9 || integration.size() > 11 ||
         integration.value("schema", "") != "arena_provider_installer_integration_v1" ||
         integration.value("schema_version", 0) != 1 ||
         !integration.contains("entrypoint") ||
@@ -1165,6 +1164,8 @@ void validate_provider_installer_integration(const json& manifest,
         !integration.at("workspace_name").is_string() ||
         !valid_identifier(integration.at("workspace_name").get<std::string>()) ||
         integration.value("workspace_name", "") != manifest.value("workspace_name", "") ||
+        (integration.value("workspace_placement", "workspace_root") != "workspace_root" &&
+         integration.value("workspace_placement", "workspace_root") != "product_data") ||
         !integration.contains("configure_when_disabled") ||
         !integration.at("configure_when_disabled").is_boolean() ||
         !integration.contains("dependency_bindings") ||
@@ -1358,6 +1359,21 @@ void validate_provider_installer_integration(const json& manifest,
         !result.at("require_live_on_install").is_boolean()) {
         throw std::runtime_error("provider startup control values are invalid");
     }
+}
+
+fs::path provider_workspace(const SetupPaths& paths, const json& integration) {
+    const std::string workspace_name =
+        integration.at("workspace_name").get<std::string>();
+    const std::string placement =
+        integration.value("workspace_placement", "workspace_root");
+    const fs::path root = placement == "product_data"
+                              ? paths.data_root / "provider-data"
+                              : paths.workspace_root;
+    const fs::path workspace = normalized_absolute(root / workspace_name);
+    if (!within(root, workspace)) {
+        throw std::runtime_error("provider workspace escapes its declared placement");
+    }
+    return workspace;
 }
 
 void validate_component_discovery(const json& manifest,
@@ -2487,6 +2503,7 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
     std::vector<fs::path> bounded_roots{
         paths.install_root,
         paths.workspace_root,
+        paths.data_root / "provider-data",
         paths.knowledge_root,
     };
     bounded_roots.insert(bounded_roots.end(), extra_roots.begin(), extra_roots.end());
@@ -3848,7 +3865,11 @@ struct ImportWrite {
     json document;
 };
 
-json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) {
+json refresh_import_consumers(
+    const SetupPaths& paths, const std::string& kind,
+    const std::string& retained_transaction_id = {},
+    json* retained_writes = nullptr,
+    const std::function<void()>& checkpoint = {}) {
     const fs::path receipts_root = paths.data_root / "receipts";
     std::vector<ImportWrite> writes;
     std::set<std::string> refreshed_components;
@@ -3913,10 +3934,11 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
         }
         const fs::path configuration_path = normalized_absolute(configured);
         const fs::path workspace = configuration_path.parent_path();
-        if (!within(paths.workspace_root, configuration_path) ||
-            !within(paths.workspace_root, workspace)) {
+        const fs::path declared_workspace = provider_workspace(paths, integration);
+        if (workspace != declared_workspace ||
+            !within(declared_workspace, configuration_path)) {
             throw std::runtime_error(
-                "installed consumer configuration escapes the selected workspace");
+                "installed consumer configuration escapes its declared workspace");
         }
         const ProviderInstallResult generated = render_provider_installation(
             paths, validated.manifest, component_root, workspace,
@@ -3940,10 +3962,12 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
         fs::path path;
         fs::path backup;
         bool existed;
+        std::optional<std::size_t> retained_index;
     };
     std::vector<AppliedWrite> applied;
-    const std::string transaction_id =
-        std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    const std::string transaction_id = retained_transaction_id.empty()
+        ? std::to_string(std::chrono::system_clock::now().time_since_epoch().count())
+        : retained_transaction_id;
     try {
         for (const auto& write : writes) {
             if (contains_symbolic_link(write.path.parent_path()) ||
@@ -3959,11 +3983,26 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
             if (existed) {
                 fs::copy_file(write.path, backup, fs::copy_options::overwrite_existing);
             }
-            applied.push_back({write.path, backup, existed});
+            std::optional<std::size_t> retained_index;
+            if (retained_writes != nullptr) {
+                retained_index = retained_writes->size();
+                retained_writes->push_back({
+                    {"path", write.path.string()},
+                    {"backup", backup.string()},
+                    {"existed", existed},
+                    {"state", "prepared"},
+                });
+                if (checkpoint) checkpoint();
+            }
+            applied.push_back({write.path, backup, existed, retained_index});
             write_json_atomic(write.path, write.document);
             if (read_json(write.path) != write.document) {
                 throw std::runtime_error(
                     "generated import consumer configuration verification failed");
+            }
+            if (retained_index.has_value()) {
+                (*retained_writes)[*retained_index]["state"] = "written";
+                if (checkpoint) checkpoint();
             }
         }
     } catch (...) {
@@ -3978,14 +4017,20 @@ json refresh_import_consumers(const SetupPaths& paths, const std::string& kind) 
                 fs::remove(current->backup, ignored);
                 ignored.clear();
             }
+            if (current->retained_index.has_value()) {
+                (*retained_writes)[*current->retained_index]["state"] = "restored";
+            }
         }
+        if (checkpoint) checkpoint();
         throw;
     }
 
-    std::error_code ignored;
-    for (const auto& write : applied) {
-        fs::remove(write.backup, ignored);
-        ignored.clear();
+    if (retained_writes == nullptr) {
+        std::error_code ignored;
+        for (const auto& write : applied) {
+            fs::remove(write.backup, ignored);
+            ignored.clear();
+        }
     }
     json refreshed = json::array();
     for (const auto& component_id : refreshed_components) {
@@ -4039,6 +4084,116 @@ json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
     }
 }
 
+void migrate_provider_workspace(
+    const SetupPaths& paths, const json& previous_receipt,
+    const fs::path& destination, const std::string& transaction_id,
+    json& migration, const std::function<void()>& checkpoint) {
+    const json data_paths = previous_receipt.value("data_paths", json::array());
+    const std::string configured = previous_receipt.value("configuration_path", "");
+    if (!data_paths.is_array() || data_paths.size() != 1 ||
+        !data_paths.at(0).is_string() || configured.empty()) {
+        throw std::runtime_error(
+            "provider workspace migration requires one exact receipt-owned data path");
+    }
+    const fs::path source =
+        normalized_absolute(data_paths.at(0).get<std::string>());
+    const fs::path configuration = normalized_absolute(configured);
+    if (source == destination) {
+        migration["state"] = "not_required";
+        checkpoint();
+        return;
+    }
+    if (configuration.parent_path() != source || !fs::is_directory(source) ||
+        contains_symbolic_link(source)) {
+        throw std::runtime_error(
+            "provider workspace migration source does not match its validated receipt");
+    }
+    for (const auto& entry : fs::recursive_directory_iterator(source)) {
+        if (entry.is_symlink()) {
+            throw std::runtime_error(
+                "provider workspace migration rejects symbolic-link content");
+        }
+    }
+    if (fs::exists(destination)) {
+        if (!fs::is_directory(destination) || !fs::is_empty(destination)) {
+            throw std::runtime_error(
+                "provider workspace migration destination is already occupied");
+        }
+        fs::remove(destination);
+    }
+    fs::create_directories(destination.parent_path());
+    migration = {
+        {"source", source.string()},
+        {"destination", destination.string()},
+        {"state", "prepared"},
+        {"locator_writes", json::array()},
+    };
+    checkpoint();
+    std::error_code move_error;
+    fs::rename(source, destination, move_error);
+    if (move_error) {
+        throw std::runtime_error(
+            "provider workspace migration requires an atomic same-volume move: " +
+            move_error.message());
+    }
+    migration["state"] = "moved";
+    checkpoint();
+
+    const fs::path locators_root = paths.data_root / "locators";
+    if (!fs::is_directory(locators_root)) return;
+    std::vector<fs::path> locator_paths;
+    for (const auto& entry : fs::directory_iterator(locators_root)) {
+        if (entry.is_regular_file() && !entry.is_symlink() &&
+            entry.path().extension() == ".json" &&
+            entry.path().filename().string().find(".rollback-") == std::string::npos) {
+            locator_paths.push_back(entry.path());
+        }
+    }
+    if (locator_paths.size() > 64) {
+        throw std::runtime_error("saved locator inventory exceeds its bounded limit");
+    }
+    std::ranges::sort(locator_paths);
+    for (const fs::path& locator_path : locator_paths) {
+        json locator = read_json(locator_path);
+        const std::string kind = locator.value("kind", "");
+        const std::string selected = locator.value("path", "");
+        if (locator.value("schema", "") != "arena_saved_locator_v1" ||
+            locator.value("schema_version", 0) != 1 || !valid_identifier(kind) ||
+            selected.empty()) {
+            continue;
+        }
+        const fs::path selected_path = normalized_absolute(selected);
+        if (!within(source, selected_path)) continue;
+        const fs::path relative = selected_path.lexically_relative(source);
+        const fs::path rebased = normalized_absolute(destination / relative);
+        if (!within(destination, rebased) || contains_symbolic_link(rebased)) {
+            throw std::runtime_error(
+                "rebased provider locator escapes its migrated workspace");
+        }
+        const fs::path backup = locator_path.string() +
+            ".workspace-rollback-" + transaction_id;
+        fs::copy_file(locator_path, backup, fs::copy_options::overwrite_existing);
+        const std::size_t row = migration["locator_writes"].size();
+        migration["locator_writes"].push_back({
+            {"kind", kind},
+            {"path", locator_path.string()},
+            {"backup", backup.string()},
+            {"previous_path", selected_path.string()},
+            {"rebased_path", rebased.string()},
+            {"state", "prepared"},
+        });
+        checkpoint();
+        locator["path"] = rebased.string();
+        locator["validation"] = validate_import_locator(kind, rebased);
+        locator["saved_at"] = current_utc_iso();
+        write_json_atomic(locator_path, locator);
+        migration["locator_writes"][row]["state"] = "rebased";
+        checkpoint();
+    }
+    migration["state"] = "rebased";
+    checkpoint();
+}
+
 bool supports_startup_capability(const json& receipt, const std::string_view capability) {
     if (!receipt.contains("active_root") || !receipt.at("active_root").is_string()) {
         return false;
@@ -4078,10 +4233,16 @@ ProviderWorkspaceInvocation validated_provider_workspace(
         trusted_existing_receipt_workspace && receipt.contains("startup") &&
         receipt.at("startup").is_object() &&
         receipt.at("startup").value("installed", false);
-    if (!within(paths.workspace_root, workspace) && !trusted_receipt_workspace) {
+    const json manifest =
+        validate_component_payload(
+            receipt.at("active_root").get<std::string>(), component_id,
+            receipt.at("component_version").get<std::string>())
+            .manifest;
+    const fs::path declared_workspace =
+        provider_workspace(paths, manifest.at("installer_integration"));
+    if (workspace != declared_workspace && !trusted_receipt_workspace) {
         throw std::runtime_error(
-            "startup-capable component workspace is outside the selected workspace "
-            "root");
+            "startup-capable component workspace differs from its declared placement");
     }
     const fs::path workspace_relative = fs::path(
         workspace_argument.at("relative_path").get<std::string>()).lexically_normal();
@@ -5421,6 +5582,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     };
     write_json_atomic(journal_path, journal);
     json results = json::array();
+    std::set<std::string> migrated_locator_kinds;
+    journal["consumer_refresh_writes"] = json::array();
     json superseded_component_cleanup{
         {"schema", "arena_superseded_component_cleanup_v1"},
         {"roots", json::array()}};
@@ -5439,6 +5602,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 throw std::runtime_error("plan contains an unsafe component identity");
             }
             const fs::path receipt_path = receipts_root / (id + ".json");
+            std::optional<json> previous_receipt;
             journal["actions"].push_back(
                 {{"component_id", id}, {"version", version}, {"state", "staging"}});
             write_json_atomic(journal_path, journal);
@@ -5459,24 +5623,24 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             const json& manifest = validated.manifest;
 
             if (fs::is_regular_file(receipt_path)) {
-                const json previous_receipt = read_json(receipt_path);
+                previous_receipt = read_json(receipt_path);
                 const bool previous_startup_installed =
-                    previous_receipt.contains("startup") &&
-                    previous_receipt.at("startup").is_object() &&
-                    previous_receipt.at("startup").value("installed", false);
+                    previous_receipt->contains("startup") &&
+                    previous_receipt->at("startup").is_object() &&
+                    previous_receipt->at("startup").value("installed", false);
                 if (previous_startup_installed) {
-                    if (!supports_startup_capability(previous_receipt,
+                    if (!supports_startup_capability(*previous_receipt,
                                                      "startup_uninstall")) {
                         throw std::runtime_error(
                             "installed provider startup cannot be stopped before replacement: " +
                             id);
                     }
                     journal["actions"].back()["previous_startup_receipt"] =
-                        previous_receipt;
+                        *previous_receipt;
                     journal["actions"].back()["previous_startup_transition_started"] = true;
                     write_json_atomic(journal_path, journal);
                     static_cast<void>(invoke_provider_startup(
-                        paths, previous_receipt, "uninstall", true));
+                        paths, *previous_receipt, "uninstall", true));
                     journal["actions"].back()["previous_startup_uninstalled"] = true;
                     write_json_atomic(journal_path, journal);
                 }
@@ -5560,9 +5724,28 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             if (validated.manifest.contains("installer_integration")) {
                 const json& integration =
                     validated.manifest.at("installer_integration");
-                const std::string workspace_name =
-                    integration.at("workspace_name").get<std::string>();
-                const fs::path workspace = paths.workspace_root / workspace_name;
+                const fs::path workspace = provider_workspace(paths, integration);
+                if (previous_receipt.has_value()) {
+                    const json previous_paths =
+                        previous_receipt->value("data_paths", json::array());
+                    if (previous_paths.is_array() && previous_paths.size() == 1 &&
+                        previous_paths.at(0).is_string() &&
+                        normalized_absolute(
+                            previous_paths.at(0).get<std::string>()) != workspace) {
+                        json& migration =
+                            journal["actions"].back()["workspace_migration"];
+                        migration = {{"state", "planning"}};
+                        write_json_atomic(journal_path, journal);
+                        migrate_provider_workspace(
+                            paths, *previous_receipt, workspace, transaction_id,
+                            migration, [&]() { write_json_atomic(journal_path, journal); });
+                        for (const auto& locator :
+                             migration.value("locator_writes", json::array())) {
+                            migrated_locator_kinds.insert(
+                                locator.at("kind").get<std::string>());
+                        }
+                    }
+                }
                 const bool enabled = action.value("enabled", true);
                 if (enabled ||
                     integration.at("configure_when_disabled").get<bool>()) {
@@ -5684,6 +5867,15 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             write_json_atomic(journal_path, journal);
             results.push_back(receipt);
         }
+        json refreshed_locator_consumers = json::object();
+        for (const std::string& kind : migrated_locator_kinds) {
+            refreshed_locator_consumers[kind] = refresh_import_consumers(
+                paths, kind, transaction_id + "-" + kind,
+                &journal["consumer_refresh_writes"],
+                [&]() { write_json_atomic(journal_path, journal); });
+            journal["refreshed_locator_consumers"] = refreshed_locator_consumers;
+            write_json_atomic(journal_path, journal);
+        }
         if (paths.restart_manager_service) {
 #ifdef _WIN32
             constexpr const char* manager_service = "UCIArenaManager";
@@ -5712,6 +5904,14 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             write_json_atomic(journal_path, journal);
         }
         std::error_code ignored;
+        for (const auto& write :
+             journal.value("consumer_refresh_writes", json::array())) {
+            const std::string backup = write.value("backup", "");
+            if (!backup.empty()) {
+                fs::remove(backup, ignored);
+                ignored.clear();
+            }
+        }
         for (const auto& action : journal.at("actions")) {
             if (action.contains("rollback_path")) {
                 fs::remove_all(action.at("rollback_path").get<std::string>(), ignored);
@@ -5743,6 +5943,17 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     ignored.clear();
                 }
             }
+            if (action.contains("workspace_migration")) {
+                for (const auto& locator :
+                     action.at("workspace_migration")
+                         .value("locator_writes", json::array())) {
+                    const std::string backup = locator.value("backup", "");
+                    if (!backup.empty()) {
+                        fs::remove(backup, ignored);
+                        ignored.clear();
+                    }
+                }
+            }
         }
         fs::remove_all(staging_root / transaction_id, ignored);
     } catch (const std::exception& error) {
@@ -5750,6 +5961,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         std::string startup_rollback_failure;
         std::string knowledge_rollback_failure;
         std::string component_rollback_failure;
+        std::string workspace_rollback_failure;
         const auto append_startup_rollback_failure =
             [&startup_rollback_failure](const std::string& failure) {
                 if (!startup_rollback_failure.empty()) {
@@ -5757,6 +5969,29 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 }
                 startup_rollback_failure += failure;
             };
+        const json consumer_refresh_writes =
+            journal.value("consumer_refresh_writes", json::array());
+        for (auto write = consumer_refresh_writes.rbegin();
+             write != consumer_refresh_writes.rend(); ++write) {
+            if (write->value("state", "") == "restored") continue;
+            const fs::path path = write->at("path").get<std::string>();
+            const fs::path backup = write->at("backup").get<std::string>();
+            fs::remove(path, rollback_error);
+            rollback_error.clear();
+            if (write->value("existed", false) && fs::is_regular_file(backup)) {
+                fs::rename(backup, path, rollback_error);
+                if (rollback_error) {
+                    workspace_rollback_failure +=
+                        (workspace_rollback_failure.empty() ? "" : "; ") +
+                        std::string("cannot restore refreshed consumer ") + path.string() +
+                        ": " + rollback_error.message();
+                    rollback_error.clear();
+                }
+            } else {
+                fs::remove(backup, rollback_error);
+                rollback_error.clear();
+            }
+        }
         for (auto action = journal["actions"].rbegin(); action != journal["actions"].rend();
              ++action) {
             const std::string state = action->value("state", "staging");
@@ -5908,6 +6143,46 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     }
                 }
             }
+            if (action->contains("workspace_migration")) {
+                const json& migration = action->at("workspace_migration");
+                const json locator_writes =
+                    migration.value("locator_writes", json::array());
+                for (auto locator = locator_writes.rbegin();
+                     locator != locator_writes.rend(); ++locator) {
+                    const fs::path path = locator->at("path").get<std::string>();
+                    const fs::path backup = locator->at("backup").get<std::string>();
+                    fs::remove(path, rollback_error);
+                    rollback_error.clear();
+                    if (fs::is_regular_file(backup)) {
+                        fs::rename(backup, path, rollback_error);
+                    }
+                    if (rollback_error) {
+                        workspace_rollback_failure +=
+                            (workspace_rollback_failure.empty() ? "" : "; ") +
+                            std::string("cannot restore migrated locator ") + path.string() +
+                            ": " + rollback_error.message();
+                        rollback_error.clear();
+                    }
+                }
+                const std::string source_value = migration.value("source", "");
+                const std::string destination_value =
+                    migration.value("destination", "");
+                if (!source_value.empty() && !destination_value.empty()) {
+                    const fs::path source = source_value;
+                    const fs::path destination = destination_value;
+                    if (!fs::exists(source) && fs::exists(destination)) {
+                        fs::create_directories(source.parent_path());
+                        fs::rename(destination, source, rollback_error);
+                        if (rollback_error) {
+                            workspace_rollback_failure +=
+                                (workspace_rollback_failure.empty() ? "" : "; ") +
+                                std::string("cannot restore provider workspace ") +
+                                source.string() + ": " + rollback_error.message();
+                            rollback_error.clear();
+                        }
+                    }
+                }
+            }
             (*action)["state"] = action_rollback_failed ? "rollback_failed" : "rolled_back";
             if (action->value("previous_startup_transition_started", false) &&
                 action->contains("previous_startup_receipt")) {
@@ -5936,6 +6211,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             rollback_failure += (rollback_failure.empty() ? "" : "; ") +
                                 std::string("component roots: ") +
                                 component_rollback_failure;
+        }
+        if (!workspace_rollback_failure.empty()) {
+            rollback_failure += (rollback_failure.empty() ? "" : "; ") +
+                                std::string("provider workspace: ") +
+                                workspace_rollback_failure;
         }
         journal["state"] = rollback_failure.empty() ? "rolled_back" : "rollback_failed";
         journal["error"] = rollback_failure.empty()
@@ -6003,13 +6283,15 @@ json SetupEngine::verify(const SetupPaths& paths) {
             const std::string configuration_path = receipt.value("configuration_path", "");
             if (!configuration_path.empty()) {
                 const fs::path configuration = normalized_absolute(configuration_path);
-                if (!within(paths.workspace_root, configuration) ||
-                    !fs::is_regular_file(configuration) || contains_symbolic_link(configuration)) {
-                    throw std::runtime_error("generated component configuration is unavailable");
-                }
                 if (!validated.manifest.contains("installer_integration")) {
                     throw std::runtime_error(
                         "generated component configuration has no owning integration contract");
+                }
+                const fs::path workspace = provider_workspace(
+                    paths, validated.manifest.at("installer_integration"));
+                if (configuration.parent_path() != workspace ||
+                    !fs::is_regular_file(configuration) || contains_symbolic_link(configuration)) {
+                    throw std::runtime_error("generated component configuration is unavailable");
                 }
                 const ProviderInstallResult expected = render_provider_installation(
                     paths, validated.manifest,

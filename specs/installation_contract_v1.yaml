@@ -513,6 +513,11 @@ provider_installer_integration:
       workspace_name at the component root. Release assembly rejects a missing
       or divergent projection before catalog generation, and runtime payload
       validation independently enforces the same invariant before mutation.
+    - A provider installer integration may declare workspace_placement as
+      workspace_root or product_data. Omission retains workspace_root for v1
+      compatibility. product_data resolves beneath the mutable Installer data
+      root at provider-data/<workspace_name>; it never resolves beneath an
+      immutable component or program root.
     - Dependency inputs are explicit receipt-verified active roots,
       entrypoints, or safe component-relative paths. Required bindings fail
       closed; unavailable optional bindings are omitted.
@@ -611,12 +616,21 @@ setup:
         selected component from the new signed catalog, and does not silently
         reinstall a component the operator previously removed.
       - Upgrade preserves the exact workspace recorded by a validated existing
-        provider receipt even when shell-folder redirection or a corrected
-        installer default resolves a different workspace root. This narrow
-        compatibility authority applies only while uninstalling or restoring
-        that receipt's already-installed startup registration; it never
-        authorizes a browser, catalog, or new component to select an arbitrary
-        outside-root path.
+        provider receipt while stopping or restoring that receipt's startup
+        registration. If the replacement manifest changes the declared
+        workspace placement, Installer then migrates that exact stopped
+        receipt-owned directory to the new declared path by a same-volume
+        atomic rename before rendering replacement configuration.
+      - Workspace migration rejects links, an occupied destination, an
+        unverified receipt/configuration relationship, and cross-volume moves.
+        It journals the directory move, rebases only saved locators whose
+        validated paths are descendants of that exact workspace, regenerates
+        every declared consumer, and reverses locator and directory changes
+        before restoring prior startup on any failure.
+      - The narrow migration authority never authorizes a browser, catalog, or
+        new component to select an arbitrary outside-root path. A workspace
+        that is not the exact validated receipt data path remains external and
+        unchanged.
       - Linux packages carry arena-setup, the retained signed catalog, and
         lifecycle integration; distro-native service scripts and arena-setup
         provide equivalent component install, repair, upgrade, and removal.
@@ -1579,6 +1593,8 @@ transaction:
         reason: redacted installer and component lifecycle accountability
       - path: workspaces_outside_data_root
         reason: Book Forge observations, qualification evidence, snapshots, and Evidence raw evidence, datasets, exports, timing profiles, and other provider state are not installer payload
+      - path: provider-data/
+        reason: manifest-declared product-data provider workspaces remain provider-owned mutable state even when placed beneath the suite data root
     removed_on_normal_uninstall:
       - every receipt-selected immutable component root
       - every provider startup registration owned by an installed receipt

@@ -127,7 +127,10 @@ export function validateCompositionManifests(candidate, availableComponents) {
           || installerIntegration.schema_version !== 1
           || !PACKAGE_IDENTIFIER.test(installerIntegration.workspace_name ?? "")
           || !PACKAGE_IDENTIFIER.test(manifest.workspace_name ?? "")
-          || installerIntegration.workspace_name !== manifest.workspace_name)) {
+          || installerIntegration.workspace_name !== manifest.workspace_name
+          || !["workspace_root", "product_data"].includes(
+            installerIntegration.workspace_placement ?? "workspace_root",
+          ))) {
       fail(
         `resolved installer-integration workspace is invalid or inconsistent for ${component.component_id}`,
       );

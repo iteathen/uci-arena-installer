@@ -225,6 +225,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     PRIVATE
       arena_installer_core
       Catch2::Catch2WithMain
+      LibArchive::LibArchive
       unofficial-sodium::sodium
   )
   if(WIN32)

@@ -124,8 +124,16 @@ test("installer-integration workspace drift is rejected before catalog generatio
     schema: "arena_provider_installer_integration_v1",
     schema_version: 1,
     workspace_name: "UCI-Arena-Engine",
+    workspace_placement: "product_data",
   };
   assert.equal(validateCompositionManifests(composition, available).length, composition.components.length);
+
+  engine.installer_integration.workspace_placement = "program_files";
+  assert.throws(
+    () => validateCompositionManifests(composition, available),
+    /installer-integration workspace is invalid or inconsistent for uci_arena\.engine/u,
+  );
+  engine.installer_integration.workspace_placement = "product_data";
 
   delete engine.workspace_name;
   assert.throws(
