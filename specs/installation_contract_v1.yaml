@@ -1542,10 +1542,11 @@ vm_mounts:
       - Runner and workflow output is redirected to an ignored bounded local
         log directory; conversational or pull-request evidence contains only
         status, paths, sizes, counts, and digests.
-      - Preflight projects the longest native CMake/MSVC scratch path under the
-        configured runner work root and rejects more than 240 characters before
-        registration. The default work root is a short dedicated local path;
-        the runner remains ephemeral and is removed after the attempt.
+        - Preflight projects both native CMake scratch and deep Manager vcpkg/MSVC
+          file-tracker paths under the configured runner work root and rejects
+          more than 240 characters before registration. The default uses C:\ar, a
+        sixteen-character ephemeral directory id, and work directory `w`; the
+        runner remains ephemeral and is removed after the attempt.
       - A physical developer host may produce a private attested component
         candidate through this explicit diagnostic transport. It is never a
         protected suite acceptance runner, stable promotion authority, or

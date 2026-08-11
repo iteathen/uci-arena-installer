@@ -11,7 +11,7 @@ param(
     [string[]]$RunnerLabel = @('self-hosted', 'Windows', 'X64', 'ephemeral', 'uci-suite'),
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
     [string]$RunnerCacheRoot = 'C:\chess_engine\.actions-runner-cache',
-    [string]$RunnerWorkRoot = 'C:\chess_engine\.release',
+    [string]$RunnerWorkRoot = 'C:\ar',
     [string]$LogRoot = '',
     [ValidateRange(5, 180)][int]$TimeoutMinutes = 90,
     [switch]$PreflightOnly,
@@ -235,6 +235,8 @@ if ($PreflightOnly) {
         runner_version = $runnerVersion
         labels = $RunnerLabel.Count
         authority = $contract.authority
+        runner_work_root = $contract.runner_work_root
+        projected_path_characters = $contract.projected_path_characters
     } | ConvertTo-Json -Compress
     return
 }
@@ -247,7 +249,7 @@ $stdoutLog = Join-Path $resolvedLogRoot "$runKey.stdout.log"
 $stderrLog = Join-Path $resolvedLogRoot "$runKey.stderr.log"
 $runnerBase = $contract.runner_work_root
 New-Item -ItemType Directory -Path $runnerBase -Force | Out-Null
-$runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N'))
+$runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N').Substring(0, 16))
 $runnerProcess = $null
 $configured = $false
 $runId = $null
@@ -265,7 +267,7 @@ try {
         $runnerName = "uci-suite-$env:COMPUTERNAME-$($head.Substring(0, 8))-$PID"
         & (Join-Path $runnerRoot 'config.cmd') --unattended --ephemeral --disableupdate `
             --url "https://github.com/$Repository" --token $registrationToken `
-            --name $runnerName --labels ($RunnerLabel -join ',') --work '_work' *> $null
+            --name $runnerName --labels ($RunnerLabel -join ',') --work 'w' *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Ephemeral runner configuration failed.' }
         $configured = $true
     } finally {
