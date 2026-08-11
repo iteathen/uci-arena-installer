@@ -6,10 +6,12 @@ import test from "node:test";
 
 import {
   validateReleaseIntegration,
+  validateRunnerPathBudget,
   validateReleaseSource,
 } from "./local-release-preflight.mjs";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
+const RUNNER_ROOT = path.join(path.parse(path.resolve(".")).root, "arena-release-runners");
 
 function fixture() {
   const root = mkdtempSync(path.join(os.tmpdir(), "arena-release-preflight-"));
@@ -56,6 +58,8 @@ test("release preflight binds versions, signing, dispatch, and runner labels", (
       releaseRef: "main",
       localHead: HEAD,
       remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/provider",
     });
     assert.equal(result.version_sources, 3);
     assert.equal(result.runner_labels, 6);
@@ -76,6 +80,8 @@ test("release preflight fails before dispatch on version or runner-label drift",
       releaseRef: "main",
       localHead: HEAD,
       remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/provider",
     }), /release version drift/u);
     assert.throws(() => validateReleaseSource({
       repositoryRoot: fixtureRoot.root,
@@ -86,6 +92,8 @@ test("release preflight fails before dispatch on version or runner-label drift",
       releaseRef: "main",
       localHead: HEAD,
       remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/provider",
     }), /missing runner label/u);
   } finally {
     rmSync(fixtureRoot.root, { recursive: true, force: true });
@@ -160,12 +168,26 @@ test("dynamic Manager releases bind one dispatch version through build artifact 
       releaseRef: "main",
       localHead: HEAD,
       remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/manager",
     });
     assert.equal(result.version_sources, 1);
     assert.equal(result.component_id, "manager.core");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("runner preflight reserves an MSVC-safe build path budget", () => {
+  const short = validateRunnerPathBudget({
+    runnerWorkRoot: RUNNER_ROOT,
+    repositorySlug: "iteathen/uci-arena-lichess-bot",
+  });
+  assert.equal(short.projected_path_characters <= 240, true);
+  assert.throws(() => validateRunnerPathBudget({
+    runnerWorkRoot: path.resolve("C:/", "long-release-root-".repeat(12)),
+    repositorySlug: "iteathen/uci-arena-lichess-bot",
+  }), /240-character budget/u);
 });
 
 test("PowerShell runner preflight keeps filtered tool candidates array-shaped", () => {

@@ -11,6 +11,7 @@ param(
     [string[]]$RunnerLabel = @('self-hosted', 'Windows', 'X64', 'ephemeral', 'uci-suite'),
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
     [string]$RunnerCacheRoot = 'C:\chess_engine\.actions-runner-cache',
+    [string]$RunnerWorkRoot = 'C:\chess_engine\.release',
     [string]$LogRoot = '',
     [ValidateRange(5, 180)][int]$TimeoutMinutes = 90,
     [switch]$PreflightOnly,
@@ -167,7 +168,9 @@ $preflightArguments = @(
     '--ref', $Ref,
     '--head', $head,
     '--remote-main-head', $remoteMainCommit,
-    '--allow-unmerged-diagnostic', $AllowUnmergedDiagnostic.IsPresent.ToString().ToLowerInvariant()
+    '--allow-unmerged-diagnostic', $AllowUnmergedDiagnostic.IsPresent.ToString().ToLowerInvariant(),
+    '--runner-work-root', $RunnerWorkRoot,
+    '--repository', $Repository
 )
 foreach ($label in $RunnerLabel) {
     $preflightArguments += @('--runner-label', $label)
@@ -219,7 +222,7 @@ New-Item -ItemType Directory -Path $resolvedLogRoot -Force | Out-Null
 $runKey = "{0}-{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $head.Substring(0, 8)
 $stdoutLog = Join-Path $resolvedLogRoot "$runKey.stdout.log"
 $stderrLog = Join-Path $resolvedLogRoot "$runKey.stderr.log"
-$runnerBase = Join-Path $env:LOCALAPPDATA 'UCI Arena Release Runners'
+$runnerBase = $contract.runner_work_root
 New-Item -ItemType Directory -Path $runnerBase -Force | Out-Null
 $runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N'))
 $runnerProcess = $null
