@@ -143,7 +143,7 @@ export function resolveNpmInvocation({
   return { executable: execPath, argsPrefix: [windowsPath.resolve(npmCli)] };
 }
 
-function sourceIdentity() {
+export function sourceIdentity() {
   const status = runChecked("git", ["status", "--porcelain", "--untracked-files=no"]);
   if (status !== "") throw new Error("clean build requires a clean tracked worktree");
   const commit = runChecked("git", ["rev-parse", "HEAD"]);
@@ -207,7 +207,7 @@ function extractArchive(archive, destination) {
   ]);
 }
 
-function verifyAndExtractCandidates({
+export function verifyAndExtractCandidates({
   lock,
   composition,
   target,
