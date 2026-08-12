@@ -592,10 +592,17 @@ provider_installer_integration:
       provider can complete its own bounded sequence of operating-system task,
       process-tree teardown, retargeting, and readiness operations. The outer
       deadline never shortens a provider's declared internal teardown bounds.
-      A replaced v2 consumer uses post_replace from the installed replacement and
-      requires the declared live result. It journals every transaction-wide
-      transition and never invokes the older payload's uninstall action for that
-      v2 replacement.
+      A replaced v2 consumer uses post_replace from the installed replacement.
+      A contract that requires a live result retains the existing fail-closed
+      behavior. A credential-gated provider may instead explicitly declare
+      deferred exact-evidence requalification: post_replace must then return
+      installed true, active false, and requalificationRequired true while its
+      retargeted startup registration remains disabled. Installer commits that
+      safe inactive state as resume_deferred rather than rolling back unrelated
+      verified components or claiming the provider is live. Missing, false, or
+      malformed deferred evidence remains a deployment failure. It journals every
+      transaction-wide transition and never invokes the older payload's uninstall
+      action for that v2 replacement.
     - Rollback first stops any consumer already resumed against replacement
       roots, restores files and receipts, then restores every prior startup
       registration in dependency order. V1 remains accepted and is quiesced
@@ -2096,6 +2103,14 @@ acceptance:
     provider through the staged replacement payload, replaces a same-version
     root, resumes the live startup registration, and requires no manual Task
     Scheduler intervention or credential re-entry.
+  - A startup-control-v2 credential-gated provider whose exact executable
+    evidence becomes stale during an otherwise compatible dependency update
+    commits installed but inactive only when its contract allows deferred
+    requalification and its bounded response proves requalificationRequired
+    true. The transaction records resume_deferred and leaves startup disabled;
+    later provider-owned qualification must prove the selected timing authority
+    remains semantically compatible before explicit resume, without rolling back
+    unrelated components.
   - A transaction ordered with a shared dependency before its startup consumer
     stages both payloads, quiesces the consumer before the dependency rename,
     defers restart until all roots commit, and restores the prior live startup
