@@ -319,7 +319,6 @@ $runnerBase = $contract.runner_work_root
 New-Item -ItemType Directory -Path $runnerBase -Force | Out-Null
 $runnerRoots = @()
 $runnerProcesses = @()
-$configuredRunnerRoots = @()
 $stdoutLogs = @()
 $stderrLogs = @()
 $runId = $null
@@ -346,7 +345,6 @@ try {
                 --url "https://github.com/$Repository" --token $registrationToken `
                 --name $runnerName --labels ($RunnerLabel -join ',') --work 'w' *> $null
             if ($LASTEXITCODE -ne 0) { throw 'Ephemeral runner configuration failed.' }
-            $configuredRunnerRoots += $runnerRoot
         } finally {
             $registrationToken = $null
         }
@@ -484,14 +482,14 @@ try {
         }
     }
     if ($cleanupAuthorized) {
-        foreach ($configuredRunnerRoot in $configuredRunnerRoots) {
-            if (-not (Test-Path -LiteralPath (Join-Path $configuredRunnerRoot 'config.cmd'))) {
+        foreach ($runnerRoot in $runnerRoots) {
+            if (-not (Test-Path -LiteralPath (Join-Path $runnerRoot 'config.cmd'))) {
                 continue
             }
             $removeToken = (& gh api --method POST `
                 "repos/$Repository/actions/runners/remove-token" --jq .token 2>$null)
             if ($LASTEXITCODE -eq 0 -and $removeToken) {
-                & (Join-Path $configuredRunnerRoot 'config.cmd') remove `
+                & (Join-Path $runnerRoot 'config.cmd') remove `
                     --token $removeToken.Trim() *> $null
             }
             $removeToken = $null
