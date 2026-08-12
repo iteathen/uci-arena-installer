@@ -144,8 +144,17 @@ export function collectReleaseVersions(repositoryRoot) {
 }
 
 function bindsDynamicWorkflowVersion(workflow) {
-  return /^\s+RELEASE_VERSION:\s*\$\{\{\s*inputs\.version\s*\}\}\s*$/mu.test(workflow)
-    && workflow.includes("-DARENA_VERSION=$env:RELEASE_VERSION")
+  const directInput = /^\s+RELEASE_VERSION:\s*\$\{\{\s*inputs\.version\s*\}\}\s*$/mu
+    .test(workflow);
+  const resolvedInput = /^\s+DISPATCH_VERSION:\s*\$\{\{\s*inputs\.version\s*\}\}\s*$/mu
+    .test(workflow)
+    && /^\s+version:\s*\$\{\{\s*steps\.release\.outputs\.version\s*\}\}\s*$/mu
+      .test(workflow)
+    && workflow.includes('version="${DISPATCH_VERSION}"')
+    && workflow.includes("printf 'version=%s\\n' \"${version}\"")
+    && /^\s+RELEASE_VERSION:\s*\$\{\{\s*needs\.resolve\.outputs\.version\s*\}\}\s*$/mu
+      .test(workflow);
+  return (directInput || resolvedInput)
     && workflow.includes("--version $env:RELEASE_VERSION")
     && workflow.includes("v$env:RELEASE_VERSION");
 }
@@ -184,11 +193,11 @@ export function validateReleaseSource({
   }
   if (expectedComponentId) {
     if (!COMPONENT_ID.test(expectedComponentId)) throw new Error("expected component id is invalid");
-    const componentMismatches = componentIds.filter(
-      (entry) => entry.value !== expectedComponentId,
+    const selectedComponents = componentIds.filter(
+      (entry) => entry.value === expectedComponentId,
     );
-    if (componentIds.length < 1 || componentMismatches.length > 0) {
-      throw new Error(`release component identity differs from ${expectedComponentId}`);
+    if (selectedComponents.length < 1) {
+      throw new Error(`release component identity does not declare ${expectedComponentId}`);
     }
   }
   if (!/^\s{2}workflow_dispatch:\s*$/mu.test(workflow)) {

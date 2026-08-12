@@ -179,6 +179,87 @@ test("dynamic Manager releases bind one dispatch version through build artifact 
   }
 });
 
+test("dynamic Engine releases bind a validated resolve-job version chain", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "arena-resolved-release-preflight-"));
+  try {
+    const workflowRoot = path.join(root, ".github", "workflows");
+    const definitionRoot = path.join(root, "release", "components");
+    mkdirSync(workflowRoot, { recursive: true });
+    mkdirSync(definitionRoot, { recursive: true });
+    writeFileSync(path.join(definitionRoot, "engine.json"), JSON.stringify({
+      component_id: "uci_arena.engine",
+    }));
+    writeFileSync(path.join(definitionRoot, "evidence.json"), JSON.stringify({
+      component_id: "uci_arena_evidence.runtime",
+    }));
+    const workflowPath = path.join(workflowRoot, "component-release.yml");
+    const workflow = [
+      "on:",
+      "  workflow_dispatch:",
+      "    inputs:",
+      "      version:",
+      "      runner:",
+      "        default: ephemeral-self-hosted-windows",
+      "permissions:",
+      "  id-token: write",
+      "jobs:",
+      "  resolve:",
+      "    outputs:",
+      "      version: ${{ steps.release.outputs.version }}",
+      "    steps:",
+      "      - id: release",
+      "        env:",
+      "          DISPATCH_VERSION: ${{ inputs.version }}",
+      "        run: |",
+      "          version=\"${DISPATCH_VERSION}\"",
+      "          printf 'version=%s\\n' \"${version}\" >> \"${GITHUB_OUTPUT}\"",
+      "  build:",
+      "    runs-on: '[\"self-hosted\",\"Windows\",\"X64\",\"ephemeral\",\"uci-suite\",\"engine-release\"]'",
+      "    env:",
+      "      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}",
+      "    steps:",
+      "      - run: node build.mjs --version $env:RELEASE_VERSION",
+      "      - run: gh release create component/engine/v$env:RELEASE_VERSION",
+      "      - run: cosign attest-blob artifact",
+      "      - run: cosign verify-blob-attestation artifact",
+      "",
+    ].join("\n");
+    writeFileSync(workflowPath, workflow);
+    const input = {
+      repositoryRoot: root,
+      expectedVersion: "0.1.11",
+      expectedComponentId: "uci_arena.engine",
+      workflowPath,
+      requiredRunnerLabels: [
+        "self-hosted", "Windows", "X64", "ephemeral", "uci-suite", "engine-release",
+      ],
+      releaseRef: "main",
+      localHead: HEAD,
+      remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/engine",
+    };
+    assert.equal(validateReleaseSource(input).version_sources, 1);
+    assert.throws(() => validateReleaseSource({
+      ...input,
+      expectedComponentId: "undeclared.engine",
+    }), /does not declare undeclared\.engine/u);
+
+    writeFileSync(workflowPath, workflow.replace(
+      "      version: ${{ steps.release.outputs.version }}\n",
+      "",
+    ));
+    assert.throws(() => validateReleaseSource(input), /no authoritative component version/u);
+    writeFileSync(workflowPath, workflow.replace(
+      "node build.mjs --version $env:RELEASE_VERSION",
+      "node build.mjs",
+    ));
+    assert.throws(() => validateReleaseSource(input), /no authoritative component version/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("runner preflight reserves an MSVC-safe build path budget", () => {
   const short = validateRunnerPathBudget({
     runnerWorkRoot: RUNNER_ROOT,
