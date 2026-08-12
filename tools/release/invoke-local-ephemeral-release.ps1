@@ -12,6 +12,12 @@ param(
     [ValidateRange(1, 4)][int]$RunnerCount = 1,
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
     [string]$CandidateReleaseTag = '',
+    [string]$OnnxRuntimeUrl = '',
+    [string]$OnnxRuntimeSha256 = '',
+    [string]$ModelUrl = '',
+    [string]$ModelSha256 = '',
+    [string]$SyzygyManifestUrl = '',
+    [string]$SyzygyManifestSha256 = '',
     [string]$RunnerCacheRoot = 'C:\chess_engine\.actions-runner-cache',
     [string]$RunnerWorkRoot = 'C:\ar',
     [string]$LogRoot = '',
@@ -34,6 +40,29 @@ function Assert-Command {
     $command = Get-Command $Name -ErrorAction SilentlyContinue
     if (-not $command) { throw "Required release command is unavailable: $Name" }
     return $command.Source
+}
+
+function Assert-PinnedReleaseInputPair {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Url,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Sha256
+    )
+    if ([string]::IsNullOrEmpty($Url) -ne [string]::IsNullOrEmpty($Sha256)) {
+        throw "$Label requires both URL and SHA-256."
+    }
+    if ([string]::IsNullOrEmpty($Url)) { return $false }
+    if ($Url -match '[\x00-\x20\x7f]' -or $Sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "$Label requires a credential-free HTTPS URL and lowercase SHA-256."
+    }
+    try { $parsedUrl = [System.Uri]::new($Url, [System.UriKind]::Absolute) } catch {
+        throw "$Label URL is invalid."
+    }
+    if ($parsedUrl.Scheme -ne 'https' -or -not $parsedUrl.Host -or $parsedUrl.UserInfo -or
+        $parsedUrl.Query -or $parsedUrl.Fragment) {
+        throw "$Label requires a credential-free HTTPS URL and lowercase SHA-256."
+    }
+    return $true
 }
 
 function Invoke-GitHubJson {
@@ -187,6 +216,32 @@ $workflowPath = Join-Path $repositoryRoot ".github\workflows\$Workflow"
 if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
     throw "Release workflow is unavailable: $Workflow"
 }
+$releaseInputPairs = @(
+    [pscustomobject]@{
+        label = 'ONNX Runtime'; url_name = 'onnxruntime_url'; sha_name = 'onnxruntime_sha256'
+        url = $OnnxRuntimeUrl; sha256 = $OnnxRuntimeSha256
+    },
+    [pscustomobject]@{
+        label = 'Model'; url_name = 'model_url'; sha_name = 'model_sha256'
+        url = $ModelUrl; sha256 = $ModelSha256
+    },
+    [pscustomobject]@{
+        label = 'Syzygy manifest'; url_name = 'syzygy_manifest_url'
+        sha_name = 'syzygy_manifest_sha256'; url = $SyzygyManifestUrl
+        sha256 = $SyzygyManifestSha256
+    }
+)
+$workflowSource = Get-Content -LiteralPath $workflowPath -Raw
+$validatedReleaseInputPairs = @()
+foreach ($pair in $releaseInputPairs) {
+    if (-not (Assert-PinnedReleaseInputPair `
+            -Label $pair.label -Url $pair.url -Sha256 $pair.sha256)) { continue }
+    if ($workflowSource -notmatch "(?m)^\s+$([regex]::Escape($pair.url_name)):\s*$" -or
+        $workflowSource -notmatch "(?m)^\s+$([regex]::Escape($pair.sha_name)):\s*$") {
+        throw "$($pair.label) is not declared by the selected release workflow."
+    }
+    $validatedReleaseInputPairs += $pair
+}
 $trackedStatus = (& git -C $repositoryRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0 -or $trackedStatus) {
     throw 'Component release requires a clean tracked worktree.'
@@ -295,6 +350,7 @@ if ($PreflightOnly) {
         runner_version = $runnerVersion
         labels = $RunnerLabel.Count
         runner_count = $RunnerCount
+        pinned_input_pairs = $validatedReleaseInputPairs.Count
         authority = $contract.authority
         runner_work_root = $contract.runner_work_root
         projected_path_characters = $contract.projected_path_characters
@@ -368,6 +424,12 @@ try {
     if ($WorkflowComponent) {
         $dispatchArguments += @('-f', "component=$WorkflowComponent")
     }
+    foreach ($pair in $validatedReleaseInputPairs) {
+        $dispatchArguments += @(
+            '-f', "$($pair.url_name)=$($pair.url)",
+            '-f', "$($pair.sha_name)=$($pair.sha256)"
+        )
+    }
     & gh @dispatchArguments *> $null
     if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed.' }
 
@@ -440,6 +502,7 @@ try {
         workflow_run_id = $runId
         runner_version = $runnerVersion
         runner_count = $RunnerCount
+        pinned_input_pairs = $validatedReleaseInputPairs.Count
         candidate_release_tag = $contract.candidate_release_tag
         candidate_release_state = $candidateReleaseState
         stdout_logs = $stdoutLogs

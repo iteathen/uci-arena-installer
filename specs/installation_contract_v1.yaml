@@ -1546,6 +1546,13 @@ vm_mounts:
         Git Bash, PowerShell module-path, GitHub authentication, and signing-
         workflow prerequisite checks before obtaining a registration token or
         dispatching work.
+      - Engine dependency inputs are explicit optional URL/SHA-256 pairs for
+        ONNX Runtime, the qualified model archive, and a Syzygy manifest. Before
+        runner registration, each supplied pair must be complete, use a
+        credential-free HTTPS URL, have a lowercase SHA-256, and correspond to
+        declared workflow inputs. The coordinator forwards only validated
+        pairs and reports presence rather than values; it never discovers a
+        model implicitly or forwards credential-bearing generic parameters.
       - Normal component releases require Ref main and the local source commit
         to equal the exact remote main head. An unmerged ref is rejected before
         runner registration unless the operator explicitly selects the
