@@ -137,6 +137,18 @@ export function assembleSuiteUpdatePackage({
     if (JSON.stringify(packagedIds) !== JSON.stringify(closure)) {
       throw new Error("update package candidate closure is incomplete or ambiguous");
     }
+    const catalogById = new Map(
+      catalog.components.map((component) => [component.id, component]),
+    );
+    const catalogSources = closure.flatMap(
+      (id) => Object.values(catalogById.get(id).artifacts).map((artifact) => artifact.source),
+    ).sort();
+    const packageSources = packageCandidates.map(
+      (candidate) => `payloads/${candidate.lockRow.artifact_name}`,
+    ).sort();
+    if (JSON.stringify(catalogSources) !== JSON.stringify(packageSources)) {
+      throw new Error("update package closure artifacts do not equal packaged payloads");
+    }
     for (const candidate of packageCandidates) {
       copyFileSync(
         candidate.artifactPath,
