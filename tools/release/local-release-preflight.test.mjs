@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  collectWorkflowDispatchInputs,
   validateReleaseIntegration,
   validateCandidateReleaseTag,
   validateRunnerPathBudget,
@@ -32,6 +33,8 @@ function fixture() {
     "on:",
     "  workflow_dispatch:",
     "    inputs:",
+    "      version:",
+    "      target:",
     "      runner:",
     "        default: ephemeral-self-hosted-windows",
     "permissions:",
@@ -61,9 +64,36 @@ test("release preflight binds versions, signing, dispatch, and runner labels", (
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/provider",
+      forwardedWorkflowInputs: ["version", "target", "runner"],
     });
     assert.equal(result.version_sources, 3);
     assert.equal(result.runner_labels, 6);
+  } finally {
+    rmSync(fixtureRoot.root, { recursive: true, force: true });
+  }
+});
+
+test("release preflight rejects optional inputs absent from workflow dispatch", () => {
+  const fixtureRoot = fixture();
+  try {
+    const workflow = readFileSync(fixtureRoot.workflowPath, "utf8");
+    assert.deepEqual(
+      [...collectWorkflowDispatchInputs(workflow)],
+      ["version", "target", "runner"],
+    );
+    assert.throws(() => validateReleaseSource({
+      repositoryRoot: fixtureRoot.root,
+      expectedVersion: "1.2.3",
+      expectedComponentId: "provider.component",
+      workflowPath: fixtureRoot.workflowPath,
+      requiredRunnerLabels: fixtureRoot.labels,
+      releaseRef: "main",
+      localHead: HEAD,
+      remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/provider",
+      forwardedWorkflowInputs: ["version", "target", "runner", "component"],
+    }), /does not declare forwarded input component/u);
   } finally {
     rmSync(fixtureRoot.root, { recursive: true, force: true });
   }
@@ -314,6 +344,10 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /onnxruntime_url[\s\S]*?onnxruntime_sha256/u);
   assert.match(source, /model_url[\s\S]*?model_sha256/u);
   assert.match(source, /pinned_input_pairs = \$validatedReleaseInputPairs\.Count/u);
+  assert.match(source, /forwarded_workflow_inputs = \$contract\.forwarded_workflow_inputs/u);
+  assert.match(source, /\$forwardedWorkflowInputs = @\('version', 'target', 'runner'\)/u);
+  assert.match(source, /if \(\$WorkflowComponent\) \{ \$forwardedWorkflowInputs \+= 'component' \}/u);
+  assert.match(source, /@\('--workflow-input', \$inputName\)/u);
   assert.ok(source.indexOf("foreach ($pair in $validatedReleaseInputPairs)")
     < source.indexOf("$runId = Invoke-WorkflowDispatch"));
   assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")

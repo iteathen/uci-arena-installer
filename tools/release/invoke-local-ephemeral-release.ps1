@@ -276,16 +276,14 @@ $releaseInputPairs = @(
         sha256 = $SyzygyManifestSha256
     }
 )
-$workflowSource = Get-Content -LiteralPath $workflowPath -Raw
 $validatedReleaseInputPairs = @()
+$forwardedWorkflowInputs = @('version', 'target', 'runner')
+if ($WorkflowComponent) { $forwardedWorkflowInputs += 'component' }
 foreach ($pair in $releaseInputPairs) {
     if (-not (Assert-PinnedReleaseInputPair `
             -Label $pair.label -Url $pair.url -Sha256 $pair.sha256)) { continue }
-    if ($workflowSource -notmatch "(?m)^\s+$([regex]::Escape($pair.url_name)):\s*$" -or
-        $workflowSource -notmatch "(?m)^\s+$([regex]::Escape($pair.sha_name)):\s*$") {
-        throw "$($pair.label) is not declared by the selected release workflow."
-    }
     $validatedReleaseInputPairs += $pair
+    $forwardedWorkflowInputs += @($pair.url_name, $pair.sha_name)
 }
 $trackedStatus = (& git -C $repositoryRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0 -or $trackedStatus) {
@@ -358,6 +356,9 @@ $preflightArguments = @(
 foreach ($label in $RunnerLabel) {
     $preflightArguments += @('--runner-label', $label)
 }
+foreach ($inputName in $forwardedWorkflowInputs) {
+    $preflightArguments += @('--workflow-input', $inputName)
+}
 $contractOutput = & node @preflightArguments
 if ($LASTEXITCODE -ne 0) { throw 'Component release source contract preflight failed.' }
 $contract = $contractOutput | ConvertFrom-Json
@@ -396,6 +397,7 @@ if ($PreflightOnly) {
         labels = $RunnerLabel.Count
         runner_count = $RunnerCount
         pinned_input_pairs = $validatedReleaseInputPairs.Count
+        forwarded_workflow_inputs = $contract.forwarded_workflow_inputs
         authority = $contract.authority
         runner_work_root = $contract.runner_work_root
         projected_path_characters = $contract.projected_path_characters
