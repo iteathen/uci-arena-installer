@@ -1561,8 +1561,17 @@ vm_mounts:
       - A component may declare its immutable version statically or bind the
         workflow_dispatch version through the release build, component-artifact
         construction, and immutable release tag. Dynamic-version preflight
-        requires that complete chain plus a checked-in component definition;
-        an unconstrained workflow input is not version authority.
+        requires that complete chain plus a checked-in component definition.
+        A multi-job workflow may project the dispatch version through one
+        explicitly validated resolve-step output only when preflight proves the
+        input environment binding, resolve job output, build-job consumption,
+        artifact construction, and immutable tag links; a missing link or an
+        unconstrained workflow input is not version authority.
+      - A repository that publishes multiple declared components satisfies
+        component identity preflight only when the requested component id is
+        present in its checked-in definitions. Valid sibling definitions do not
+        become identity drift; an undeclared requested component still fails
+        before runner registration.
       - One command may provision a caller-selected pool of one through four
         repository-scoped, update-disabled ephemeral runners before dispatching
         exactly one bounded workflow attempt. This supports workflows with
