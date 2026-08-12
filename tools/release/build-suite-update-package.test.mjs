@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 import { assembleSuiteUpdatePackage } from "./build-suite-update-package.mjs";
@@ -22,6 +26,15 @@ function tarEntries(filename) {
     offset += 512 + Math.ceil(size / 512) * 512;
   }
   return entries;
+}
+
+function extractTar(filename, destination) {
+  for (const [name, contents] of tarEntries(filename)) {
+    assert.match(name, /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/u);
+    const output = path.join(destination, ...name.split("/"));
+    mkdirSync(path.dirname(output), { recursive: true });
+    writeFileSync(output, contents);
+  }
 }
 
 function fixture(root) {
@@ -114,11 +127,13 @@ test("routine suite update is deterministic and has no native build path", () =>
     const catalog = JSON.parse(entries.get("release/catalog.json").toString("utf8"));
     assert.deepEqual(
       catalog.components.map((component) => component.id).sort(),
-      first.dependency_closure,
+      ["lichess.adapter", "manager.core", "node_runtime.private"],
     );
-    assert.deepEqual(catalog.presets.manager_only, []);
+    assert.deepEqual(catalog.presets.manager_only, ["manager.core"]);
     assert.deepEqual(
-      catalog.components.flatMap(
+      catalog.components.filter(
+        (component) => first.dependency_closure.includes(component.id),
+      ).flatMap(
         (component) => Object.values(component.artifacts).map((artifact) => artifact.source),
       ).sort(),
       [...entries.keys()]
@@ -154,6 +169,86 @@ test("manager changes stay on the full installer path", () => {
       inputAuthority: "diagnostic_review_lock",
       applyScript,
     }), /full MSI\/installer build path/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply script reconciles exact retained payloads before arena-setup", {
+  skip: process.platform !== "win32",
+}, () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "arena-suite-update-media-"));
+  try {
+    const { composition, candidates } = fixture(root);
+    const applyScript = fileURLToPath(
+      new URL("../../packaging/windows/apply-suite-update.ps1", import.meta.url),
+    );
+    const result = assembleSuiteUpdatePackage({
+      composition,
+      candidates,
+      selectedComponents: ["lichess.adapter"],
+      outputRoot: path.join(root, "output"),
+      sourceCommit: "a".repeat(40),
+      sourceEpoch: 1_700_000_000,
+      compositionSha256: "b".repeat(64),
+      releaseLockSha256: "c".repeat(64),
+      inputAuthority: "diagnostic_review_lock",
+      applyScript,
+    });
+    const packageRoot = path.join(root, "package");
+    extractTar(path.join(root, "output", result.artifact.name), packageRoot);
+    const dataRoot = path.join(root, "data");
+    const retainedManager = path.join(
+      dataRoot, "release", "payloads", "manager.core.tar.gz",
+    );
+    mkdirSync(path.dirname(retainedManager), { recursive: true });
+    writeFileSync(retainedManager, readFileSync(path.join(root, "manager.core.tar.gz")));
+    const programRoot = path.join(root, "program");
+    mkdirSync(path.join(programRoot, "bin"), { recursive: true });
+    writeFileSync(path.join(programRoot, "bin", "arena-setup.exe"), "not executed");
+    const runtimeRoot = path.join(programRoot, "libexec", "uci-arena-installer");
+    mkdirSync(runtimeRoot, { recursive: true });
+    writeFileSync(path.join(runtimeRoot, "arena-installer-runtime.json"), JSON.stringify({
+      schema: "arena_installer_runtime_v1",
+      runtime_version: "0.2.0",
+    }));
+    const arguments_ = [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+      path.join(packageRoot, "apply-update.ps1"),
+      "-Scope", "per-user",
+      "-ManagerProgramRoot", programRoot,
+      "-DataRoot", dataRoot,
+      "-ValidateMediaOnly",
+    ];
+    const validation = spawnSync("powershell.exe", arguments_, {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    assert.equal(validation.status, 0, validation.stderr);
+    const summary = JSON.parse(validation.stdout.trim().split(/\r?\n/u).at(-1));
+    assert.deepEqual(summary, {
+      schema: "arena_suite_update_media_validation_v1",
+      state: "validated",
+      suite_version: "1.2.3",
+      catalog_components: 3,
+      packaged_payloads: 2,
+      retained_payloads: 1,
+    });
+    assert.deepEqual(
+      readdirSync(dataRoot).filter((name) => name.startsWith("routine-update-media-")),
+      [],
+    );
+
+    rmSync(retainedManager);
+    const missing = spawnSync("powershell.exe", arguments_, {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    assert.notEqual(missing.status, 0);
+    assert.match(
+      `${missing.stdout}\n${missing.stderr}`,
+      /unavailable from its exact retained release channel authority/u,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

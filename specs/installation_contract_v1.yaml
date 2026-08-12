@@ -889,12 +889,17 @@ packaging:
         upgrade transaction for the declared component roots and dependency
         closure. It never accepts an executable or arbitrary command from the
         package manifest.
-      - Archive payloads and embedded catalog components equal the selected
-        component dependency closure exactly. Every suite-local artifact source
-        named by the catalog has matching bytes in the archive; unrelated
-        composed components and their bytes are absent. manager.core can never
-        enter a routine package unless it is a selected dependency, which is
-        rejected as a full-build exception.
+      - Archive payloads equal the selected component dependency closure
+        exactly. The embedded catalog may describe the complete current
+        composition so the retained repair channel remains complete;
+        manager.core can never enter the archive unless it is a selected
+        dependency, which is rejected as a full-build exception.
+      - Before invoking arena-setup, the fixed deployment script materializes
+        complete exact release media in a private temporary directory. Closure
+        artifacts come only from the verified package; non-closure artifacts
+        come only from the current retained release channel after matching the
+        new catalog size and digest. Missing or stale retained media fails
+        before component, service, receipt, or release-channel mutation.
       - Official packages require matching signed TUF metadata. Explicit
         diagnostic-review packages remain unsigned development candidates and
         pass the existing narrowly scoped development-catalog flag.

@@ -6,7 +6,8 @@ param(
     [string]$DataRoot = '',
     [string]$InstallRoot = '',
     [string]$CacheRoot = '',
-    [string]$KnowledgeRoot = ''
+    [string]$KnowledgeRoot = '',
+    [switch]$ValidateMediaOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,12 +31,48 @@ function Test-SemanticVersionAtLeast {
     return $true
 }
 
+function Get-Sha256Hex {
+    param([string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Test-ExactArtifactFile {
+    param([string]$Path, [pscustomobject]$Artifact)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $item.Length -ne [int64]$Artifact.size_bytes -or
+        [string]$Artifact.sha256 -notmatch '^[0-9a-f]{64}$') {
+        return $false
+    }
+    return (Get-Sha256Hex -Path $Path) -eq [string]$Artifact.sha256
+}
+
+function Get-PlatformArtifact {
+    param([pscustomobject]$Component)
+    $property = $Component.artifacts.PSObject.Properties['windows-x86_64']
+    if ($null -eq $property) {
+        $property = $Component.artifacts.PSObject.Properties['any']
+    }
+    if ($null -eq $property) {
+        throw "Catalog component $($Component.id) has no Windows or portable artifact."
+    }
+    return $property.Value
+}
+
 $packageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifestPath = Join-Path $packageRoot 'update-package.json'
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw 'The suite update package manifest is unavailable.'
 }
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 32
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.schema -ne 'arena_suite_update_package_v1' -or
     $manifest.schema_version -ne 1 -or
     $manifest.target_platform -ne 'windows-x86_64') {
@@ -54,7 +91,7 @@ foreach ($file in $manifest.files) {
     $filename = Join-Path $packageRoot ($file.path -replace '/', '\')
     $item = Get-Item -LiteralPath $filename -Force
     if (-not $item.PSIsContainer -and $item.Length -eq [int64]$file.size_bytes) {
-        $digest = (Get-FileHash -LiteralPath $filename -Algorithm SHA256).Hash.ToLowerInvariant()
+        $digest = Get-Sha256Hex -Path $filename
         if ($digest -eq [string]$file.sha256) { continue }
     }
     throw "The update package file failed verification: $($file.path)"
@@ -105,7 +142,7 @@ $selected = $installed[0]
 $setup = Join-Path $selected.Program 'bin\arena-setup.exe'
 $runtimeManifestPath = Join-Path $selected.Program 'libexec\uci-arena-installer\arena-installer-runtime.json'
 $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw |
-    ConvertFrom-Json -Depth 16
+    ConvertFrom-Json
 if ($runtimeManifest.schema -ne 'arena_installer_runtime_v1' -or
     -not (Test-SemanticVersionAtLeast -Actual $runtimeManifest.runtime_version `
         -Minimum $manifest.installer_minimum_version)) {
@@ -122,40 +159,132 @@ $effectiveCacheRoot = if ($CacheRoot) { $CacheRoot } else {
 $effectiveKnowledgeRoot = if ($KnowledgeRoot) { $KnowledgeRoot } else {
     Join-Path $effectiveDataRoot 'knowledge'
 }
-$catalog = Join-Path $packageRoot 'release\catalog.json'
-$arguments = @(
-    '--catalog', $catalog,
-    '--install-scope', $selected.Scope,
-    '--install-root', $effectiveInstallRoot,
-    '--data-root', $effectiveDataRoot,
-    '--cache-root', $effectiveCacheRoot,
-    '--knowledge-root', $effectiveKnowledgeRoot,
-    '--json'
-)
-if ($manifest.trust -eq 'tuf') {
-    $arguments += @('--metadata-dir', (Join-Path $packageRoot 'release\tuf'))
-} elseif ($manifest.trust -eq 'unsigned_development') {
-    $arguments += '--allow-unsigned-development-catalog'
-} else {
-    throw 'The suite update package trust mode is unsupported.'
+$packageReleaseRoot = Join-Path $packageRoot 'release'
+$packageCatalog = Join-Path $packageReleaseRoot 'catalog.json'
+$catalogDocument = Get-Content -LiteralPath $packageCatalog -Raw |
+    ConvertFrom-Json
+if ($catalogDocument.schema -ne 'arena_install_catalog_v1' -or
+    $catalogDocument.schema_version -ne 1 -or
+    $catalogDocument.suite_version -ne $manifest.suite_version) {
+    throw 'The update package catalog identity is invalid.'
 }
-if ($selected.Scope -eq 'per-machine') {
-    $arguments += '--restart-manager-service'
+$closureIds = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal)
+foreach ($componentId in @($manifest.dependency_closure)) {
+    if ([string]$componentId -notmatch '^[A-Za-z0-9_.-]+$' -or
+        -not $closureIds.Add([string]$componentId)) {
+        throw 'The update package dependency closure is invalid.'
+    }
 }
-$arguments += @('upgrade', '--preset', 'custom', '--offline', '--yes')
-foreach ($component in $manifest.selected_components) {
-    $arguments += @('--component', [string]$component)
+if ($closureIds.Count -lt 1) {
+    throw 'The update package dependency closure is empty.'
+}
+foreach ($componentId in @($manifest.selected_components)) {
+    if (-not $closureIds.Contains([string]$componentId)) {
+        throw 'The selected components are not contained by the dependency closure.'
+    }
+}
+$catalogIds = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal)
+foreach ($component in @($catalogDocument.components)) {
+    if ([string]$component.id -notmatch '^[A-Za-z0-9_.-]+$' -or
+        -not $catalogIds.Add([string]$component.id)) {
+        throw 'The update package catalog component identity is invalid.'
+    }
+}
+foreach ($componentId in $closureIds) {
+    if (-not $catalogIds.Contains($componentId)) {
+        throw "The update package catalog omits closure component $componentId."
+    }
 }
 
-$resultPath = Join-Path ([System.IO.Path]::GetTempPath()) `
-    ("uci-arena-update-result-{0}.json" -f [guid]::NewGuid().ToString('N'))
+$normalizedDataRoot = [System.IO.Path]::GetFullPath($effectiveDataRoot)
+$materializedMediaRoot = Join-Path $normalizedDataRoot `
+    ("routine-update-media-{0}" -f [guid]::NewGuid().ToString('N'))
+$resultPath = ''
 try {
+    New-Item -ItemType Directory -Path $materializedMediaRoot | Out-Null
+    Copy-Item -LiteralPath $packageCatalog `
+        -Destination (Join-Path $materializedMediaRoot 'catalog.json')
+    $materializedSources = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    [int]$packagedPayloads = 0
+    [int]$retainedPayloads = 0
+    foreach ($component in @($catalogDocument.components)) {
+        $artifact = Get-PlatformArtifact -Component $component
+        $source = [string]$artifact.source
+        if ($source.StartsWith('https://', [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ($closureIds.Contains([string]$component.id)) {
+                throw "Closure component $($component.id) does not have a packaged artifact."
+            }
+            continue
+        }
+        if ($source -notmatch '^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$' -or
+            -not $materializedSources.Add($source)) {
+            throw "The update catalog artifact source is unsafe or repeated: $source"
+        }
+        $isClosureArtifact = $closureIds.Contains([string]$component.id)
+        $sourceFile = if ($isClosureArtifact) {
+            Join-Path $packageReleaseRoot ($source -replace '/', '\')
+        } else {
+            Join-Path (Join-Path $normalizedDataRoot 'release') ($source -replace '/', '\')
+        }
+        if (-not (Test-ExactArtifactFile -Path $sourceFile -Artifact $artifact)) {
+            $authority = if ($isClosureArtifact) { 'package' } else { 'retained release channel' }
+            throw "Catalog artifact is unavailable from its exact $authority authority: $source"
+        }
+        $destination = Join-Path $materializedMediaRoot ($source -replace '/', '\')
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force |
+            Out-Null
+        Copy-Item -LiteralPath $sourceFile -Destination $destination
+        if ($isClosureArtifact) { $packagedPayloads += 1 } else { $retainedPayloads += 1 }
+    }
+
+    if ($ValidateMediaOnly) {
+        [pscustomobject]@{
+            schema = 'arena_suite_update_media_validation_v1'
+            state = 'validated'
+            suite_version = $manifest.suite_version
+            catalog_components = $catalogIds.Count
+            packaged_payloads = $packagedPayloads
+            retained_payloads = $retainedPayloads
+        } | ConvertTo-Json -Compress
+        return
+    }
+
+    $catalog = Join-Path $materializedMediaRoot 'catalog.json'
+    $arguments = @(
+        '--catalog', $catalog,
+        '--install-scope', $selected.Scope,
+        '--install-root', $effectiveInstallRoot,
+        '--data-root', $effectiveDataRoot,
+        '--cache-root', $effectiveCacheRoot,
+        '--knowledge-root', $effectiveKnowledgeRoot,
+        '--json'
+    )
+    if ($manifest.trust -eq 'tuf') {
+        $arguments += @('--metadata-dir', (Join-Path $packageReleaseRoot 'tuf'))
+    } elseif ($manifest.trust -eq 'unsigned_development') {
+        $arguments += '--allow-unsigned-development-catalog'
+    } else {
+        throw 'The suite update package trust mode is unsupported.'
+    }
+    if ($selected.Scope -eq 'per-machine') {
+        $arguments += '--restart-manager-service'
+    }
+    $arguments += @('upgrade', '--preset', 'custom', '--offline', '--yes')
+    foreach ($component in $manifest.selected_components) {
+        $arguments += @('--component', [string]$component)
+    }
+
+    $resultPath = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("uci-arena-update-result-{0}.json" -f [guid]::NewGuid().ToString('N'))
     $arguments = @('--result-file', $resultPath) + $arguments
     & $setup @arguments
     if ($LASTEXITCODE -ne 0) {
         throw "arena-setup failed with exit code $LASTEXITCODE."
     }
-    $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json -Depth 64
+    $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
     if ($result.state -ne 'committed') {
         throw "arena-setup did not commit the update: $($result.state)"
     }
@@ -169,5 +298,12 @@ try {
         manager_restart = if ($selected.Scope -eq 'per-machine') { 'completed' } else { 'required' }
     } | ConvertTo-Json -Compress
 } finally {
-    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    if ($resultPath) {
+        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    }
+    if ((Split-Path -Parent $materializedMediaRoot) -eq $normalizedDataRoot -and
+        (Split-Path -Leaf $materializedMediaRoot) -match '^routine-update-media-[0-9a-f]{32}$') {
+        Remove-Item -LiteralPath $materializedMediaRoot -Recurse -Force `
+            -ErrorAction SilentlyContinue
+    }
 }

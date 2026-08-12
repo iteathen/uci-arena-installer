@@ -89,33 +89,6 @@ test("catalog derives dependencies, features, capacities, and knowledge groups f
   );
 });
 
-test("catalog can scope every projection to a complete component subset", () => {
-  const candidates = [
-    candidate(composition.components[0]),
-    candidate(composition.components[1], {
-      activation: [{
-        kind: "opening_book",
-        source_path: "book.bin",
-        destination_root: "knowledge_root",
-        destination_path: "books/book.bin",
-      }],
-    }),
-  ];
-  const catalog = buildSuiteCatalog({
-    composition,
-    target: "windows-x86_64",
-    candidates,
-    featureComponentIds: [],
-    catalogComponentIds: ["example.book"],
-  });
-  assert.deepEqual(catalog.components.map((component) => component.id), ["example.book"]);
-  assert.deepEqual(catalog.presets.manager_only, []);
-  assert.deepEqual(catalog.presets.complete_arena, ["example.book"]);
-  assert.deepEqual(catalog.optional_component_groups.knowledge, ["example.book"]);
-  assert.deepEqual(catalog.optional_component_groups.books, ["example.book"]);
-  assert.deepEqual(catalog.feature_selection.components, []);
-});
-
 test("catalog refuses composition that omits a provider manifest dependency", () => {
   const candidates = [
     candidate(composition.components[0]),
