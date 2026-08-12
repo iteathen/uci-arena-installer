@@ -889,11 +889,12 @@ packaging:
         upgrade transaction for the declared component roots and dependency
         closure. It never accepts an executable or arbitrary command from the
         package manifest.
-      - Archive payloads equal the selected component dependency closure
-        exactly. The suite catalog may describe other composed components, but
-        their bytes are absent; manager.core can never enter a routine package
-        unless it is a selected dependency, which is rejected as a full-build
-        exception.
+      - Archive payloads and embedded catalog components equal the selected
+        component dependency closure exactly. Every suite-local artifact source
+        named by the catalog has matching bytes in the archive; unrelated
+        composed components and their bytes are absent. manager.core can never
+        enter a routine package unless it is a selected dependency, which is
+        rejected as a full-build exception.
       - Official packages require matching signed TUF metadata. Explicit
         diagnostic-review packages remain unsigned development candidates and
         pass the existing narrowly scoped development-catalog flag.

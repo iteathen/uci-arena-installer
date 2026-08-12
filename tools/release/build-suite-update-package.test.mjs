@@ -8,9 +8,9 @@ import { gunzipSync } from "node:zlib";
 import { assembleSuiteUpdatePackage } from "./build-suite-update-package.mjs";
 import { sha256File } from "./release-lock.mjs";
 
-function tarEntryNames(filename) {
+function tarEntries(filename) {
   const archive = gunzipSync(readFileSync(filename));
-  const names = [];
+  const entries = new Map();
   let offset = 0;
   while (offset + 512 <= archive.length) {
     const header = archive.subarray(offset, offset + 512);
@@ -18,10 +18,10 @@ function tarEntryNames(filename) {
     const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/u, "");
     const sizeText = header.subarray(124, 136).toString("ascii").replace(/\0.*$/u, "").trim();
     const size = Number.parseInt(sizeText || "0", 8);
-    names.push(name);
+    entries.set(name, archive.subarray(offset + 512, offset + 512 + size));
     offset += 512 + Math.ceil(size / 512) * 512;
   }
-  return names;
+  return entries;
 }
 
 function fixture(root) {
@@ -107,10 +107,25 @@ test("routine suite update is deterministic and has no native build path", () =>
     assert.deepEqual(first.selected_components, ["lichess.adapter"]);
     assert.deepEqual(first.dependency_closure, ["lichess.adapter", "node_runtime.private"]);
     assert.equal(first.artifact.sha256, second.artifact.sha256);
-    const entries = tarEntryNames(path.join(root, "first", first.artifact.name));
-    assert.ok(entries.includes("release/payloads/lichess.adapter.tar.gz"));
-    assert.ok(entries.includes("release/payloads/node_runtime.private.tar.gz"));
-    assert.equal(entries.includes("release/payloads/manager.core.tar.gz"), false);
+    const entries = tarEntries(path.join(root, "first", first.artifact.name));
+    assert.ok(entries.has("release/payloads/lichess.adapter.tar.gz"));
+    assert.ok(entries.has("release/payloads/node_runtime.private.tar.gz"));
+    assert.equal(entries.has("release/payloads/manager.core.tar.gz"), false);
+    const catalog = JSON.parse(entries.get("release/catalog.json").toString("utf8"));
+    assert.deepEqual(
+      catalog.components.map((component) => component.id).sort(),
+      first.dependency_closure,
+    );
+    assert.deepEqual(catalog.presets.manager_only, []);
+    assert.deepEqual(
+      catalog.components.flatMap(
+        (component) => Object.values(component.artifacts).map((artifact) => artifact.source),
+      ).sort(),
+      [...entries.keys()]
+        .filter((name) => name.startsWith("release/payloads/"))
+        .map((name) => name.replace(/^release\//u, ""))
+        .sort(),
+    );
     assert.equal(
       readFileSync(path.join(root, "first", "suite-update-result.json"), "utf8")
         .includes("cmake"),

@@ -45,6 +45,7 @@ export function buildSuiteCatalog({
   target,
   candidates,
   featureComponentIds,
+  catalogComponentIds = null,
   channel = "development",
 }) {
   if (!Array.isArray(candidates) || candidates.length !== composition.components.length) {
@@ -62,15 +63,33 @@ export function buildSuiteCatalog({
   const byId = new Map(
     candidates.map((candidate) => [candidate.lockRow.component_id, candidate]),
   );
+  const selectedCatalogIds = catalogComponentIds
+    ?? composition.components.map((component) => component.component_id);
+  if (!Array.isArray(selectedCatalogIds) || selectedCatalogIds.length < 1
+      || new Set(selectedCatalogIds).size !== selectedCatalogIds.length
+      || selectedCatalogIds.some((id) => !byId.has(id))) {
+    throw new Error("suite catalog component scope is unavailable or invalid");
+  }
+  const selectedCatalogIdSet = new Set(selectedCatalogIds);
   if (!Array.isArray(featureComponentIds)
       || new Set(featureComponentIds).size !== featureComponentIds.length
-      || featureComponentIds.some((id) => !byId.has(id))) {
+      || featureComponentIds.some((id) => !selectedCatalogIdSet.has(id))) {
     throw new Error("feature policy contains an unavailable or duplicate component");
   }
   const manager = composition.components.find((component) => component.role === "manager");
   if (!manager) throw new Error("product composition has no Manager role");
 
-  const components = resolved.map((component) => {
+  const scopedResolved = resolved.filter(
+    (component) => selectedCatalogIdSet.has(component.component_id),
+  );
+  for (const component of scopedResolved) {
+    if (component.requires.some((id) => !selectedCatalogIdSet.has(id))) {
+      throw new Error(
+        `suite catalog component scope omits a dependency of ${component.component_id}`,
+      );
+    }
+  }
+  const components = scopedResolved.map((component) => {
     const candidate = byId.get(component.component_id);
     const installedBytes = candidate.manifest.files.reduce(
       (total, file) => total + file.size_bytes,
@@ -106,12 +125,15 @@ export function buildSuiteCatalog({
   const knowledge = components
     .filter((component) => component.activation_role === "knowledge")
     .map((component) => component.id);
-  const books = candidates
+  const scopedCandidates = candidates.filter(
+    (candidate) => selectedCatalogIdSet.has(candidate.lockRow.component_id),
+  );
+  const books = scopedCandidates
     .filter((candidate) => candidate.manifest.activation?.some(
       (activation) => activation.kind === "opening_book",
     ))
     .map((candidate) => candidate.lockRow.component_id);
-  const tablebases = candidates
+  const tablebases = scopedCandidates
     .filter((candidate) => candidate.manifest.activation?.some(
       (activation) => activation.kind === "syzygy",
     ))
@@ -122,9 +144,11 @@ export function buildSuiteCatalog({
     suite_version: composition.product_release,
     channel,
     presets: {
-      manager_only: [manager.component_id],
+      manager_only: selectedCatalogIdSet.has(manager.component_id)
+        ? [manager.component_id] : [],
       complete_arena: composition.components
-        .filter((component) => component.default_enabled)
+        .filter((component) => component.default_enabled
+          && selectedCatalogIdSet.has(component.component_id))
         .map((component) => component.component_id),
     },
     optional_component_groups: { knowledge, books, tablebases },

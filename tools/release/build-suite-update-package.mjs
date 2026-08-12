@@ -123,6 +123,7 @@ export function assembleSuiteUpdatePackage({
       target: supportedPlatform,
       candidates,
       featureComponentIds: [],
+      catalogComponentIds: closure,
       channel: trusted ? "stable" : "development",
     });
     const catalogPath = path.join(releaseRoot, "catalog.json");
@@ -136,6 +137,19 @@ export function assembleSuiteUpdatePackage({
     ).sort();
     if (JSON.stringify(packagedIds) !== JSON.stringify(closure)) {
       throw new Error("update package candidate closure is incomplete or ambiguous");
+    }
+    const catalogIds = catalog.components.map((component) => component.id).sort();
+    if (JSON.stringify(catalogIds) !== JSON.stringify(closure)) {
+      throw new Error("update package catalog does not equal the dependency closure");
+    }
+    const catalogSources = catalog.components.flatMap(
+      (component) => Object.values(component.artifacts).map((artifact) => artifact.source),
+    ).sort();
+    const packageSources = packageCandidates.map(
+      (candidate) => `payloads/${candidate.lockRow.artifact_name}`,
+    ).sort();
+    if (JSON.stringify(catalogSources) !== JSON.stringify(packageSources)) {
+      throw new Error("update package catalog artifacts do not equal packaged payloads");
     }
     for (const candidate of packageCandidates) {
       copyFileSync(
