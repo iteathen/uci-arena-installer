@@ -319,6 +319,9 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")
     < source.indexOf("actions/runners/registration-token"));
   assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
+  assert.match(source, /\$registration = Invoke-GitHubJson[\s\S]*?actions\/runners\/registration-token/u);
+  assert.match(source, /\$registrationToken = \[string\]\$registration\.token/u);
+  assert.doesNotMatch(source, /registration-token" --jq \.token\)\.Trim\(\)/u);
   assert.match(source, /drainDeadline[\s\S]*?AddMinutes\(5\)/u);
   assert.match(source, /\$cleanupAuthorized\s*=\s*\$false/u);
   assert.match(source, /\[ValidateRange\(1, 4\)\]\[int\]\$RunnerCount/u);
