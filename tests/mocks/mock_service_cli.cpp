@@ -63,13 +63,15 @@ int main(int argc, char** argv) {
                     {{"schema", "replaceable_provider_configuration_v1"},
                      {"enabled", context.at("enabled")},
                      {"bindings", context.at("bindings")},
-                     {"locators", context.at("locators")}}},
+                     {"locators", context.at("locators")},
+                     {"locator_details", context.at("locator_details")}}},
                    {"generated_documents",
                     nlohmann::json::array(
                         {{{"path", "generated/context-projection.json"},
                           {"document",
                            {{"schema", "replaceable_provider_projection_v1"},
-                            {"locators", context.at("locators")}}}}})},
+                            {"locators", context.at("locators")},
+                            {"locator_details", context.at("locator_details")}}}}})},
                }
                    .dump()
             << '\n';

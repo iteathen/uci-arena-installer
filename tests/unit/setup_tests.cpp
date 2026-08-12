@@ -431,12 +431,14 @@ void write_manager_api_service_install(
                {"enabled", true},
                {"bindings", json::object()},
                {"locators", json::object()},
+               {"locator_details", json::object()},
            }
                .dump(2);
     std::ofstream(generated, std::ios::binary)
         << json{
                {"schema", "replaceable_provider_projection_v1"},
                {"locators", json::object()},
+               {"locator_details", json::object()},
            }
                .dump(2);
 
@@ -1920,6 +1922,45 @@ TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
     fs::remove_all(root);
 }
 
+TEST_CASE("opening-book authority mode is explicit and reaches declared consumers") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.book.authority.consumer", "opening_book", "runtime",
+        {"saved_locator"});
+    const fs::path live_channel = root / "published" / "integration";
+    fs::create_directories(live_channel);
+    std::ofstream(live_channel / "strong_rare_v1.bin") << "live channel book";
+
+    const json imported = SetupEngine::import_path(
+        paths, "opening_book", live_channel, false,
+        "service_managed_live_channel");
+    REQUIRE(imported.at("authority_mode") == "service_managed_live_channel");
+    const json locator = json::parse(std::ifstream(
+        paths.data_root / "locators" / "opening_book.json"));
+    REQUIRE(locator.at("mode") == "in_place_reference");
+    REQUIRE(locator.at("authority_mode") == "service_managed_live_channel");
+
+    const json generated = json::parse(std::ifstream(configuration));
+    const json& details = generated.at("locator_details").at("selected");
+    REQUIRE(details.at("kind") == "opening_book");
+    REQUIRE(details.at("source") == "saved_locator");
+    REQUIRE(details.at("storage_mode") == "in_place_reference");
+    REQUIRE(details.at("authority_mode") == "service_managed_live_channel");
+    REQUIRE(details.at("path") ==
+            fs::absolute(live_channel).lexically_normal().string());
+
+    REQUIRE_THROWS(
+        SetupEngine::import_path(paths, "opening_book", live_channel, true,
+                                 "service_managed_live_channel"));
+    const fs::path pinned_file = root / "pinned.bin";
+    std::ofstream(pinned_file) << "pinned book";
+    REQUIRE_THROWS(
+        SetupEngine::import_path(paths, "opening_book", pinned_file, false,
+                                 "service_managed_live_channel"));
+    fs::remove_all(root);
+}
+
 TEST_CASE("explicit saved knowledge selection does not erase installed authority") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -1966,18 +2007,28 @@ TEST_CASE("stale optional locator falls back to validated managed knowledge") {
     const fs::path configuration = write_mock_renderer_consumer(
         paths, "replaceable.book.consumer", "opening_book");
     const json locators{{"selected", managed_root.string()}};
+    const json locator_details{
+        {"selected",
+         {{"kind", "opening_book"},
+          {"path", managed_root.string()},
+          {"source", "install_receipt"},
+          {"storage_mode", "installed_component"},
+          {"authority_mode", "immutable_pinned_snapshot"}}},
+    };
     std::ofstream(configuration, std::ios::binary | std::ios::trunc)
         << json{{"schema", "replaceable_provider_configuration_v1"},
                 {"enabled", false},
                 {"bindings", json::object()},
-                {"locators", locators}}
+                {"locators", locators},
+                {"locator_details", locator_details}}
                .dump(2);
     const fs::path generated =
         configuration.parent_path() / "generated" / "context-projection.json";
     fs::create_directories(generated.parent_path());
     std::ofstream(generated, std::ios::binary)
         << json{{"schema", "replaceable_provider_projection_v1"},
-                {"locators", locators}}
+                {"locators", locators},
+                {"locator_details", locator_details}}
                .dump(2);
 
     const json verified = SetupEngine::verify(paths);
@@ -2017,14 +2068,16 @@ TEST_CASE("provider locator source policy keeps managed receipts out of saved ov
         << json{{"schema", "replaceable_provider_configuration_v1"},
                 {"enabled", false},
                 {"bindings", json::object()},
-                {"locators", empty_locators}}
+                {"locators", empty_locators},
+                {"locator_details", json::object()}}
                .dump(2);
     const fs::path projection =
         configuration.parent_path() / "generated" / "context-projection.json";
     fs::create_directories(projection.parent_path());
     std::ofstream(projection, std::ios::binary)
         << json{{"schema", "replaceable_provider_projection_v1"},
-                {"locators", empty_locators}}
+                {"locators", empty_locators},
+                {"locator_details", json::object()}}
                .dump(2);
 
     const json verified = SetupEngine::verify(paths);
@@ -2832,8 +2885,10 @@ TEST_CASE("managed copy is restricted to small flat opening books") {
     const fs::path managed_root = imported.at("path").get<std::string>();
     const fs::path locator_path = paths.data_root / "locators" / "opening_book.json";
     REQUIRE(fs::is_regular_file(locator_path));
-    REQUIRE(fs::path(json::parse(std::ifstream(locator_path)).at("path").get<std::string>()) ==
-            managed_root);
+    const json saved_locator = json::parse(std::ifstream(locator_path));
+    REQUIRE(fs::path(saved_locator.at("path").get<std::string>()) == managed_root);
+    REQUIRE(saved_locator.at("mode") == "managed_copy");
+    REQUIRE(saved_locator.at("authority_mode") == "immutable_pinned_snapshot");
     const std::string managed_id =
         imported.at("receipt").at("component_id").get<std::string>();
     const json uninstall_plan =

@@ -545,7 +545,9 @@ provider_installer_integration:
       discovery kind. Selection remains data-driven and never branches on a
       provider or component identity.
     - Context contains component identity, immutable active root, provider
-      workspace, enablement, declared bindings, and validated locator paths.
+      workspace, enablement, declared bindings, validated locator paths, and a
+      typed locator_details projection containing kind, source, storage mode,
+      and any declared authority mode.
       Credential contents never enter context, argv, logs, receipts, or output.
     - Renderer output is a closed versioned object containing one configuration
       object and at most sixteen safe workspace-relative JSON documents.
@@ -1448,8 +1450,11 @@ discovery:
 
 local_import:
   interface: arena_setup_import_result_v1
-  command: arena-setup --json import --kind KIND --path PATH
+  command: arena-setup --json import --kind KIND --path PATH [--authority-mode MODE]
   default_mode: in_place_reference
+  opening_book_authority_modes:
+    - service_managed_live_channel
+    - immutable_pinned_snapshot
   saved_location: manager_data_root/locators
   managed_copy:
     allowed_kinds: [opening_book, lichess_single_game_profile]
@@ -1475,6 +1480,8 @@ local_import:
   rules:
     - Import never scans outside the supplied path and its explicitly allowed flat entries.
     - In-place imports save only normalized locators and never copy provider-owned data.
+    - "Opening-book imports persist authority mode independently of storage mode. New imports default to immutable_pinned_snapshot; service_managed_live_channel must be explicit, is valid only for an in-place stable channel directory selected through provider output or explicit operator authority, and is never inferred from a filename or path shape."
+    - "Legacy opening-book locators without authority_mode retain compatibility as immutable_pinned_snapshot. Consumer contexts expose the resolved mode so a renderer never guesses whether a path is mutable authority or an immutable pin."
     - Syzygy tablebases are always referenced in place.
     - Timing profiles remain identity-bound in-place references and are never copied or rewritten.
     - A Lichess single-game profile is copied without rewriting into immutable

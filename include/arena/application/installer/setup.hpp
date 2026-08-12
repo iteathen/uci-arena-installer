@@ -53,7 +53,8 @@ class SetupEngine final {
     [[nodiscard]] static nlohmann::json import_path(const SetupPaths& paths,
                                                     const std::string& kind,
                                                     const std::filesystem::path& path,
-                                                    bool managed_copy = false);
+                                                    bool managed_copy = false,
+                                                    const std::string& authority_mode = {});
 
     [[nodiscard]] static nlohmann::json save_lichess_token_reference(
         const std::filesystem::path& data_root,
