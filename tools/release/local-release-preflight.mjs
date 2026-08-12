@@ -159,6 +159,32 @@ function bindsDynamicWorkflowVersion(workflow) {
     && workflow.includes("v$env:RELEASE_VERSION");
 }
 
+export function collectWorkflowDispatchInputs(workflow) {
+  const lines = workflow.split(/\r?\n/u);
+  const dispatchIndex = lines.findIndex((line) => /^ {2}workflow_dispatch:\s*$/u.test(line));
+  if (dispatchIndex < 0) return new Set();
+  let dispatchEnd = lines.length;
+  for (let index = dispatchIndex + 1; index < lines.length; index += 1) {
+    if (/^ {0,2}\S/u.test(lines[index])) {
+      dispatchEnd = index;
+      break;
+    }
+  }
+  const inputsIndex = lines.findIndex(
+    (line, index) => index > dispatchIndex && index < dispatchEnd
+      && /^ {4}inputs:\s*$/u.test(line),
+  );
+  if (inputsIndex < 0) return new Set();
+  const inputs = new Set();
+  for (let index = inputsIndex + 1; index < dispatchEnd; index += 1) {
+    const line = lines[index];
+    if (/^ {0,4}\S/u.test(line)) break;
+    const match = /^ {6}([A-Za-z_][A-Za-z0-9_-]*):\s*(?:#.*)?$/u.exec(line);
+    if (match) inputs.add(match[1]);
+  }
+  return inputs;
+}
+
 export function validateReleaseSource({
   repositoryRoot,
   expectedVersion,
@@ -172,6 +198,7 @@ export function validateReleaseSource({
   runnerWorkRoot,
   repositorySlug,
   candidateReleaseTag = "",
+  forwardedWorkflowInputs = [],
 }) {
   if (!SEMVER.test(expectedVersion ?? "")) throw new Error("expected version is invalid");
   const { versions, componentIds } = collectReleaseVersions(repositoryRoot);
@@ -202,6 +229,18 @@ export function validateReleaseSource({
   }
   if (!/^\s{2}workflow_dispatch:\s*$/mu.test(workflow)) {
     throw new Error("release workflow is not explicitly dispatchable");
+  }
+  const declaredWorkflowInputs = collectWorkflowDispatchInputs(workflow);
+  if (new Set(forwardedWorkflowInputs).size !== forwardedWorkflowInputs.length) {
+    throw new Error("forwarded workflow inputs must be unique");
+  }
+  for (const inputName of forwardedWorkflowInputs) {
+    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/u.test(inputName)) {
+      throw new Error(`forwarded workflow input name is invalid: ${inputName}`);
+    }
+    if (!declaredWorkflowInputs.has(inputName)) {
+      throw new Error(`release workflow does not declare forwarded input ${inputName}`);
+    }
   }
   for (const forbidden of ["push", "pull_request", "pull_request_target", "schedule"]) {
     if (new RegExp(`^ {2}${forbidden}:`, "mu").test(workflow)) {
@@ -240,16 +279,18 @@ export function validateReleaseSource({
     runner_labels: requiredRunnerLabels.length,
     workflow: path.relative(repositoryRoot, workflowPath).split(path.sep).join("/"),
     candidate_release_tag: releaseTag,
+    forwarded_workflow_inputs: forwardedWorkflowInputs.length,
     ...integration,
     ...pathBudget,
   };
 }
 
 function parse(argv) {
-  const values = { label: [] };
+  const values = { label: [], "workflow-input": [] };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--runner-label") values.label.push(argv[++index]);
+    else if (flag === "--workflow-input") values["workflow-input"].push(argv[++index]);
     else if (flag.startsWith("--")) values[flag.slice(2)] = argv[++index];
     else throw new Error(`unexpected argument: ${flag}`);
   }
@@ -270,6 +311,7 @@ function parse(argv) {
     runnerWorkRoot: values["runner-work-root"],
     repositorySlug: values.repository,
     candidateReleaseTag: values["candidate-release-tag"] ?? "",
+    forwardedWorkflowInputs: values["workflow-input"],
   };
 }
 

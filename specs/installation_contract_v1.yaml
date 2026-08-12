@@ -1553,6 +1553,10 @@ vm_mounts:
         declared workflow inputs. The coordinator forwards only validated
         pairs and reports presence rather than values; it never discovers a
         model implicitly or forwards credential-bearing generic parameters.
+      - Before candidate creation or runner registration, every dispatch input
+        the coordinator will forward is proven to be declared by the selected
+        workflow. This includes version, target, runner authority, an optional
+        component selector, and every supplied pinned dependency input.
       - Normal component releases require Ref main and the local source commit
         to equal the exact remote main head. An unmerged ref is rejected before
         runner registration unless the operator explicitly selects the
