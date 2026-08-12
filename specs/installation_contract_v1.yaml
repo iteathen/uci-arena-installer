@@ -588,6 +588,10 @@ provider_installer_integration:
       installed, is inactive, and is replacement-ready. Installer defers every
       affected consumer restart until all component roots, receipts, and
       configurations are committed, then resumes consumers in dependency order.
+      Each provider lifecycle command has one 120-second outer deadline so a
+      provider can complete its own bounded sequence of operating-system task,
+      process-tree teardown, retargeting, and readiness operations. The outer
+      deadline never shortens a provider's declared internal teardown bounds.
       A replaced v2 consumer uses post_replace from the installed replacement and
       requires the declared live result. It journals every transaction-wide
       transition and never invokes the older payload's uninstall action for that

@@ -34,11 +34,16 @@ namespace {
 namespace fs = std::filesystem;
 using arena::application::installer::SetupEngine;
 using arena::application::installer::SetupPaths;
+using arena::application::installer::provider_startup_command_timeout;
 using arena::application::installer::RemovalLifecycle;
 using arena::application::installer::RemovalLifecycleHooks;
 using arena::application::installer::assess_book_forge_credential_recovery;
 using arena::application::installer::recover_book_forge_credential;
 using nlohmann::json;
+
+TEST_CASE("provider startup lifecycle has a bounded replacement-safe deadline") {
+    STATIC_REQUIRE(provider_startup_command_timeout == std::chrono::seconds(120));
+}
 
 class FakeAssetSearchIndex final : public arena::ports::AssetSearchIndex {
   public:
