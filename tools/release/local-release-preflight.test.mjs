@@ -308,6 +308,14 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /'draft=false'[\s\S]*?'prerelease=true'[\s\S]*?'make_latest=false'/u);
   assert.match(source, /Candidate prerelease already contains assets/u);
   assert.match(source, /candidate_release_action/u);
+  assert.match(source, /function Assert-PinnedReleaseInputPair/u);
+  assert.match(source, /\$parsedUrl\.Query[\s\S]*?\$parsedUrl\.Fragment/u);
+  assert.match(source, /\$Sha256 -notmatch '\^\[0-9a-f\]\{64\}\$'/u);
+  assert.match(source, /onnxruntime_url[\s\S]*?onnxruntime_sha256/u);
+  assert.match(source, /model_url[\s\S]*?model_sha256/u);
+  assert.match(source, /pinned_input_pairs = \$validatedReleaseInputPairs\.Count/u);
+  assert.ok(source.indexOf("foreach ($pair in $validatedReleaseInputPairs)")
+    < source.indexOf("& gh @dispatchArguments"));
   assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")
     < source.indexOf("actions/runners/registration-token"));
   assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
