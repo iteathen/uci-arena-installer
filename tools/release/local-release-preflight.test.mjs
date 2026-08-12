@@ -315,7 +315,7 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /model_url[\s\S]*?model_sha256/u);
   assert.match(source, /pinned_input_pairs = \$validatedReleaseInputPairs\.Count/u);
   assert.ok(source.indexOf("foreach ($pair in $validatedReleaseInputPairs)")
-    < source.indexOf("& gh @dispatchArguments"));
+    < source.indexOf("$runId = Invoke-WorkflowDispatch"));
   assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")
     < source.indexOf("actions/runners/registration-token"));
   assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
@@ -331,8 +331,12 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /stdout_logs = \$stdoutLogs[\s\S]*?stderr_logs = \$stderrLogs/u);
   assert.match(source, /preserving ephemeral runner roots for the active workflow/u);
   assert.match(source, /\$priorRunIds\s*=\s*@\(\$priorRuns[\s\S]*?databaseId/u);
-  assert.match(source, /-not \(\$priorRunIds -contains \[string\]\$_\.databaseId\)/u);
+  assert.match(source, /-not \(\$PriorRunIds -contains \[string\]\$_\.databaseId\)/u);
   assert.doesNotMatch(source, /dispatchTime\.AddSeconds/u);
+  assert.match(source, /function Invoke-WorkflowDispatch[\s\S]*?attempt -le 3[\s\S]*?observation -le 5[\s\S]*?Start-Sleep -Seconds 2/u);
+  assert.match(source, /Invoke-WorkflowDispatch -Arguments \$dispatchArguments/u);
+  assert.doesNotMatch(source, /& gh @dispatchArguments/u);
+  assert.match(source, /\[Console\]::Error\.WriteLine\([\s\S]*?\$releaseStage/u);
   assert.match(source, /foreach \(\$runnerProcess in \$runnerProcesses\)[\s\S]*?\[void\]\$runnerProcess\.WaitForExit/u);
   assert.match(source, /\} else \{[\s\S]*?'run', 'view'/u);
   assert.match(source, /foreach \(\$runnerRoot in \$runnerRoots\)[\s\S]*?Remove-Item/u);

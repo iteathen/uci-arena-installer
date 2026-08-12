@@ -1604,6 +1604,12 @@ vm_mounts:
         timestamps are not identity. If more than one new matching run appears,
         the wrapper refuses ambiguity and preserves the runner rather than
         deleting files that an unowned active job may be using.
+      - A failed dispatch command is not blindly repeated. The coordinator
+        first polls for up to ten seconds for one exact new run outside the
+        snapshot; one observed run is adopted, multiple runs fail ambiguous,
+        and only a proven zero-run result permits the next of at most three
+        dispatch attempts. Terminal errors identify the coordinator stage on
+        stderr without replacing the original exception.
       - After exact run-id discovery, the complete local ephemeral runner pool,
         per-runner bounded log sizes, and exact GitHub workflow state are the
         lifecycle signals. Read-only terminal-state polling continues while an
