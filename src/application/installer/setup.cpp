@@ -1341,7 +1341,9 @@ void validate_provider_installer_integration(const json& manifest,
         !startup.contains("configuration_argument") ||
         !startup.at("configuration_argument").is_string() ||
         !startup.contains("result") || !startup.at("result").is_object() ||
-        startup.at("result").size() != (startup_v2 ? 4 : 3) ||
+        (startup_v1 && startup.at("result").size() != 3) ||
+        (startup_v2 && startup.at("result").size() != 4 &&
+         startup.at("result").size() != 5) ||
         (startup_v2 &&
          (!startup.contains("replacement_arguments") ||
           !startup.at("replacement_arguments").is_object() ||
@@ -1380,6 +1382,10 @@ void validate_provider_installer_integration(const json& manifest,
     };
     const json& result = startup.at("result");
     const std::string envelope = result.value("envelope", "");
+    const bool require_live_on_post_replace =
+        result.value("require_live_on_post_replace", true);
+    const bool deferred_requalification =
+        result.value("allow_deferred_requalification_on_post_replace", false);
     if (!valid_flag(workspace_flag) ||
         (workspace_relative != fs::path(".") &&
          !safe_relative_path(workspace_relative)) ||
@@ -1393,7 +1399,11 @@ void validate_provider_installer_integration(const json& manifest,
           (!valid_flag(startup.at("replacement_arguments").value("previous_root", "")) ||
            !valid_flag(startup.at("replacement_arguments").value("replacement_root", "")) ||
            !result.contains("require_live_on_post_replace") ||
-           !result.at("require_live_on_post_replace").is_boolean()))) {
+           !result.at("require_live_on_post_replace").is_boolean() ||
+           (result.contains("allow_deferred_requalification_on_post_replace") &&
+            !result.at("allow_deferred_requalification_on_post_replace").is_boolean()) ||
+           (require_live_on_post_replace && deferred_requalification) ||
+           (!require_live_on_post_replace && !deferred_requalification)))) {
         throw std::runtime_error("provider startup control values are invalid");
     }
 }
@@ -4505,12 +4515,24 @@ json invoke_provider_startup(
             "provider startup adapter did not prove replacement quiescence: " +
             component_id);
     }
-    if (action == "post_replace" &&
-        result_contract.at("require_live_on_post_replace").get<bool>() &&
-        (!status.contains("active") || !status.at("active").is_boolean() ||
-         !status.at("active").get<bool>())) {
-        throw std::runtime_error(
-            "provider startup adapter did not resume after replacement: " + component_id);
+    if (action == "post_replace") {
+        const bool active = status.contains("active") &&
+                            status.at("active").is_boolean() &&
+                            status.at("active").get<bool>();
+        if (result_contract.at("require_live_on_post_replace").get<bool>() && !active) {
+            throw std::runtime_error(
+                "provider startup adapter did not resume after replacement: " + component_id);
+        }
+        if (!active &&
+            (!result_contract.value(
+                 "allow_deferred_requalification_on_post_replace", false) ||
+             !status.contains("requalificationRequired") ||
+             !status.at("requalificationRequired").is_boolean() ||
+             !status.at("requalificationRequired").get<bool>())) {
+            throw std::runtime_error(
+                "provider startup adapter did not prove deferred requalification: " +
+                component_id);
+        }
     }
     if (action == "install" &&
         result_contract.at("require_live_on_install").get<bool>() &&
@@ -6261,7 +6283,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             }
             receipt["startup"] = startup;
             write_json_atomic(receipt_path, receipt);
-            transition["state"] = "resumed";
+            const bool active = startup.value("active", false);
+            transition["state"] = active ? "resumed" : "resume_deferred";
+            if (!active) {
+                transition["requalification_required"] = true;
+            }
             write_json_atomic(journal_path, journal);
             for (auto& result : results) {
                 if (result.value("component_id", "") == id) result["startup"] = startup;

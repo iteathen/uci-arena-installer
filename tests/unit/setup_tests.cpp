@@ -2420,9 +2420,17 @@ TEST_CASE("provider startup control accepts the provider workspace root") {
 }
 
 TEST_CASE("staged startup control v2 quiesces startup without receipt-owned state") {
+    bool deferred_requalification = false;
+    std::string component_id;
+    SECTION("live replacement resumes") {
+        component_id = "replaceable.staged-lifecycle.consumer";
+    }
+    SECTION("exact evidence requalification remains safely deferred") {
+        component_id = "replaceable.requalification-required.consumer";
+        deferred_requalification = true;
+    }
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
-    const std::string component_id = "replaceable.staged-lifecycle.consumer";
     static_cast<void>(write_mock_renderer_consumer(
         paths, component_id, "lichess_transport_profile"));
 
@@ -2486,7 +2494,12 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
     startup["replacement_arguments"] = {
         {"previous_root", "--previous-root"},
         {"replacement_root", "--replacement-root"}};
-    startup["result"]["require_live_on_post_replace"] = true;
+    startup["result"]["require_live_on_post_replace"] =
+        !deferred_requalification;
+    if (deferred_requalification) {
+        startup["result"]["allow_deferred_requalification_on_post_replace"] =
+            true;
+    }
     std::ofstream(package_root / "arena-component.json", std::ios::binary)
         << replacement_manifest.dump(2);
     const fs::path archive = root / "staged-provider-1.0.0.tar.gz";
@@ -2528,14 +2541,22 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
     REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("installed") ==
             true);
     REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("active") ==
-            true);
+            !deferred_requalification);
+    REQUIRE(json::parse(std::ifstream(receipt_path))
+                .at("startup")
+                .at("requalificationRequired") == deferred_requalification);
     const json transaction = json::parse(std::ifstream(
         paths.data_root / "transactions" /
         (applied.at("transaction_id").get<std::string>() + ".json")));
     REQUIRE(transaction.at("startup_quiescence").size() == 1);
     REQUIRE(transaction.at("startup_quiescence").at(0).at("component_id") ==
             component_id);
-    REQUIRE(transaction.at("startup_quiescence").at(0).at("state") == "resumed");
+    REQUIRE(transaction.at("startup_quiescence").at(0).at("state") ==
+            (deferred_requalification ? "resume_deferred" : "resumed"));
+    REQUIRE(transaction.at("startup_quiescence")
+                .at(0)
+                .value("requalification_required", false) ==
+            deferred_requalification);
     REQUIRE(transaction.at("actions").at(0).at("component_id") == "runtime.host");
     REQUIRE(fs::is_directory(paths.install_root / "components" / component_id /
                              "1.0.0"));

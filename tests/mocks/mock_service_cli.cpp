@@ -92,13 +92,19 @@ int main(int argc, char** argv) {
         const bool installed = operation == "enable" ||
                                operation == "prepare_replace" ||
                                operation == "complete_replace";
-        const bool active = operation == "enable" || operation == "complete_replace";
+        const bool deferred_requalification =
+            operation == "complete_replace" &&
+            cli.find("requalification-required") != std::string::npos;
+        const bool active = operation == "enable" ||
+                            (operation == "complete_replace" &&
+                             !deferred_requalification);
         std::cout
             << nlohmann::json{
                    {"installed", installed},
                    {"matchesCurrentConfiguration", true},
                    {"active", active},
                    {"replacementReady", operation == "prepare_replace"},
+                   {"requalificationRequired", deferred_requalification},
                }
                    .dump()
             << '\n';
