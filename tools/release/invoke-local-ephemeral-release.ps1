@@ -80,6 +80,51 @@ function Invoke-GitHubJson {
     throw $FailureMessage
 }
 
+function Get-NewMatchingWorkflowRuns {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Workflow,
+        [Parameter(Mandatory = $true)][string]$Ref,
+        [Parameter(Mandatory = $true)][string]$Head,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$PriorRunIds
+    )
+    $runs = @(Invoke-GitHubJson -Arguments @(
+        'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
+        '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
+        '--json', 'databaseId,headSha,status,conclusion,createdAt'
+    ) -FailureMessage 'Could not query workflow runs after three attempts.')
+    return @($runs | Where-Object {
+        $_.headSha -eq $Head -and
+        -not ($PriorRunIds -contains [string]$_.databaseId)
+    } | Sort-Object { [int64]$_.databaseId })
+}
+
+function Invoke-WorkflowDispatch {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [Parameter(Mandatory = $true)][string]$Workflow,
+        [Parameter(Mandatory = $true)][string]$Ref,
+        [Parameter(Mandatory = $true)][string]$Head,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$PriorRunIds
+    )
+    for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        & gh @Arguments *> $null
+        if ($LASTEXITCODE -eq 0) { return $null }
+        for ($observation = 1; $observation -le 5; $observation += 1) {
+            Start-Sleep -Seconds 2
+            $matching = @(Get-NewMatchingWorkflowRuns `
+                -Repository $Repository -Workflow $Workflow -Ref $Ref `
+                -Head $Head -PriorRunIds $PriorRunIds)
+            if ($matching.Count -gt 1) {
+                throw 'More than one new matching workflow run exists after dispatch.'
+            }
+            if ($matching.Count -eq 1) { return [string]$matching[0].databaseId }
+        }
+    }
+    throw 'Workflow dispatch failed and no exact new run appeared after three attempts.'
+}
+
 function Assert-GitHubAuthentication {
     for ($attempt = 1; $attempt -le 3; $attempt += 1) {
         & gh auth status --hostname github.com *> $null
@@ -380,6 +425,7 @@ $stderrLogs = @()
 $runId = $null
 $completed = $false
 $cleanupAuthorized = $true
+$releaseStage = 'runner_registration'
 try {
     foreach ($runnerIndex in 1..$RunnerCount) {
         $runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N').Substring(0, 16))
@@ -414,6 +460,7 @@ try {
             -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
         $runnerProcesses += $runnerProcess
     }
+    $releaseStage = 'workflow_snapshot'
     $priorRuns = @(Invoke-GitHubJson -Arguments @(
         'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
         '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
@@ -434,9 +481,19 @@ try {
             '-f', "$($pair.sha_name)=$($pair.sha256)"
         )
     }
-    & gh @dispatchArguments *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Workflow dispatch failed.' }
+    $releaseStage = 'workflow_dispatch'
+    try {
+        $runId = Invoke-WorkflowDispatch -Arguments $dispatchArguments `
+            -Repository $Repository -Workflow $Workflow -Ref $Ref -Head $head `
+            -PriorRunIds $priorRunIds
+    } catch {
+        if ($_.Exception.Message -match 'More than one new matching workflow run') {
+            $cleanupAuthorized = $false
+        }
+        throw
+    }
 
+    $releaseStage = 'workflow_monitor'
     $deadline = [DateTimeOffset]::UtcNow.AddMinutes($TimeoutMinutes)
     $lastMonitorFailure = $null
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
@@ -446,22 +503,16 @@ try {
             }
         }
         if (-not $runId) {
-            $runs = $null
+            $matching = @()
             try {
-                $runs = @(Invoke-GitHubJson -Arguments @(
-                    'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
-                    '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
-                    '--json', 'databaseId,headSha,status,conclusion,createdAt'
-                ) -FailureMessage 'Could not query the dispatched workflow after three attempts.')
+                $matching = @(Get-NewMatchingWorkflowRuns `
+                    -Repository $Repository -Workflow $Workflow -Ref $Ref `
+                    -Head $head -PriorRunIds $priorRunIds)
                 $lastMonitorFailure = $null
             } catch {
                 $lastMonitorFailure = $_.Exception.Message
             }
-            if ($runs) {
-                $matching = @($runs | Where-Object {
-                    $_.headSha -eq $head -and
-                    -not ($priorRunIds -contains [string]$_.databaseId)
-                } | Sort-Object { [int64]$_.databaseId })
+            if ($matching.Count -gt 0) {
                 if ($matching.Count -gt 1) {
                     $cleanupAuthorized = $false
                     throw 'More than one new matching workflow run exists; preserving the runner and refusing ambiguous monitoring.'
@@ -537,7 +588,9 @@ try {
             Write-Error "Release cancellation did not drain; preserving ephemeral runner roots for the active workflow: $($runnerRoots -join ', ')"
         }
     }
-    Write-Error "Local ephemeral release failed: $($releaseFailure.Exception.Message)"
+    [Console]::Error.WriteLine(
+        "Local ephemeral release failed at $releaseStage`: $($releaseFailure.Exception.Message)"
+    )
     throw $releaseFailure
 } finally {
     if ($cleanupAuthorized) {
