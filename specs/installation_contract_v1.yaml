@@ -1563,10 +1563,14 @@ vm_mounts:
         construction, and immutable release tag. Dynamic-version preflight
         requires that complete chain plus a checked-in component definition;
         an unconstrained workflow input is not version authority.
-      - The runner is repository-scoped, ephemeral, update-disabled, and
-        removed after exactly one bounded workflow attempt. Registration tokens
-        are obtained just in time, suppressed from output, and never written to
-        tracked files or retained logs.
+      - One command may provision a caller-selected pool of one through four
+        repository-scoped, update-disabled ephemeral runners before dispatching
+        exactly one bounded workflow attempt. This supports workflows with
+        sequential self-hosted jobs, including the Engine resolve/build split,
+        without manual runner registration or a second dispatch. Every runner
+        receives an independent just-in-time registration token, accepts at
+        most one job, suppresses the token from output, and is removed after
+        the attempt.
       - Read-only GitHub run discovery and monitoring retry transient CLI/API
         failures three times without ending the runner job. On a terminal local
         wrapper failure, cancellation is requested and both workflow and runner
@@ -1578,11 +1582,13 @@ vm_mounts:
         timestamps are not identity. If more than one new matching run appears,
         the wrapper refuses ambiguity and preserves the runner rather than
         deleting files that an unowned active job may be using.
-      - After exact run-id discovery, the local ephemeral runner process and
-        bounded log sizes are the active-job lifecycle signals. GitHub is not
-        polled while that process is running. After it exits, transient final-
-        status read failures remain non-terminal until the overall deadline;
-        they never trigger cleanup beneath a running action.
+      - After exact run-id discovery, the complete local ephemeral runner pool,
+        per-runner bounded log sizes, and exact GitHub workflow state are the
+        lifecycle signals. Read-only terminal-state polling continues while an
+        unused pool member is waiting so an early workflow failure cannot hang
+        until the overall deadline. Transient status-read failures remain non-
+        terminal, and cleanup starts only after terminal workflow state or a
+        cancellation-and-drain proof, never beneath a running action.
       - Runner and workflow output is redirected to an ignored bounded local
         log directory; conversational or pull-request evidence contains only
         status, paths, sizes, counts, and digests.

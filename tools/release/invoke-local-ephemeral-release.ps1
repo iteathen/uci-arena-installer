@@ -9,6 +9,7 @@ param(
     [string]$Target = 'windows-x86_64',
     [string]$WorkflowComponent = '',
     [string[]]$RunnerLabel = @('self-hosted', 'Windows', 'X64', 'ephemeral', 'uci-suite'),
+    [ValidateRange(1, 4)][int]$RunnerCount = 1,
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
     [string]$CandidateReleaseTag = '',
     [string]$RunnerCacheRoot = 'C:\chess_engine\.actions-runner-cache',
@@ -293,6 +294,7 @@ if ($PreflightOnly) {
         workflow = $Workflow
         runner_version = $runnerVersion
         labels = $RunnerLabel.Count
+        runner_count = $RunnerCount
         authority = $contract.authority
         runner_work_root = $contract.runner_work_root
         projected_path_characters = $contract.projected_path_characters
@@ -313,38 +315,47 @@ if (-not $LogRoot) { $LogRoot = Join-Path $PSScriptRoot '..\..\build\release-run
 $resolvedLogRoot = [System.IO.Path]::GetFullPath($LogRoot)
 New-Item -ItemType Directory -Path $resolvedLogRoot -Force | Out-Null
 $runKey = "{0}-{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $head.Substring(0, 8)
-$stdoutLog = Join-Path $resolvedLogRoot "$runKey.stdout.log"
-$stderrLog = Join-Path $resolvedLogRoot "$runKey.stderr.log"
 $runnerBase = $contract.runner_work_root
 New-Item -ItemType Directory -Path $runnerBase -Force | Out-Null
-$runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N').Substring(0, 16))
-$runnerProcess = $null
-$configured = $false
+$runnerRoots = @()
+$runnerProcesses = @()
+$configuredRunnerRoots = @()
+$stdoutLogs = @()
+$stderrLogs = @()
 $runId = $null
 $completed = $false
 $cleanupAuthorized = $true
 try {
-    New-Item -ItemType Directory -Path $runnerRoot | Out-Null
-    Expand-Archive -LiteralPath $runnerArchive -DestinationPath $runnerRoot
-    $registrationToken = (& gh api --method POST `
-        "repos/$Repository/actions/runners/registration-token" --jq .token).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $registrationToken) {
-        throw 'Could not obtain a just-in-time runner registration token.'
-    }
-    try {
-        $runnerName = "uci-suite-$env:COMPUTERNAME-$($head.Substring(0, 8))-$PID"
-        & (Join-Path $runnerRoot 'config.cmd') --unattended --ephemeral --disableupdate `
-            --url "https://github.com/$Repository" --token $registrationToken `
-            --name $runnerName --labels ($RunnerLabel -join ',') --work 'w' *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'Ephemeral runner configuration failed.' }
-        $configured = $true
-    } finally {
-        $registrationToken = $null
-    }
+    foreach ($runnerIndex in 1..$RunnerCount) {
+        $runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N').Substring(0, 16))
+        $stdoutLog = Join-Path $resolvedLogRoot "$runKey.runner-$runnerIndex.stdout.log"
+        $stderrLog = Join-Path $resolvedLogRoot "$runKey.runner-$runnerIndex.stderr.log"
+        $runnerRoots += $runnerRoot
+        $stdoutLogs += $stdoutLog
+        $stderrLogs += $stderrLog
+        New-Item -ItemType Directory -Path $runnerRoot | Out-Null
+        Expand-Archive -LiteralPath $runnerArchive -DestinationPath $runnerRoot
+        $registrationToken = (& gh api --method POST `
+            "repos/$Repository/actions/runners/registration-token" --jq .token).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $registrationToken) {
+            throw 'Could not obtain a just-in-time runner registration token.'
+        }
+        try {
+            $runnerName = "uci-suite-$env:COMPUTERNAME-$($head.Substring(0, 8))-$PID-$runnerIndex"
+            & (Join-Path $runnerRoot 'config.cmd') --unattended --ephemeral --disableupdate `
+                --url "https://github.com/$Repository" --token $registrationToken `
+                --name $runnerName --labels ($RunnerLabel -join ',') --work 'w' *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'Ephemeral runner configuration failed.' }
+            $configuredRunnerRoots += $runnerRoot
+        } finally {
+            $registrationToken = $null
+        }
 
-    $runnerProcess = Start-Process -FilePath (Join-Path $runnerRoot 'run.cmd') `
-        -WorkingDirectory $runnerRoot -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+        $runnerProcess = Start-Process -FilePath (Join-Path $runnerRoot 'run.cmd') `
+            -WorkingDirectory $runnerRoot -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+        $runnerProcesses += $runnerProcess
+    }
     $priorRuns = @(Invoke-GitHubJson -Arguments @(
         'run', 'list', '--repo', $Repository, '--workflow', $Workflow,
         '--branch', $Ref, '--event', 'workflow_dispatch', '--limit', '10',
@@ -365,11 +376,10 @@ try {
     $deadline = [DateTimeOffset]::UtcNow.AddMinutes($TimeoutMinutes)
     $lastMonitorFailure = $null
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
-        if ((Test-Path $stdoutLog) -and (Get-Item $stdoutLog).Length -gt $maximumLogBytes) {
-            throw 'Runner stdout exceeded the bounded log limit.'
-        }
-        if ((Test-Path $stderrLog) -and (Get-Item $stderrLog).Length -gt $maximumLogBytes) {
-            throw 'Runner stderr exceeded the bounded log limit.'
+        foreach ($logPath in @($stdoutLogs) + @($stderrLogs)) {
+            if ((Test-Path $logPath) -and (Get-Item $logPath).Length -gt $maximumLogBytes) {
+                throw 'Runner output exceeded the bounded per-runner log limit.'
+            }
         }
         if (-not $runId) {
             $runs = $null
@@ -394,7 +404,7 @@ try {
                 }
                 if ($matching.Count -eq 1) { $runId = [string]$matching[0].databaseId }
             }
-        } elseif ($runnerProcess.HasExited) {
+        } else {
             $run = $null
             try {
                 $run = Invoke-GitHubJson -Arguments @(
@@ -431,10 +441,11 @@ try {
         head = $head
         workflow_run_id = $runId
         runner_version = $runnerVersion
+        runner_count = $RunnerCount
         candidate_release_tag = $contract.candidate_release_tag
         candidate_release_state = $candidateReleaseState
-        stdout_log = $stdoutLog
-        stderr_log = $stderrLog
+        stdout_logs = $stdoutLogs
+        stderr_logs = $stderrLogs
     } | ConvertTo-Json -Compress
 } catch {
     $releaseFailure = $_
@@ -452,35 +463,51 @@ try {
             } catch {
                 $runDrained = $false
             }
-            $runnerDrained = -not $runnerProcess -or $runnerProcess.HasExited
+            $runnerDrained = @($runnerProcesses | Where-Object { -not $_.HasExited }).Count -eq 0
             if ($runDrained -and $runnerDrained) { break }
             Start-Sleep -Seconds 2
         }
-        if (-not $runDrained -or ($runnerProcess -and -not $runnerProcess.HasExited)) {
+        if (-not $runDrained -or @($runnerProcesses | Where-Object { -not $_.HasExited }).Count -gt 0) {
             $cleanupAuthorized = $false
-            Write-Error "Release cancellation did not drain; preserving ephemeral runner root for the active job: $runnerRoot"
+            Write-Error "Release cancellation did not drain; preserving ephemeral runner roots for the active workflow: $($runnerRoots -join ', ')"
         }
     }
     Write-Error "Local ephemeral release failed: $($releaseFailure.Exception.Message)"
     throw $releaseFailure
 } finally {
-    if ($cleanupAuthorized -and $runnerProcess -and -not $runnerProcess.HasExited) {
-        Stop-Process -Id $runnerProcess.Id -Force -ErrorAction SilentlyContinue
-        [void]$runnerProcess.WaitForExit(5000)
-    }
-    if ($cleanupAuthorized -and $configured -and
-        (Test-Path -LiteralPath (Join-Path $runnerRoot 'config.cmd'))) {
-        $removeToken = (& gh api --method POST `
-            "repos/$Repository/actions/runners/remove-token" --jq .token 2>$null)
-        if ($LASTEXITCODE -eq 0 -and $removeToken) {
-            & (Join-Path $runnerRoot 'config.cmd') remove --token $removeToken.Trim() *> $null
+    if ($cleanupAuthorized) {
+        foreach ($runnerProcess in $runnerProcesses) {
+            if (-not $runnerProcess.HasExited) {
+                Stop-Process -Id $runnerProcess.Id -Force -ErrorAction SilentlyContinue
+                [void]$runnerProcess.WaitForExit(5000)
+            }
         }
-        $removeToken = $null
+    }
+    if ($cleanupAuthorized) {
+        foreach ($configuredRunnerRoot in $configuredRunnerRoots) {
+            if (-not (Test-Path -LiteralPath (Join-Path $configuredRunnerRoot 'config.cmd'))) {
+                continue
+            }
+            $removeToken = (& gh api --method POST `
+                "repos/$Repository/actions/runners/remove-token" --jq .token 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $removeToken) {
+                & (Join-Path $configuredRunnerRoot 'config.cmd') remove `
+                    --token $removeToken.Trim() *> $null
+            }
+            $removeToken = $null
+        }
     }
     $resolvedRunnerBase = [System.IO.Path]::GetFullPath($runnerBase).TrimEnd('\') + '\'
-    $resolvedRunnerRoot = [System.IO.Path]::GetFullPath($runnerRoot)
-    if ($cleanupAuthorized -and
-        $resolvedRunnerRoot.StartsWith($resolvedRunnerBase, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Remove-Item -LiteralPath $resolvedRunnerRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($cleanupAuthorized) {
+        foreach ($runnerRoot in $runnerRoots) {
+            $resolvedRunnerRoot = [System.IO.Path]::GetFullPath($runnerRoot)
+            if ($resolvedRunnerRoot.StartsWith(
+                    $resolvedRunnerBase,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )) {
+                Remove-Item -LiteralPath $resolvedRunnerRoot -Recurse -Force `
+                    -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
