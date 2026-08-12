@@ -4476,7 +4476,7 @@ json invoke_provider_startup(
     }
     arena::application::ProcessSupervisor process;
     const json response =
-        process.run_json(runtime, active_root, arguments, std::chrono::seconds(30));
+        process.run_json(runtime, active_root, arguments, provider_startup_command_timeout);
     const json& result_contract = control.at("result");
     const json status = result_contract.at("envelope") == "startup"
                             ? response.at("startup")

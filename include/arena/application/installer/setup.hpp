@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -10,6 +11,8 @@ class AssetSearchIndex;
 }
 
 namespace arena::application::installer {
+
+inline constexpr auto provider_startup_command_timeout = std::chrono::seconds(120);
 
 struct SetupPaths {
     std::filesystem::path install_root;
