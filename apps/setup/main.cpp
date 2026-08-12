@@ -179,6 +179,7 @@ int main(int argc, char** argv) {
         std::string import_kind;
         fs::path import_source;
         bool managed_copy = false;
+        std::string authority_mode;
         auto* import_command =
             app.add_subcommand("import", "Validate and save a local component locator");
         import_command
@@ -196,6 +197,12 @@ int main(int argc, char** argv) {
         import_command->add_option("--path", import_source)->required();
         import_command->add_flag("--managed-copy", managed_copy,
                                  "Copy a small opening book into Manager-owned knowledge storage");
+        import_command
+            ->add_option("--authority-mode", authority_mode,
+                         "Opening-book authority: service_managed_live_channel or "
+                         "immutable_pinned_snapshot")
+            ->check(CLI::IsMember({"service_managed_live_channel",
+                                   "immutable_pinned_snapshot"}));
 
         std::string preset{"complete_arena"};
         std::vector<std::string> components;
@@ -290,7 +297,8 @@ int main(int argc, char** argv) {
             print(SetupEngine::inventory(paths, scan_roots, search_index.get()),
                   json_output, result_file);
         } else if (*import_command) {
-            print(SetupEngine::import_path(paths, import_kind, import_source, managed_copy),
+            print(SetupEngine::import_path(paths, import_kind, import_source, managed_copy,
+                                           authority_mode),
                   json_output, result_file);
         } else if (*verify_command) {
             const auto result = SetupEngine::verify(paths);

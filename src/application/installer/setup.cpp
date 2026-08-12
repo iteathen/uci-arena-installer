@@ -2386,6 +2386,9 @@ json indexed_search_projection(const ports::IndexedAssetSearchResult& result,
     };
 }
 
+std::optional<std::string> saved_locator_authority_mode(const json& locator,
+                                                        const std::string& kind);
+
 json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_roots,
                     ports::AssetSearchIndex* search_index) {
     json rows = json::object();
@@ -2497,6 +2500,11 @@ json discovery_rows(const SetupPaths& paths, const std::vector<fs::path>& extra_
                 const fs::path selected = locator.at("path").get<std::string>();
                 bool healthy = fs::exists(selected) && !contains_symbolic_link(selected);
                 json details{{"mode", locator.value("mode", "in_place_reference")}};
+                if (const auto authority =
+                        saved_locator_authority_mode(locator, std::string(kind));
+                    authority.has_value()) {
+                    details["authority_mode"] = *authority;
+                }
                 if (healthy) {
                     try {
                         if (kind == "opening_book") {
@@ -3673,7 +3681,33 @@ fs::path installed_active_root(const fs::path& receipts_root, const std::string&
     return root;
 }
 
-std::optional<fs::path> saved_locator_path(const fs::path& data_root, const std::string& kind) {
+std::optional<std::string> saved_locator_authority_mode(const json& locator,
+                                                        const std::string& kind) {
+    if (!locator.contains("authority_mode")) {
+        return kind == "opening_book"
+            ? std::optional<std::string>{"immutable_pinned_snapshot"}
+            : std::nullopt;
+    }
+    if (kind != "opening_book" || !locator.at("authority_mode").is_string()) {
+        throw std::runtime_error("saved locator authority mode is not allowed for " + kind);
+    }
+    const std::string authority = locator.at("authority_mode").get<std::string>();
+    if (authority != "service_managed_live_channel" &&
+        authority != "immutable_pinned_snapshot") {
+        throw std::runtime_error("saved opening_book locator authority mode is invalid");
+    }
+    return authority;
+}
+
+struct ProviderLocatorSelection {
+    fs::path path;
+    std::string source;
+    std::string storage_mode;
+    std::optional<std::string> authority_mode;
+};
+
+std::optional<ProviderLocatorSelection>
+saved_locator_path(const fs::path& data_root, const std::string& kind) {
     const fs::path locator_path = data_root / "locators" / (kind + ".json");
     if (!fs::is_regular_file(locator_path) || contains_symbolic_link(locator_path)) {
         return std::nullopt;
@@ -3683,20 +3717,25 @@ std::optional<fs::path> saved_locator_path(const fs::path& data_root, const std:
     if (locator.value("schema", "") != "arena_saved_locator_v1" ||
         locator.value("schema_version", 0) != 1 || locator.value("kind", "") != kind ||
         (mode != "in_place_reference" &&
-         !(kind == "lichess_single_game_profile" && mode == "managed_copy")) ||
+         !((kind == "opening_book" || kind == "lichess_single_game_profile") &&
+           mode == "managed_copy")) ||
         !locator.contains("path") ||
         !locator.at("path").is_string()) {
         throw std::runtime_error("saved " + kind + " locator is invalid");
     }
     const fs::path path = normalized_absolute(locator.at("path").get<std::string>());
     static_cast<void>(validate_import_locator(kind, path));
-    return path;
+    return ProviderLocatorSelection{
+        path,
+        "saved_locator",
+        mode,
+        saved_locator_authority_mode(locator, kind),
+    };
 }
 
-std::optional<fs::path> provider_locator_path(const SetupPaths& paths,
-                                              const std::string& kind,
-                                              const json& binding,
-                                              std::optional<json>& discovery_cache) {
+std::optional<ProviderLocatorSelection> provider_locator_path(
+    const SetupPaths& paths, const std::string& kind, const json& binding,
+    std::optional<json>& discovery_cache) {
     const auto accepts = [&binding](const std::string_view source) {
         if (!binding.contains("accepted_sources")) {
             return true;
@@ -3747,7 +3786,14 @@ std::optional<fs::path> provider_locator_path(const SetupPaths& paths,
     const fs::path path =
         normalized_absolute(selected->at("path").get<std::string>());
     static_cast<void>(validate_import_locator(kind, path));
-    return path;
+    return ProviderLocatorSelection{
+        path,
+        "install_receipt",
+        "installed_component",
+        kind == "opening_book"
+            ? std::optional<std::string>{"immutable_pinned_snapshot"}
+            : std::nullopt,
+    };
 }
 
 struct ProviderInstallResult {
@@ -3797,6 +3843,7 @@ ProviderInstallResult render_provider_installation(
     }
 
     json locators = json::object();
+    json locator_details = json::object();
     std::optional<json> discovery_cache;
     for (const auto& binding : integration.at("locator_bindings")) {
         const std::string name = binding.at("name").get<std::string>();
@@ -3805,7 +3852,17 @@ ProviderInstallResult render_provider_installation(
             const auto selected =
                 provider_locator_path(paths, kind, binding, discovery_cache);
             if (selected.has_value()) {
-                locators[name] = selected->string();
+                locators[name] = selected->path.string();
+                json details{
+                    {"kind", kind},
+                    {"path", selected->path.string()},
+                    {"source", selected->source},
+                    {"storage_mode", selected->storage_mode},
+                };
+                if (selected->authority_mode.has_value()) {
+                    details["authority_mode"] = *selected->authority_mode;
+                }
+                locator_details[name] = std::move(details);
             } else if (binding.at("required").get<bool>()) {
                 throw std::runtime_error("required saved locator is unavailable: " + kind);
             }
@@ -3828,6 +3885,7 @@ ProviderInstallResult render_provider_installation(
         {"enabled", enabled},
         {"bindings", std::move(bindings)},
         {"locators", std::move(locators)},
+        {"locator_details", std::move(locator_details)},
     };
     const fs::path context_root = paths.cache_root / "provider-context";
     fs::create_directories(context_root);
@@ -4078,10 +4136,28 @@ json refresh_import_consumers(
 
 json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
                               const fs::path& normalized, const json& validation,
-                              const std::string_view mode = "in_place_reference") {
+                              const std::string_view mode = "in_place_reference",
+                              const std::string_view authority_mode = {}) {
     if (mode != "in_place_reference" &&
-        !(kind == "lichess_single_game_profile" && mode == "managed_copy")) {
+        !((kind == "opening_book" || kind == "lichess_single_game_profile") &&
+          mode == "managed_copy")) {
         throw std::runtime_error("saved locator mode is not allowed for " + kind);
+    }
+    if (kind != "opening_book" && !authority_mode.empty()) {
+        throw std::runtime_error("saved locator authority mode is not allowed for " + kind);
+    }
+    const std::string resolved_authority = kind == "opening_book"
+        ? std::string(authority_mode.empty() ? "immutable_pinned_snapshot" : authority_mode)
+        : std::string{};
+    if (kind == "opening_book" &&
+        resolved_authority != "service_managed_live_channel" &&
+        resolved_authority != "immutable_pinned_snapshot") {
+        throw std::runtime_error("saved opening_book locator authority mode is invalid");
+    }
+    if (resolved_authority == "service_managed_live_channel" &&
+        mode != "in_place_reference") {
+        throw std::runtime_error(
+            "service-managed opening-book authority requires an in-place reference");
     }
     const fs::path locator_path = paths.data_root / "locators" / (kind + ".json");
     fs::create_directories(locator_path.parent_path());
@@ -4092,7 +4168,7 @@ json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
     if (locator_existed) {
         fs::copy_file(locator_path, backup, fs::copy_options::overwrite_existing);
     }
-    const json locator{
+    json locator{
         {"schema", "arena_saved_locator_v1"},
         {"schema_version", 1},
         {"kind", kind},
@@ -4101,6 +4177,9 @@ json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
         {"validation", validation},
         {"saved_at", current_utc_iso()},
     };
+    if (!resolved_authority.empty()) {
+        locator["authority_mode"] = resolved_authority;
+    }
     try {
         write_json_atomic(locator_path, locator);
         const json refreshed = refresh_import_consumers(paths, kind);
@@ -5286,8 +5365,29 @@ json SetupEngine::inventory(const SetupPaths& paths,
 }
 
 json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
-                              const fs::path& path, const bool managed_copy) {
+                              const fs::path& path, const bool managed_copy,
+                              const std::string& authority_mode) {
     const fs::path normalized = normalized_absolute(path);
+    if (kind != "opening_book" && !authority_mode.empty()) {
+        throw std::runtime_error("authority mode is supported only for opening_book");
+    }
+    const std::string opening_book_authority = kind == "opening_book"
+        ? (authority_mode.empty() ? "immutable_pinned_snapshot" : authority_mode)
+        : std::string{};
+    if (kind == "opening_book" &&
+        opening_book_authority != "service_managed_live_channel" &&
+        opening_book_authority != "immutable_pinned_snapshot") {
+        throw std::runtime_error("opening_book authority mode is invalid");
+    }
+    if (managed_copy && opening_book_authority == "service_managed_live_channel") {
+        throw std::runtime_error(
+            "service-managed opening-book authority cannot use managed copy");
+    }
+    if (opening_book_authority == "service_managed_live_channel" &&
+        (!fs::is_directory(normalized) || contains_symbolic_link(normalized))) {
+        throw std::runtime_error(
+            "service-managed opening-book authority requires a regular directory");
+    }
     if (kind == "lichess_token_path") {
         require_external_token_path(paths.data_root, normalized);
     }
@@ -5338,7 +5438,9 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         try {
             const json managed_validation = validate_import_locator(kind, active_root);
             result["refreshed_consumers"] =
-                save_locator_and_refresh(paths, kind, active_root, managed_validation);
+                save_locator_and_refresh(paths, kind, active_root, managed_validation,
+                                         "managed_copy", opening_book_authority);
+            result["authority_mode"] = opening_book_authority;
         } catch (...) {
             std::error_code ignored;
             if (!receipt_existed) {
@@ -5355,7 +5457,7 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         return result;
     }
 
-    return {
+    json result{
         {"schema", "arena_setup_import_result_v1"},
         {"schema_version", 1},
         {"kind", kind},
@@ -5363,8 +5465,14 @@ json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
         {"state", "saved"},
         {"path", normalized.string()},
         {"validation", validation},
-        {"refreshed_consumers", save_locator_and_refresh(paths, kind, normalized, validation)},
+        {"refreshed_consumers", save_locator_and_refresh(paths, kind, normalized, validation,
+                                                          "in_place_reference",
+                                                          opening_book_authority)},
     };
+    if (!opening_book_authority.empty()) {
+        result["authority_mode"] = opening_book_authority;
+    }
+    return result;
 }
 
 json SetupEngine::save_lichess_token_reference(
@@ -5947,7 +6055,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             normalized_absolute(resource.at("path").get<std::string>());
                         const json validation =
                             validate_import_locator(locator_kind, activation_path);
-                        const json locator{
+                        json locator{
                             {"schema", "arena_saved_locator_v1"},
                             {"schema_version", 1},
                             {"kind", locator_kind},
@@ -5956,6 +6064,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             {"validation", validation},
                             {"saved_at", current_utc_iso()},
                         };
+                        if (locator_kind == "opening_book") {
+                            locator["authority_mode"] = "immutable_pinned_snapshot";
+                        }
                         write_json_atomic(locator_path, locator);
                         created_locators.push_back(locator_path.string());
                         journal["actions"].back()["created_knowledge_locators"] =
