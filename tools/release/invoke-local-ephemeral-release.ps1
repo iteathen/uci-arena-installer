@@ -390,10 +390,13 @@ try {
         $stderrLogs += $stderrLog
         New-Item -ItemType Directory -Path $runnerRoot | Out-Null
         Expand-Archive -LiteralPath $runnerArchive -DestinationPath $runnerRoot
-        $registrationToken = (& gh api --method POST `
-            "repos/$Repository/actions/runners/registration-token" --jq .token).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $registrationToken) {
-            throw 'Could not obtain a just-in-time runner registration token.'
+        $registration = Invoke-GitHubJson -Arguments @(
+            'api', '--method', 'POST',
+            "repos/$Repository/actions/runners/registration-token"
+        ) -FailureMessage 'Could not obtain a just-in-time runner registration token.'
+        $registrationToken = [string]$registration.token
+        if (-not $registrationToken) {
+            throw 'Runner registration token response omitted its token.'
         }
         try {
             $runnerName = "uci-suite-$env:COMPUTERNAME-$($head.Substring(0, 8))-$PID-$runnerIndex"
@@ -403,6 +406,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Ephemeral runner configuration failed.' }
         } finally {
             $registrationToken = $null
+            $registration = $null
         }
 
         $runnerProcess = Start-Process -FilePath (Join-Path $runnerRoot 'run.cmd') `

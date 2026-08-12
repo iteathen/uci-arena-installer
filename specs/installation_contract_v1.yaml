@@ -1587,6 +1587,12 @@ vm_mounts:
         receives an independent just-in-time registration token, accepts at
         most one job, suppresses the token from output, and is removed after
         the attempt.
+      - Registration-token acquisition uses the same bounded three-attempt
+        GitHub JSON retry contract as monitoring. A transient CLI, transport,
+        TLS, or malformed-response failure never reaches string operations as
+        a null token and occurs before dispatch; exhaustion cleans staged
+        runner roots and reports the acquisition failure without consuming a
+        workflow attempt.
       - Read-only GitHub run discovery and monitoring retry transient CLI/API
         failures three times without ending the runner job. On a terminal local
         wrapper failure, cancellation is requested and both workflow and runner
