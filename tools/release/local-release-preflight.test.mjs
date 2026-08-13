@@ -12,6 +12,7 @@ import {
   validatePublicationAuthority,
   validateRunnerPathBudget,
   validateReleaseSource,
+  workflowPublicationAuthority,
 } from "./local-release-preflight.mjs";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
@@ -47,6 +48,7 @@ function fixture() {
     "    steps:",
     "      - run: cosign attest-blob artifact",
     "      - run: cosign verify-blob-attestation artifact",
+    "      - run: gh release create component/provider/v1.2.3/windows-x86_64 artifact",
     "",
   ].join("\n"));
   return { root, workflowPath, labels };
@@ -97,6 +99,7 @@ test("release preflight derives distinct Engine resolve and build runner labels"
         "    steps:",
         "      - run: cosign attest-blob artifact",
         "      - run: cosign verify-blob-attestation artifact",
+        "      - run: gh release create component/provider/v1.2.3/windows-x86_64 artifact",
         "",
       ].join("\n"),
     );
@@ -431,6 +434,58 @@ test("release publication authority is explicit and internally consistent", () =
     candidateReleaseTag: "component/lichess-bot/v1.0.19/windows-x86_64",
     expectedVersion: "1.0.19",
   }), /forbids a candidate release tag/u);
+});
+
+test("release preflight rejects publication authority that disagrees with workflow steps", () => {
+  const workflowOwned = "gh release create component/provider/v1.2.3/windows-x86_64 artifact";
+  const preprovisioned = [
+    "gh release view $tag --json assets",
+    "gh release upload $tag @assetPaths",
+  ].join("\n");
+  assert.equal(workflowPublicationAuthority(workflowOwned), "workflow-owned");
+  assert.equal(workflowPublicationAuthority(preprovisioned), "preprovisioned-candidate");
+  assert.throws(
+    () => workflowPublicationAuthority("cosign attest-blob artifact"),
+    /cannot be derived/u,
+  );
+
+  const fixtureRoot = fixture();
+  try {
+    const source = readFileSync(fixtureRoot.workflowPath, "utf8")
+      .replace(
+        "gh release create component/provider/v1.2.3/windows-x86_64 artifact",
+        preprovisioned,
+      );
+    writeFileSync(fixtureRoot.workflowPath, source);
+    const input = {
+      repositoryRoot: fixtureRoot.root,
+      expectedVersion: "1.2.3",
+      expectedComponentId: "provider.component",
+      workflowPath: fixtureRoot.workflowPath,
+      requiredRunnerLabels: fixtureRoot.labels,
+      releaseRef: "main",
+      localHead: HEAD,
+      remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/provider",
+      forwardedWorkflowInputs: ["version", "target", "runner"],
+    };
+    assert.throws(
+      () => validateReleaseSource({
+        ...input,
+        publicationMode: "workflow-owned",
+      }),
+      /does not match workflow requirement preprovisioned-candidate/u,
+    );
+    const accepted = validateReleaseSource({
+      ...input,
+      publicationMode: "preprovisioned-candidate",
+      candidateReleaseTag: "component/provider/v1.2.3/windows-x86_64",
+    });
+    assert.equal(accepted.workflow_publication_mode, "preprovisioned-candidate");
+  } finally {
+    rmSync(fixtureRoot.root, { recursive: true, force: true });
+  }
 });
 
 test("PowerShell runner preflight keeps filtered tool candidates array-shaped", () => {

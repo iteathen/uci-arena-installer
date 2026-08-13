@@ -102,6 +102,15 @@ export function validatePublicationAuthority({
   };
 }
 
+export function workflowPublicationAuthority(workflow) {
+  const createsRelease = /\bgh\s+release\s+create\b/u.test(workflow);
+  const viewsRelease = /\bgh\s+release\s+view\b/u.test(workflow);
+  const uploadsRelease = /\bgh\s+release\s+upload\b/u.test(workflow);
+  if (createsRelease) return "workflow-owned";
+  if (viewsRelease && uploadsRelease) return "preprovisioned-candidate";
+  throw new Error("release workflow publication authority cannot be derived from its checked-in steps");
+}
+
 function readJson(filename, label) {
   try {
     return JSON.parse(readFileSync(filename, "utf8"));
@@ -344,6 +353,12 @@ export function validateReleaseSource({
     candidateReleaseTag,
     expectedVersion,
   });
+  const workflowPublicationMode = workflowPublicationAuthority(workflow);
+  if (publication.publication_mode !== workflowPublicationMode) {
+    throw new Error(
+      `publication authority ${publication.publication_mode} does not match workflow requirement ${workflowPublicationMode}`,
+    );
+  }
   return {
     schema: "arena_local_release_preflight_v1",
     version: expectedVersion,
@@ -354,6 +369,7 @@ export function validateReleaseSource({
     runner_label_sets: runnerLabelSets,
     workflow: path.relative(repositoryRoot, workflowPath).split(path.sep).join("/"),
     forwarded_workflow_inputs: forwardedWorkflowInputs.length,
+    workflow_publication_mode: workflowPublicationMode,
     ...publication,
     ...integration,
     ...pathBudget,
