@@ -14,6 +14,13 @@ Installation is transactional where the platform permits:
 
 `RollbackResult` records attempted, completed, failed operation, restored identities, unresolved state, remediation, log location, and backup location. A rollback failure returns the rollback-failed exit category and retains both the original error and recovery error.
 
+Exact-current upgrade refreshes journal receipt and generated-configuration
+writes but do not rename immutable component roots or quiesce provider startup.
+Their rollback restores the prior receipt and generated files. Burn never plans
+rollback restoration for a related bundle it explicitly detected as missing
+from cache, so an unavailable stale registration cannot displace the prior
+Manager shell during recovery.
+
 Normal uninstall is not secure erase. It durably writes
 `arena_install_uninstall_preservation_v1` before removing a receipt, so an
 interruption leaves either installed authority or explicit prepared evidence

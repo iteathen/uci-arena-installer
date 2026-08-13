@@ -377,7 +377,7 @@ int main(int argc, char** argv) {
             const json resolved = SetupEngine::plan(
                 catalog, paths, preset, components, offline, download_missing_knowledge,
                 download_missing_books, download_missing_tablebases,
-                repair_command->parsed() || upgrade_command->parsed());
+                repair_command->parsed(), upgrade_command->parsed());
             if (*plan_command) {
                 print(resolved, json_output, result_file);
                 curl_global_cleanup();

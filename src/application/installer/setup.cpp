@@ -4041,6 +4041,8 @@ json refresh_provider_consumers(
             throw std::runtime_error(
                 "installed consumer configuration escapes its declared workspace");
         }
+        arena::platform::grant_manager_workspace_access(
+            workspace, paths.manager_service_access);
         const ProviderInstallResult generated = render_provider_installation(
             paths, validated.manifest, component_root, workspace,
             receipt_state == "installed_managed");
@@ -4160,14 +4162,19 @@ json refresh_import_consumers(
 json refresh_dependency_consumers(
     const SetupPaths& paths,
     const std::set<std::string>& replaced_component_ids,
+    const std::set<std::string>& already_refreshed_component_ids,
     const std::string& retained_transaction_id,
     json* retained_writes,
     const std::function<void()>& checkpoint) {
     return refresh_provider_consumers(
         paths,
-        [&replaced_component_ids](const json& receipt, const json&) {
+        [&replaced_component_ids,
+         &already_refreshed_component_ids](const json& receipt, const json&) {
             const std::string component_id = receipt.at("component_id").get<std::string>();
-            if (replaced_component_ids.contains(component_id)) return false;
+            if (replaced_component_ids.contains(component_id) ||
+                already_refreshed_component_ids.contains(component_id)) {
+                return false;
+            }
             return std::ranges::any_of(
                 receipt.value("dependencies", json::array()),
                 [&replaced_component_ids](const json& dependency) {
@@ -5665,7 +5672,8 @@ json SetupEngine::resolve_feature_selection(
 json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::string& preset,
                        const std::vector<std::string>& selected_components, const bool offline,
                        const bool download_missing_knowledge, const bool download_missing_books,
-                       const bool download_missing_tablebases, const bool repair) {
+                       const bool download_missing_tablebases, const bool repair,
+                       const bool upgrade) {
     const auto ids = selected_ids(catalog, preset, selected_components, download_missing_knowledge,
                                   download_missing_books, download_missing_tablebases);
     json actions = json::array();
@@ -5679,9 +5687,11 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
     std::set<std::string> artifact_hashes;
     for (const auto& id : ids) {
         const auto& component = component_by_id(catalog, id);
+        const auto& artifact = platform_artifact(component);
         reserve = (std::max)(reserve, integer_field(component, "workspace_reserve_bytes"));
         const fs::path receipt_path = paths.data_root / "receipts" / (id + ".json");
         bool already_current = false;
+        bool exact_current_artifact = false;
         bool current_enabled = true;
         if (fs::is_regular_file(receipt_path)) {
             try {
@@ -5694,12 +5704,26 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
                     validate_component_payload(receipt.at("active_root").get<std::string>(), id,
                                                receipt.at("component_version").get<std::string>());
                     already_current = true;
+                    exact_current_artifact =
+                        receipt.value("artifact_sha256", "") ==
+                        artifact.at("sha256").get<std::string>();
                     current_enabled = receipt.value("state", "") == "installed_managed";
-                    if (!repair) {
+                    if (!repair && !upgrade) {
                         actions.push_back({{"action", "keep"},
                                            {"component_id", id},
                                            {"version", component.at("version")},
                                            {"enabled", current_enabled}});
+                        continue;
+                    }
+                    if (upgrade && exact_current_artifact) {
+                        actions.push_back(
+                            {{"action", "refresh"},
+                             {"component_id", id},
+                             {"version", component.at("version")},
+                             {"dependencies",
+                              component.value("dependencies", json::array())},
+                             {"enabled", current_enabled},
+                             {"artifact", artifact}});
                         continue;
                     }
                 }
@@ -5710,7 +5734,7 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
         const fs::path selected_root =
             paths.install_root / "components" / id / selected_version;
         const bool partial_selected_root = fs::exists(selected_root) && !already_current;
-        if (partial_selected_root && !repair) {
+        if (partial_selected_root && !repair && !upgrade) {
             blockers.push_back({
                 {"code", "partial_installation_requires_repair"},
                 {"component_id", id},
@@ -5718,7 +5742,6 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
                 {"path", selected_root.string()},
             });
         }
-        const auto& artifact = platform_artifact(component);
         const std::string hash = artifact.at("sha256").get<std::string>();
         if (artifact_hashes.insert(hash).second) {
             download += artifact.value("type", "archive") == "file_set"
@@ -5832,6 +5855,7 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
         {"preset", preset},
         {"offline", offline},
         {"repair", repair},
+        {"upgrade", upgrade},
         {"download_missing_knowledge", download_missing_knowledge},
         {"download_missing_books", download_missing_knowledge || download_missing_books},
         {"download_missing_tablebases", download_missing_knowledge || download_missing_tablebases},
@@ -5899,14 +5923,28 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     try {
         const fs::path catalog_directory = fs::path(plan.value("catalog_directory", "."));
         std::set<std::string> replaced_component_ids;
+        std::set<std::string> refreshed_component_ids;
         for (const auto& action : plan.at("actions")) {
-            if (action.value("action", "install") == "keep") continue;
+            const std::string action_kind = action.value("action", "install");
+            if (action_kind == "keep") continue;
             const std::string id = action.at("component_id").get<std::string>();
             const std::string version = action.at("version").get<std::string>();
-            if (!valid_identifier(id) || !valid_identifier(version) ||
-                !replaced_component_ids.insert(id).second) {
+            if (!valid_identifier(id) || !valid_identifier(version)) {
                 throw std::runtime_error(
-                    "plan contains an unsafe or duplicate component identity");
+                    "plan contains an unsafe component identity");
+            }
+            if (action_kind == "refresh") {
+                if (replaced_component_ids.contains(id) ||
+                    !refreshed_component_ids.insert(id).second) {
+                    throw std::runtime_error(
+                        "plan contains a duplicate refresh component identity");
+                }
+                continue;
+            }
+            if (!replaced_component_ids.insert(id).second ||
+                refreshed_component_ids.contains(id)) {
+                throw std::runtime_error(
+                    "plan contains a duplicate component identity");
             }
             const fs::path artifact = acquire_artifact(
                 action.at("artifact"), catalog_directory, paths,
@@ -6033,7 +6071,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         }
 
         for (const auto& action : plan.at("actions")) {
-            if (action.value("action", "install") == "keep") {
+            const std::string action_kind = action.value("action", "install");
+            if (action_kind == "keep") {
                 results.push_back({{"component_id", action.at("component_id")},
                                    {"component_version", action.at("version")},
                                    {"state", "already_current"}});
@@ -6045,6 +6084,68 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 throw std::runtime_error("plan contains an unsafe component identity");
             }
             const fs::path receipt_path = receipts_root / (id + ".json");
+            if (action_kind == "refresh") {
+                if (!fs::is_regular_file(receipt_path) ||
+                    !action.contains("artifact") ||
+                    !action.at("artifact").is_object()) {
+                    throw std::runtime_error(
+                        "exact-current refresh is missing receipt or artifact evidence: " +
+                        id);
+                }
+                json receipt = read_json(receipt_path);
+                const std::string expected_state =
+                    action.value("enabled", true) ? "installed_managed"
+                                                   : "installed_disabled";
+                const std::string artifact_sha256 =
+                    action.at("artifact").value("sha256", "");
+                const fs::path target = components_root / id / version;
+                if (receipt.value("schema", "") != "arena_install_receipt_v1" ||
+                    receipt.value("component_id", "") != id ||
+                    receipt.value("component_version", "") != version ||
+                    receipt.value("state", "") != expected_state ||
+                    artifact_sha256.empty() ||
+                    receipt.value("artifact_sha256", "") != artifact_sha256 ||
+                    !receipt.contains("active_root") ||
+                    normalized_absolute(
+                        receipt.at("active_root").get<std::string>()) !=
+                        normalized_absolute(target)) {
+                    throw std::runtime_error(
+                        "exact-current refresh evidence no longer matches: " + id);
+                }
+                const ValidatedComponentPayload validated =
+                    validate_component_payload(target, id, version);
+                journal["actions"].push_back(
+                    {{"action", "refresh"},
+                     {"component_id", id},
+                     {"version", version},
+                     {"state", "refreshing"},
+                     {"target", target.string()}});
+                const fs::path receipt_backup =
+                    receipts_root / (id + ".rollback-" + transaction_id + ".json");
+                fs::copy_file(receipt_path, receipt_backup,
+                              fs::copy_options::overwrite_existing);
+                journal["actions"].back()["receipt_path"] = receipt_path.string();
+                journal["actions"].back()["receipt_backup"] =
+                    receipt_backup.string();
+                write_json_atomic(journal_path, journal);
+                if (validated.manifest.contains("installer_integration")) {
+                    const fs::path workspace = provider_workspace(
+                        paths, validated.manifest.at("installer_integration"));
+                    arena::platform::grant_manager_workspace_access(
+                        workspace, paths.manager_service_access);
+                }
+                receipt["dependencies"] =
+                    action.value("dependencies", json::array());
+                if (!paths.bundle_owner.empty()) {
+                    receipt["bundle_owner"] = paths.bundle_owner;
+                }
+                receipt["refreshed_at"] = current_utc_iso();
+                write_json_atomic(receipt_path, receipt);
+                journal["actions"].back()["state"] = "refreshed_current";
+                write_json_atomic(journal_path, journal);
+                results.push_back(std::move(receipt));
+                continue;
+            }
             std::optional<json> previous_receipt;
             journal["actions"].push_back(
                 {{"component_id", id}, {"version", version}, {"state", "staging"}});
@@ -6292,9 +6393,22 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             write_json_atomic(journal_path, journal);
             results.push_back(receipt);
         }
+        journal["refreshed_current_components"] = json::array();
+        for (const std::string& id : refreshed_component_ids) {
+            journal["refreshed_current_components"].push_back(id);
+        }
+        journal["refreshed_current_consumers"] = refresh_provider_consumers(
+            paths,
+            [&refreshed_component_ids](const json& receipt, const json&) {
+                return refreshed_component_ids.contains(
+                    receipt.at("component_id").get<std::string>());
+            },
+            transaction_id + "-current", &journal["consumer_refresh_writes"],
+            [&]() { write_json_atomic(journal_path, journal); });
+        write_json_atomic(journal_path, journal);
         journal["refreshed_dependency_consumers"] = refresh_dependency_consumers(
-            paths, replaced_component_ids, transaction_id + "-dependencies",
-            &journal["consumer_refresh_writes"],
+            paths, replaced_component_ids, refreshed_component_ids,
+            transaction_id + "-dependencies", &journal["consumer_refresh_writes"],
             [&]() { write_json_atomic(journal_path, journal); });
         write_json_atomic(journal_path, journal);
         for (std::size_t offset = 0;
@@ -6624,7 +6738,8 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 fs::remove(locator->get<std::string>(), rollback_error);
                 rollback_error.clear();
             }
-            if (state != "staging" && action->contains("target")) {
+            if (state != "staging" && action->contains("target") &&
+                action->value("action", "replace") != "refresh") {
                 try {
                     remove_managed_component_tree_with_retry(
                         action->at("target").get<std::string>(),

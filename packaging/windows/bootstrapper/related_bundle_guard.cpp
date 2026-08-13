@@ -30,6 +30,21 @@ HRESULT WINAPI ArenaBAFunctionsProc(
     case BA_FUNCTIONS_MESSAGE_ONDESTROY:
       delete context;
       return S_OK;
+    case BA_FUNCTIONS_MESSAGE_ONDETECTBEGIN:
+      context->related_bundles.begin_detect();
+      return S_OK;
+    case BA_FUNCTIONS_MESSAGE_ONDETECTRELATEDBUNDLE: {
+      const auto* detect_arguments =
+          static_cast<BA_ONDETECTRELATEDBUNDLE_ARGS*>(arguments);
+      if (detect_arguments == nullptr ||
+          detect_arguments->wzBundleCode == nullptr) {
+        return E_INVALIDARG;
+      }
+      context->related_bundles.observe(
+          detect_arguments->wzBundleCode,
+          detect_arguments->fMissingFromCache != FALSE);
+      return S_OK;
+    }
     case BA_FUNCTIONS_MESSAGE_ONPLANBEGIN:
       context->related_bundles.begin_plan();
       return S_OK;
@@ -43,6 +58,22 @@ HRESULT WINAPI ArenaBAFunctionsProc(
       }
       if (!context->related_bundles.claim(plan_arguments->wzBundleCode)) {
         plan_results->requestedState = BOOTSTRAPPER_REQUEST_STATE_NONE;
+      }
+      return S_OK;
+    }
+    case BA_FUNCTIONS_MESSAGE_ONPLANRESTORERELATEDBUNDLE: {
+      const auto* restore_arguments =
+          static_cast<BA_ONPLANRESTORERELATEDBUNDLE_ARGS*>(arguments);
+      auto* restore_results =
+          static_cast<BA_ONPLANRESTORERELATEDBUNDLE_RESULTS*>(results);
+      if (restore_arguments == nullptr ||
+          restore_arguments->wzBundleCode == nullptr ||
+          restore_results == nullptr) {
+        return E_INVALIDARG;
+      }
+      if (!context->related_bundles.allow_restore(
+              restore_arguments->wzBundleCode)) {
+        restore_results->requestedState = BOOTSTRAPPER_REQUEST_STATE_NONE;
       }
       return S_OK;
     }

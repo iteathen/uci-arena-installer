@@ -820,9 +820,14 @@ packaging:
       - The Complete development bootstrapper uses the upgrade transaction for
         both initial installation and related-bundle replacement. With no
         receipts the upgrade transaction installs normally; with existing
-        receipts it restages every selected component, regenerates integration
-        configuration, reapplies managed workspace access, and adopts the
-        receipts before the related older bundle is removed.
+        receipts it stages and replaces every changed or unproven component.
+        A receipt whose active payload validates and whose component version
+        plus artifact digest exactly match the selected catalog is refreshed
+        in place: Installer regenerates integration configuration, reapplies
+        managed workspace access, and adopts its receipt without renaming the
+        immutable root or quiescing its startup authority. Explicit repair
+        still restages every selected component. All selected receipts are
+        adopted before the related older bundle is removed.
       - When that bootstrapper's initial elevated transaction explicitly
         accepts an unsigned development catalog, retained release media records
         the exact catalog digest in the same administrator-protected release
@@ -1001,6 +1006,12 @@ packaging:
         duplication remains observable in the Burn log; it must never produce
         duplicate removal authority, a missing-cache launch, or a success-path
         error dialog.
+      - When Burn explicitly reports a related bundle missing from its package
+        cache, the bootstrapper records that exact bundle code and requests no
+        execute or rollback-restore action for it. A proven uncached stale
+        registration cannot remove, restore, or replace live installation
+        authority; registry cleanup requires separate exact evidence and is not
+        inferred by the bundle plan.
       - A scope-neutral native launcher may provide one visible Personal or All
         users choice while delegating unchanged to the two fixed-scope bundles.
         It is a launcher brick, not a configurable WiX bundle: it never
@@ -2066,8 +2077,14 @@ transaction:
         configurations and active-model pointers from current saved locators.
   upgrade:
     rules:
-      - Upgrade restages every selected component so the new bundle atomically
-        adopts all selected receipts before Burn removes a related older bundle.
+      - Upgrade stages and replaces every selected component whose validated
+        active receipt does not exactly match the catalog component version and
+        artifact digest. An exact-current payload is reused in place while its
+        generated configuration, managed workspace access, dependency
+        projection, and bundle ownership are refreshed transactionally. Only
+        roots that will actually be renamed, or consumers of those roots, enter
+        startup quiescence. All selected receipts are adopted before Burn
+        removes a related older bundle.
       - A prior immutable component root remains available until the replacement
         receipt, generated configuration, startup state, and Manager restart
         have committed. Post-commit maintenance then considers only sibling
@@ -2152,6 +2169,13 @@ acceptance:
     provider resume. The resumed provider cannot retain the superseded
     dependency root, and any later transaction failure restores the exact prior
     generated files.
+  - A same-version suite update with only Manager or Installer integration
+    changes reuses exact-current provider roots, keeps their hidden startup
+    registrations active, refreshes their generated configuration and receipt
+    ownership, and completes without provider requalification. A related
+    bundle explicitly detected as missing from cache receives no execute or
+    rollback-restore action, and an injected later failure restores the prior
+    Manager shell plus receipts without launching that stale registration.
   - A routine component update test emits and applies a verified package while
     proving that no CMake configure, native compilation, MSI build, Burn build,
     or installer-envelope composition entrypoint was invoked.

@@ -21,3 +21,34 @@ TEST_CASE("related bundle plan starts a fresh identity ledger") {
   guard.begin_plan();
   CHECK(guard.claim(identity));
 }
+
+TEST_CASE("related bundles missing from cache receive no execute or restore action") {
+  RelatedBundlePlanGuard guard;
+  constexpr auto missing = L"{43A6C14D-4B5C-4E8B-B967-A62200DB7035}";
+  constexpr auto cached = L"{3857CC73-F47D-45B6-A419-25F7FBD4745F}";
+
+  guard.begin_detect();
+  guard.observe(missing, true);
+  guard.observe(cached, false);
+  guard.begin_plan();
+
+  CHECK_FALSE(guard.claim(missing));
+  CHECK_FALSE(guard.allow_restore(missing));
+  CHECK(guard.claim(cached));
+  CHECK(guard.allow_restore(cached));
+}
+
+TEST_CASE("a new detection pass clears stale missing-cache observations") {
+  RelatedBundlePlanGuard guard;
+  constexpr auto identity = L"{F0C731FA-6AD6-4D36-AE12-9B645D9945F8}";
+
+  guard.begin_detect();
+  guard.observe(identity, true);
+  CHECK_FALSE(guard.allow_restore(identity));
+
+  guard.begin_detect();
+  guard.observe(identity, false);
+  guard.begin_plan();
+  CHECK(guard.claim(identity));
+  CHECK(guard.allow_restore(identity));
+}
