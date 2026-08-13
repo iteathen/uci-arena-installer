@@ -586,8 +586,13 @@ provider_installer_integration:
       registration without opening or copying credential contents.
     - A successful pre_replace response proves the registration remains
       installed, is inactive, and is replacement-ready. Installer defers every
-      affected consumer restart until all component roots, receipts, and
-      configurations are committed, then resumes consumers in dependency order.
+      affected consumer restart until all component roots and receipts are
+      committed. Before any restart, Installer reruns each unchanged affected
+      consumer's validated provider renderer against the new dependency
+      receipts, transactionally replaces its configuration and generated
+      documents, and journals those writes for rollback. Components already
+      replaced and rendered by the same transaction are excluded. Installer
+      then resumes consumers in dependency order.
       Each provider lifecycle command has one 120-second outer deadline so a
       provider can complete its own bounded sequence of operating-system task,
       process-tree teardown, retargeting, and readiness operations. The outer
@@ -2136,6 +2141,11 @@ acceptance:
     stages both payloads, quiesces the consumer before the dependency rename,
     defers restart until all roots commit, and restores the prior live startup
     registration after any rollback.
+  - A dependency-only update regenerates every unchanged affected provider
+    configuration and generated document from the replacement receipt before
+    provider resume. The resumed provider cannot retain the superseded
+    dependency root, and any later transaction failure restores the exact prior
+    generated files.
   - A routine component update test emits and applies a verified package while
     proving that no CMake configure, native compilation, MSI build, Burn build,
     or installer-envelope composition entrypoint was invoked.

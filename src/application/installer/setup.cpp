@@ -3970,8 +3970,9 @@ struct ImportWrite {
     json document;
 };
 
-json refresh_import_consumers(
-    const SetupPaths& paths, const std::string& kind,
+json refresh_provider_consumers(
+    const SetupPaths& paths,
+    const std::function<bool(const json&, const json&)>& matches,
     const std::string& retained_transaction_id = {},
     json* retained_writes = nullptr,
     const std::function<void()>& checkpoint = {}) {
@@ -4026,12 +4027,7 @@ json refresh_import_consumers(
             continue;
         }
         const json& integration = validated.manifest.at("installer_integration");
-        if (std::ranges::none_of(
-                integration.at("locator_bindings"), [&kind](const json& binding) {
-                    return binding.value("kind", "") == kind;
-                })) {
-            continue;
-        }
+        if (!matches(receipt, validated.manifest)) continue;
         const std::string configured = receipt.value("configuration_path", "");
         if (configured.empty()) {
             throw std::runtime_error("installed consumer has no generated configuration: " +
@@ -4142,6 +4138,45 @@ json refresh_import_consumers(
         refreshed.push_back(component_id);
     }
     return refreshed;
+}
+
+json refresh_import_consumers(
+    const SetupPaths& paths, const std::string& kind,
+    const std::string& retained_transaction_id = {},
+    json* retained_writes = nullptr,
+    const std::function<void()>& checkpoint = {}) {
+    return refresh_provider_consumers(
+        paths,
+        [&kind](const json&, const json& manifest) {
+            const json& integration = manifest.at("installer_integration");
+            return std::ranges::any_of(
+                integration.at("locator_bindings"), [&kind](const json& binding) {
+                    return binding.value("kind", "") == kind;
+                });
+        },
+        retained_transaction_id, retained_writes, checkpoint);
+}
+
+json refresh_dependency_consumers(
+    const SetupPaths& paths,
+    const std::set<std::string>& replaced_component_ids,
+    const std::string& retained_transaction_id,
+    json* retained_writes,
+    const std::function<void()>& checkpoint) {
+    return refresh_provider_consumers(
+        paths,
+        [&replaced_component_ids](const json& receipt, const json&) {
+            const std::string component_id = receipt.at("component_id").get<std::string>();
+            if (replaced_component_ids.contains(component_id)) return false;
+            return std::ranges::any_of(
+                receipt.value("dependencies", json::array()),
+                [&replaced_component_ids](const json& dependency) {
+                    return dependency.is_string() &&
+                           replaced_component_ids.contains(
+                               dependency.get<std::string>());
+                });
+        },
+        retained_transaction_id, retained_writes, checkpoint);
 }
 
 json save_locator_and_refresh(const SetupPaths& paths, const std::string& kind,
@@ -6257,6 +6292,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             write_json_atomic(journal_path, journal);
             results.push_back(receipt);
         }
+        journal["refreshed_dependency_consumers"] = refresh_dependency_consumers(
+            paths, replaced_component_ids, transaction_id + "-dependencies",
+            &journal["consumer_refresh_writes"],
+            [&]() { write_json_atomic(journal_path, journal); });
+        write_json_atomic(journal_path, journal);
         for (std::size_t offset = 0;
              offset < journal.at("startup_quiescence").size(); ++offset) {
             const std::size_t index =

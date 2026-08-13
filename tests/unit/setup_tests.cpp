@@ -2563,6 +2563,127 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
     fs::remove_all(root);
 }
 
+TEST_CASE("dependency replacement refreshes unchanged consumers before resume") {
+    bool fail_after_refresh = false;
+    std::string component_id = "replaceable.dependency.consumer";
+    SECTION("committed consumer selects replacement dependency") {}
+    SECTION("later failure restores prior generated configuration") {
+        fail_after_refresh = true;
+        component_id = "replaceable.fail-new-binding.consumer";
+    }
+
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile");
+    const fs::path consumer_root =
+        paths.install_root / "components" / component_id / "1.0.0";
+    const fs::path consumer_manifest_path = consumer_root / "arena-component.json";
+    json consumer_manifest = json::parse(std::ifstream(consumer_manifest_path));
+    consumer_manifest["installer_integration"]["dependency_bindings"] =
+        json::array({{{"name", "runtime"},
+                      {"component_id", "runtime.host"},
+                      {"source", "active_root"},
+                      {"required", true}}});
+    std::ofstream(consumer_manifest_path, std::ios::binary | std::ios::trunc)
+        << consumer_manifest.dump(2);
+
+    const fs::path old_runtime_root =
+        paths.install_root / "components" / "runtime.host" / "1.0.0";
+    const json old_configuration{
+        {"schema", "replaceable_provider_configuration_v1"},
+        {"enabled", true},
+        {"bindings", {{"runtime", old_runtime_root.string()}}},
+        {"locators", json::object()},
+        {"locator_details", json::object()},
+    };
+    std::ofstream(configuration, std::ios::binary | std::ios::trunc)
+        << old_configuration.dump(2);
+    const fs::path generated =
+        configuration.parent_path() / "generated" / "context-projection.json";
+    REQUIRE_FALSE(fs::exists(generated));
+    const fs::path consumer_receipt_path =
+        paths.data_root / "receipts" / (component_id + ".json");
+    json consumer_receipt = json::parse(std::ifstream(consumer_receipt_path));
+    consumer_receipt["state"] = "installed_managed";
+    consumer_receipt["startup"] = {{"installed", true}};
+    std::ofstream(consumer_receipt_path, std::ios::binary | std::ios::trunc)
+        << consumer_receipt.dump(2);
+
+    const fs::path replacement_package = root / "runtime-host-replacement";
+    const fs::path runtime_relative = fs::path("bin") /
+                                      fs::path(ARENA_MOCK_SERVICE_PATH).filename();
+    const fs::path replacement_runtime = replacement_package / runtime_relative;
+    fs::create_directories(replacement_runtime.parent_path());
+    fs::copy_file(ARENA_MOCK_SERVICE_PATH, replacement_runtime);
+    std::ofstream(replacement_package / "arena-component.json", std::ios::binary)
+        << json{
+               {"schema", "arena_install_component_v1"},
+               {"schema_version", 1},
+               {"component_id", "runtime.host"},
+               {"component_version", "2.0.0"},
+               {"entrypoints", {{"execute", runtime_relative.generic_string()}}},
+               {"dependencies", json::array()},
+               {"files",
+                json::array({{{"path", runtime_relative.generic_string()},
+                              {"size_bytes", fs::file_size(replacement_runtime)},
+                              {"sha256", sha256_path(replacement_runtime)}}})},
+           }
+               .dump(2);
+    const fs::path replacement_archive = root / "runtime.host-2.0.0.tar.gz";
+    write_component_archive(replacement_package, replacement_archive);
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array({{{"action", "install"},
+                       {"component_id", "runtime.host"},
+                       {"version", "2.0.0"},
+                       {"dependencies", json::array()},
+                       {"enabled", true},
+                       {"artifact",
+                        {{"type", "archive"},
+                         {"source", replacement_archive.filename().string()},
+                         {"sha256", sha256_path(replacement_archive)},
+                         {"size_bytes", fs::file_size(replacement_archive)}}}}})},
+    };
+
+    if (fail_after_refresh) {
+        REQUIRE_THROWS(SetupEngine::apply(json::object(), plan, paths, true, true));
+        REQUIRE(json::parse(std::ifstream(configuration)) == old_configuration);
+        REQUIRE_FALSE(fs::exists(generated));
+        const json runtime_receipt = json::parse(std::ifstream(
+            paths.data_root / "receipts" / "runtime.host.json"));
+        REQUIRE(runtime_receipt.at("component_version") == "1.0.0");
+        REQUIRE(fs::is_directory(old_runtime_root));
+        const auto transactions = fs::directory_iterator(
+            paths.data_root / "transactions");
+        const auto transaction = json::parse(std::ifstream(transactions->path()));
+        REQUIRE(transaction.at("state") == "rolled_back");
+    } else {
+        const json applied =
+            SetupEngine::apply(json::object(), plan, paths, true, true);
+        INFO(applied.dump(2));
+        REQUIRE(applied.at("state") == "committed");
+        const fs::path replacement_root =
+            paths.install_root / "components" / "runtime.host" / "2.0.0";
+        const json refreshed = json::parse(std::ifstream(configuration));
+        REQUIRE(refreshed.at("bindings").at("runtime") ==
+                replacement_root.string());
+        REQUIRE(fs::is_regular_file(generated));
+        const json transaction = json::parse(std::ifstream(
+            paths.data_root / "transactions" /
+            (applied.at("transaction_id").get<std::string>() + ".json")));
+        REQUIRE(transaction.at("refreshed_dependency_consumers") ==
+                json::array({component_id}));
+        REQUIRE(transaction.at("startup_quiescence").at(0).at("state") ==
+                "resumed");
+    }
+    fs::remove_all(root);
+}
+
 TEST_CASE("timing profile imports derive only additive permissions from complete gates") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
