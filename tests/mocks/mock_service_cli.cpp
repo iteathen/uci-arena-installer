@@ -36,6 +36,22 @@ bool has_option(const int argc, char** argv, const std::string_view option) {
     return false;
 }
 
+bool has_dependency_version(const int argc, char** argv,
+                            const std::string_view binding,
+                            const std::string_view version) {
+    for (int index = 1; index + 1 < argc; ++index) {
+        if (std::string_view(argv[index]) != "--settings") continue;
+        std::ifstream input(argv[index + 1], std::ios::binary);
+        if (!input) return false;
+        const nlohmann::json configuration = nlohmann::json::parse(input);
+        const auto& bindings = configuration.at("bindings");
+        return bindings.contains(binding) && bindings.at(binding).is_string() &&
+               bindings.at(binding).get<std::string>().find(version) !=
+                   std::string::npos;
+    }
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -89,6 +105,11 @@ int main(int argc, char** argv) {
         command == "lifecycle" &&
         (operation == "enable" || operation == "disable" ||
          operation == "prepare_replace" || operation == "complete_replace")) {
+        if (operation == "enable" &&
+            cli.find("fail-new-binding") != std::string::npos &&
+            has_dependency_version(argc, argv, "runtime", "2.0.0")) {
+            return 23;
+        }
         const bool installed = operation == "enable" ||
                                operation == "prepare_replace" ||
                                operation == "complete_replace";
