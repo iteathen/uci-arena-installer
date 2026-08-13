@@ -11,6 +11,7 @@ param(
     [string[]]$RunnerLabel = @('self-hosted', 'Windows', 'X64', 'ephemeral', 'uci-suite'),
     [ValidateRange(1, 4)][int]$RunnerCount = 1,
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
+    [ValidateSet('preprovisioned-candidate', 'workflow-owned')][string]$PublicationMode = '',
     [string]$CandidateReleaseTag = '',
     [string]$OnnxRuntimeUrl = '',
     [string]$OnnxRuntimeSha256 = '',
@@ -351,6 +352,7 @@ $preflightArguments = @(
     '--allow-unmerged-diagnostic', $AllowUnmergedDiagnostic.IsPresent.ToString().ToLowerInvariant(),
     '--runner-work-root', $RunnerWorkRoot,
     '--repository', $Repository,
+    '--publication-mode', $PublicationMode,
     '--candidate-release-tag', $CandidateReleaseTag
 )
 foreach ($label in $RunnerLabel) {
@@ -401,14 +403,15 @@ if ($PreflightOnly) {
         authority = $contract.authority
         runner_work_root = $contract.runner_work_root
         projected_path_characters = $contract.projected_path_characters
+        publication_mode = $contract.publication_mode
         candidate_release_tag = $contract.candidate_release_tag
-        candidate_release_action = $(if ($contract.candidate_release_tag) { 'would_create_or_verify' } else { 'not_requested' })
+        candidate_release_action = $(if ($contract.publication_mode -eq 'preprovisioned-candidate') { 'would_create_or_verify' } else { 'workflow_owned' })
     } | ConvertTo-Json -Compress
     return
 }
 
-$candidateReleaseState = 'not_requested'
-if ($contract.candidate_release_tag) {
+$candidateReleaseState = 'workflow_owned'
+if ($contract.publication_mode -eq 'preprovisioned-candidate') {
     $candidateReleaseState = Ensure-EmptyCandidateRelease `
         -Repository $Repository -Tag $contract.candidate_release_tag -Head $head `
         -ComponentId $ComponentId -Version $Version -Target $Target
@@ -560,6 +563,7 @@ try {
         runner_version = $runnerVersion
         runner_count = $RunnerCount
         pinned_input_pairs = $validatedReleaseInputPairs.Count
+        publication_mode = $contract.publication_mode
         candidate_release_tag = $contract.candidate_release_tag
         candidate_release_state = $candidateReleaseState
         stdout_logs = $stdoutLogs

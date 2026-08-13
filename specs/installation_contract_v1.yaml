@@ -1586,6 +1586,12 @@ vm_mounts:
         prerelease, exact-head, and empty. Existing assets fail closed before
         dispatch; an empty candidate left by an earlier pre-upload failure is
         safely reusable. Preflight-only reports intent and never creates it.
+      - Every local component-release invocation explicitly selects either
+        pre-provisioned-candidate or workflow-owned publication authority.
+        Pre-provisioned-candidate authority requires one valid version-bound
+        candidate tag; workflow-owned authority forbids a candidate tag. An
+        omitted, unknown, or contradictory selection fails before candidate
+        creation, runner-token acquisition, runner registration, or dispatch.
       - A component may declare its immutable version statically or bind the
         workflow_dispatch version through the release build, component-artifact
         construction, and immutable release tag. Dynamic-version preflight

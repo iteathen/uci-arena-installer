@@ -8,6 +8,7 @@ import {
   collectWorkflowDispatchInputs,
   validateReleaseIntegration,
   validateCandidateReleaseTag,
+  validatePublicationAuthority,
   validateRunnerPathBudget,
   validateReleaseSource,
 } from "./local-release-preflight.mjs";
@@ -64,6 +65,7 @@ test("release preflight binds versions, signing, dispatch, and runner labels", (
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/provider",
+      publicationMode: "workflow-owned",
       forwardedWorkflowInputs: ["version", "target", "runner"],
     });
     assert.equal(result.version_sources, 3);
@@ -92,6 +94,7 @@ test("release preflight rejects optional inputs absent from workflow dispatch", 
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/provider",
+      publicationMode: "workflow-owned",
       forwardedWorkflowInputs: ["version", "target", "runner", "component"],
     }), /does not declare forwarded input component/u);
   } finally {
@@ -113,6 +116,7 @@ test("release preflight fails before dispatch on version or runner-label drift",
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/provider",
+      publicationMode: "workflow-owned",
     }), /release version drift/u);
     assert.throws(() => validateReleaseSource({
       repositoryRoot: fixtureRoot.root,
@@ -125,6 +129,7 @@ test("release preflight fails before dispatch on version or runner-label drift",
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/provider",
+      publicationMode: "workflow-owned",
     }), /missing runner label/u);
   } finally {
     rmSync(fixtureRoot.root, { recursive: true, force: true });
@@ -201,6 +206,7 @@ test("dynamic Manager releases bind one dispatch version through build artifact 
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/manager",
+      publicationMode: "workflow-owned",
     });
     assert.equal(result.version_sources, 1);
     assert.equal(result.component_id, "manager.core");
@@ -268,6 +274,7 @@ test("dynamic Engine releases bind a validated resolve-job version chain", () =>
       remoteMainHead: HEAD,
       runnerWorkRoot: RUNNER_ROOT,
       repositorySlug: "owner/engine",
+      publicationMode: "workflow-owned",
     };
     assert.equal(validateReleaseSource(input).version_sources, 1);
     assert.throws(() => validateReleaseSource({
@@ -321,6 +328,45 @@ test("candidate prerelease tags are optional and version-bound", () => {
   }), /invalid/u);
 });
 
+test("release publication authority is explicit and internally consistent", () => {
+  assert.throws(() => validatePublicationAuthority({
+    publicationMode: "",
+    candidateReleaseTag: "",
+    expectedVersion: "1.0.19",
+  }), /must be selected explicitly/u);
+  assert.throws(() => validatePublicationAuthority({
+    publicationMode: "implicit",
+    candidateReleaseTag: "",
+    expectedVersion: "1.0.19",
+  }), /publication authority is invalid/u);
+  assert.deepEqual(validatePublicationAuthority({
+    publicationMode: "workflow-owned",
+    candidateReleaseTag: "",
+    expectedVersion: "1.0.19",
+  }), {
+    publication_mode: "workflow-owned",
+    candidate_release_tag: null,
+  });
+  assert.deepEqual(validatePublicationAuthority({
+    publicationMode: "preprovisioned-candidate",
+    candidateReleaseTag: "component/lichess-bot/v1.0.19/windows-x86_64",
+    expectedVersion: "1.0.19",
+  }), {
+    publication_mode: "preprovisioned-candidate",
+    candidate_release_tag: "component/lichess-bot/v1.0.19/windows-x86_64",
+  });
+  assert.throws(() => validatePublicationAuthority({
+    publicationMode: "preprovisioned-candidate",
+    candidateReleaseTag: "",
+    expectedVersion: "1.0.19",
+  }), /requires a candidate release tag/u);
+  assert.throws(() => validatePublicationAuthority({
+    publicationMode: "workflow-owned",
+    candidateReleaseTag: "component/lichess-bot/v1.0.19/windows-x86_64",
+    expectedVersion: "1.0.19",
+  }), /forbids a candidate release tag/u);
+});
+
 test("PowerShell runner preflight keeps filtered tool candidates array-shaped", () => {
   const source = readFileSync(
     new URL("./invoke-local-ephemeral-release.ps1", import.meta.url),
@@ -338,6 +384,7 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /'draft=false'[\s\S]*?'prerelease=true'[\s\S]*?'make_latest=false'/u);
   assert.match(source, /Candidate prerelease already contains assets/u);
   assert.match(source, /candidate_release_action/u);
+  assert.match(source, /--publication-mode', \$PublicationMode/u);
   assert.match(source, /function Assert-PinnedReleaseInputPair/u);
   assert.match(source, /\$parsedUrl\.Query[\s\S]*?\$parsedUrl\.Fragment/u);
   assert.match(source, /\$Sha256 -notmatch '\^\[0-9a-f\]\{64\}\$'/u);
