@@ -324,6 +324,14 @@ foreach ($pair in $releaseInputPairs) {
     $validatedReleaseInputPairs += $pair
     $forwardedWorkflowInputs += @($pair.url_name, $pair.sha_name)
 }
+if ($ComponentId -eq 'uci_arena.engine') {
+    $validatedInputLabels = @($validatedReleaseInputPairs | ForEach-Object { $_.label })
+    foreach ($requiredLabel in @('ONNX Runtime', 'Model')) {
+        if ($validatedInputLabels -notcontains $requiredLabel) {
+            throw "uci_arena.engine release requires an explicit $requiredLabel URL and SHA-256."
+        }
+    }
+}
 $trackedStatus = (& git -C $repositoryRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0 -or $trackedStatus) {
     throw 'Component release requires a clean tracked worktree.'

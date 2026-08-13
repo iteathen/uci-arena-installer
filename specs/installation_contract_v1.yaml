@@ -1563,13 +1563,16 @@ vm_mounts:
         Git Bash, PowerShell module-path, GitHub authentication, and signing-
         workflow prerequisite checks before obtaining a registration token or
         dispatching work.
-      - Engine dependency inputs are explicit optional URL/SHA-256 pairs for
-        ONNX Runtime, the qualified model archive, and a Syzygy manifest. Before
-        runner registration, each supplied pair must be complete, use a
-        credential-free HTTPS URL, have a lowercase SHA-256, and correspond to
-        declared workflow inputs. The coordinator forwards only validated
-        pairs and reports presence rather than values; it never discovers a
-        model implicitly or forwards credential-bearing generic parameters.
+      - Engine dependency inputs are explicit URL/SHA-256 pairs for ONNX
+        Runtime, the qualified model archive, and an optional Syzygy manifest.
+        A uci_arena.engine release requires the ONNX Runtime and qualified
+        model pairs before candidate creation or runner registration; omitting
+        either pair fails local preflight. Each supplied pair must be complete,
+        use a credential-free HTTPS URL, have a lowercase SHA-256, and
+        correspond to declared workflow inputs. The coordinator forwards only
+        validated pairs and reports presence rather than values; it never
+        discovers a model implicitly or forwards credential-bearing generic
+        parameters.
       - Before candidate creation or runner registration, every dispatch input
         the coordinator will forward is proven to be declared by the selected
         workflow. This includes version, target, runner authority, an optional
@@ -2137,8 +2140,9 @@ acceptance:
     proving that no CMake configure, native compilation, MSI build, Burn build,
     or installer-envelope composition entrypoint was invoked.
   - Local component-release preflight rejects version drift, a missing runner
-    label, Git Bash or PowerShell module-path breakage, and an unclean or stale
-    source head before runner registration or workflow dispatch.
+    label, missing required uci_arena.engine ONNX Runtime or model input pairs,
+    Git Bash or PowerShell module-path breakage, and an unclean or stale source
+    head before candidate creation, runner registration, or workflow dispatch.
   - Local component-release preflight rejects an unmerged release ref by
     default, rejects a stale local main, and labels the explicit unmerged
     override diagnostic-only.

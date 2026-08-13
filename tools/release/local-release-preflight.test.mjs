@@ -456,6 +456,8 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /\$Sha256 -notmatch '\^\[0-9a-f\]\{64\}\$'/u);
   assert.match(source, /onnxruntime_url[\s\S]*?onnxruntime_sha256/u);
   assert.match(source, /model_url[\s\S]*?model_sha256/u);
+  assert.match(source, /\$ComponentId -eq 'uci_arena\.engine'[\s\S]*?@\('ONNX Runtime', 'Model'\)/u);
+  assert.match(source, /uci_arena\.engine release requires an explicit \$requiredLabel URL and SHA-256/u);
   assert.match(source, /pinned_input_pairs = \$validatedReleaseInputPairs\.Count/u);
   assert.match(source, /forwarded_workflow_inputs = \$contract\.forwarded_workflow_inputs/u);
   assert.match(source, /\$forwardedWorkflowInputs = @\('version', 'target', 'runner'\)/u);
@@ -463,6 +465,8 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /@\('--workflow-input', \$inputName\)/u);
   assert.ok(source.indexOf("foreach ($pair in $validatedReleaseInputPairs)")
     < source.indexOf("$runId = Invoke-WorkflowDispatch"));
+  assert.ok(source.indexOf("if ($ComponentId -eq 'uci_arena.engine')")
+    < source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease"));
   assert.ok(source.indexOf("$candidateReleaseState = Ensure-EmptyCandidateRelease")
     < source.indexOf("actions/runners/registration-token"));
   assert.match(source, /function Invoke-GitHubJson[\s\S]*?attempt -le 3/u);
