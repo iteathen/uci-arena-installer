@@ -9,7 +9,7 @@ param(
     [string]$Target = 'windows-x86_64',
     [string]$WorkflowComponent = '',
     [string[]]$RunnerLabel = @('self-hosted', 'Windows', 'X64', 'ephemeral', 'uci-suite'),
-    [ValidateRange(1, 4)][int]$RunnerCount = 1,
+    [ValidateRange(0, 4)][int]$RunnerCount = 0,
     [string]$RunnerSelection = 'ephemeral-self-hosted-windows',
     [ValidateSet('preprovisioned-candidate', 'workflow-owned')][string]$PublicationMode = '',
     [string]$CandidateReleaseTag = '',
@@ -41,6 +41,44 @@ function Assert-Command {
     $command = Get-Command $Name -ErrorAction SilentlyContinue
     if (-not $command) { throw "Required release command is unavailable: $Name" }
     return $command.Source
+}
+
+function Stop-RunnerProcessTree {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [Parameter(Mandatory = $true)][string]$RunnerRoot
+    )
+    $resolvedRunnerRoot = [System.IO.Path]::GetFullPath($RunnerRoot).TrimEnd('\') + '\'
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Select-Object ProcessId, ParentProcessId, ExecutablePath)
+    $pending = [System.Collections.Generic.Stack[int]]::new()
+    if ($RootProcessId -gt 0) { $pending.Push($RootProcessId) }
+    foreach ($process in $processes) {
+        if ($process.ExecutablePath -and
+            [System.IO.Path]::GetFullPath([string]$process.ExecutablePath).StartsWith(
+                $resolvedRunnerRoot,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) {
+            $pending.Push([int]$process.ProcessId)
+        }
+    }
+    $ordered = [System.Collections.Generic.List[int]]::new()
+    $visited = [System.Collections.Generic.HashSet[int]]::new()
+    while ($pending.Count -gt 0) {
+        $processId = $pending.Pop()
+        if (-not $visited.Add($processId)) { continue }
+        if ($visited.Count -gt 128) { throw 'Runner process tree exceeds the cleanup bound.' }
+        $ordered.Add($processId)
+        foreach ($child in $processes | Where-Object { $_.ParentProcessId -eq $processId }) {
+            $pending.Push([int]$child.ProcessId)
+        }
+    }
+    for ($index = $ordered.Count - 1; $index -ge 0; $index -= 1) {
+        Stop-Process -Id $ordered[$index] -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($processId in $ordered) {
+        Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
+    }
 }
 
 function Assert-PinnedReleaseInputPair {
@@ -353,7 +391,8 @@ $preflightArguments = @(
     '--runner-work-root', $RunnerWorkRoot,
     '--repository', $Repository,
     '--publication-mode', $PublicationMode,
-    '--candidate-release-tag', $CandidateReleaseTag
+    '--candidate-release-tag', $CandidateReleaseTag,
+    '--runner-count', $RunnerCount
 )
 foreach ($label in $RunnerLabel) {
     $preflightArguments += @('--runner-label', $label)
@@ -397,7 +436,8 @@ if ($PreflightOnly) {
         workflow = $Workflow
         runner_version = $runnerVersion
         labels = $RunnerLabel.Count
-        runner_count = $RunnerCount
+        runner_count = $contract.runner_count
+        runner_label_sets = $contract.runner_label_sets
         pinned_input_pairs = $validatedReleaseInputPairs.Count
         forwarded_workflow_inputs = $contract.forwarded_workflow_inputs
         authority = $contract.authority
@@ -432,7 +472,7 @@ $completed = $false
 $cleanupAuthorized = $true
 $releaseStage = 'runner_registration'
 try {
-    foreach ($runnerIndex in 1..$RunnerCount) {
+    for ($runnerIndex = 1; $runnerIndex -le $contract.runner_count; $runnerIndex += 1) {
         $runnerRoot = Join-Path $runnerBase ([guid]::NewGuid().ToString('N').Substring(0, 16))
         $stdoutLog = Join-Path $resolvedLogRoot "$runKey.runner-$runnerIndex.stdout.log"
         $stderrLog = Join-Path $resolvedLogRoot "$runKey.runner-$runnerIndex.stderr.log"
@@ -451,9 +491,10 @@ try {
         }
         try {
             $runnerName = "uci-suite-$env:COMPUTERNAME-$($head.Substring(0, 8))-$PID-$runnerIndex"
+            $effectiveRunnerLabels = @($contract.runner_label_sets[$runnerIndex - 1])
             & (Join-Path $runnerRoot 'config.cmd') --unattended --ephemeral --disableupdate `
                 --url "https://github.com/$Repository" --token $registrationToken `
-                --name $runnerName --labels ($RunnerLabel -join ',') --work 'w' *> $null
+                --name $runnerName --labels ($effectiveRunnerLabels -join ',') --work 'w' *> $null
             if ($LASTEXITCODE -ne 0) { throw 'Ephemeral runner configuration failed.' }
         } finally {
             $registrationToken = $null
@@ -561,7 +602,8 @@ try {
         head = $head
         workflow_run_id = $runId
         runner_version = $runnerVersion
-        runner_count = $RunnerCount
+        runner_count = $contract.runner_count
+        runner_label_sets = $contract.runner_label_sets
         pinned_input_pairs = $validatedReleaseInputPairs.Count
         publication_mode = $contract.publication_mode
         candidate_release_tag = $contract.candidate_release_tag
@@ -600,11 +642,11 @@ try {
     throw $releaseFailure
 } finally {
     if ($cleanupAuthorized) {
-        foreach ($runnerProcess in $runnerProcesses) {
-            if (-not $runnerProcess.HasExited) {
-                Stop-Process -Id $runnerProcess.Id -Force -ErrorAction SilentlyContinue
-                [void]$runnerProcess.WaitForExit(5000)
-            }
+        for ($runnerIndex = 0; $runnerIndex -lt $runnerProcesses.Count; $runnerIndex += 1) {
+            $runnerProcess = $runnerProcesses[$runnerIndex]
+            $rootProcessId = if ($runnerProcess.HasExited) { 0 } else { $runnerProcess.Id }
+            Stop-RunnerProcessTree -RootProcessId $rootProcessId `
+                -RunnerRoot $runnerRoots[$runnerIndex]
         }
     }
     if ($cleanupAuthorized) {

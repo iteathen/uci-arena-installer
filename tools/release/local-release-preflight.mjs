@@ -211,6 +211,39 @@ export function collectWorkflowDispatchInputs(workflow) {
   return inputs;
 }
 
+export function collectEphemeralRunnerLabelSets(workflow, requiredRunnerLabels) {
+  const labelSets = [];
+  const expression = /fromJSON\(\s*'(\[[^']+\])'\s*\)/gu;
+  for (const match of workflow.matchAll(expression)) {
+    let labels;
+    try {
+      labels = JSON.parse(match[1]);
+    } catch (error) {
+      throw new Error(`release workflow runner label set is invalid: ${error.message}`);
+    }
+    if (!Array.isArray(labels) || !labels.includes("self-hosted")) continue;
+    if (labels.length < 1 || labels.length > 16
+        || new Set(labels).size !== labels.length
+        || labels.some((label) => typeof label !== "string"
+          || !/^[A-Za-z0-9_.-]+$/u.test(label))) {
+      throw new Error("release workflow runner label set is malformed");
+    }
+    for (const required of requiredRunnerLabels) {
+      if (!labels.includes(required)) {
+        throw new Error(`release workflow runner job is missing runner label ${required}`);
+      }
+    }
+    labelSets.push(labels);
+  }
+  if (labelSets.length < 1) {
+    throw new Error("release workflow has no schedulable ephemeral runner job");
+  }
+  if (labelSets.length > 4) {
+    throw new Error("release workflow requires more than four ephemeral runners");
+  }
+  return labelSets;
+}
+
 export function validateReleaseSource({
   repositoryRoot,
   expectedVersion,
@@ -226,6 +259,7 @@ export function validateReleaseSource({
   publicationMode = "",
   candidateReleaseTag = "",
   forwardedWorkflowInputs = [],
+  requestedRunnerCount = 0,
 }) {
   if (!SEMVER.test(expectedVersion ?? "")) throw new Error("expected version is invalid");
   const { versions, componentIds } = collectReleaseVersions(repositoryRoot);
@@ -285,10 +319,18 @@ export function validateReleaseSource({
       || !workflow.includes("ephemeral-self-hosted-windows")) {
     throw new Error("release workflow has no explicit ephemeral runner input");
   }
-  for (const label of requiredRunnerLabels) {
-    if (!workflow.includes(`"${label}"`) && !workflow.includes(`'${label}'`)) {
-      throw new Error(`release workflow is missing runner label ${label}`);
-    }
+  if (!Number.isInteger(requestedRunnerCount)
+      || requestedRunnerCount < 0 || requestedRunnerCount > 4) {
+    throw new Error("requested runner count must be zero or between one and four");
+  }
+  const runnerLabelSets = collectEphemeralRunnerLabelSets(
+    workflow,
+    requiredRunnerLabels,
+  );
+  if (requestedRunnerCount !== 0 && requestedRunnerCount !== runnerLabelSets.length) {
+    throw new Error(
+      `requested runner count ${requestedRunnerCount} does not match workflow job count ${runnerLabelSets.length}`,
+    );
   }
   const integration = validateReleaseIntegration({
     releaseRef,
@@ -308,6 +350,8 @@ export function validateReleaseSource({
     component_id: expectedComponentId || null,
     version_sources: versions.length,
     runner_labels: requiredRunnerLabels.length,
+    runner_count: runnerLabelSets.length,
+    runner_label_sets: runnerLabelSets,
     workflow: path.relative(repositoryRoot, workflowPath).split(path.sep).join("/"),
     forwarded_workflow_inputs: forwardedWorkflowInputs.length,
     ...publication,
@@ -344,6 +388,7 @@ function parse(argv) {
     publicationMode: values["publication-mode"] ?? "",
     candidateReleaseTag: values["candidate-release-tag"] ?? "",
     forwardedWorkflowInputs: values["workflow-input"],
+    requestedRunnerCount: Number.parseInt(values["runner-count"] ?? "0", 10),
   };
 }
 
