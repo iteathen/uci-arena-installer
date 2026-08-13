@@ -3,11 +3,20 @@
 Clean install, upgrade, repair, reinstall, downgrade, replacement, and uninstall are distinct plans.
 
 - Clean install requires no conflicting authority and creates new receipts.
-- Upgrade requires a compatible newer suite, carries feature selection forward, restages selected components, migrates idempotently, and adopts receipts before related-bundle removal.
+- Upgrade requires a compatible newer suite and carries feature selection
+  forward. Changed or unproven payloads are staged and replaced. A validated
+  receipt whose version and artifact digest exactly match the selected catalog
+  is refreshed in place: generated configuration, workspace access,
+  dependencies, and bundle ownership are reconciled without renaming its root
+  or stopping its provider. Every selected receipt is adopted before
+  related-bundle removal.
 - The Windows bootstrapper lifecycle adapter claims at most one execute/rollback
   action for each exact related-bundle identity. Duplicate platform detection
   remains logged, while later plan occurrences are explicitly set to no action
   so successful upgrades cannot invoke an already-removed cache entry.
+- A related bundle that Burn explicitly reports as missing from cache receives
+  no execute or rollback-restore action. The stale registration remains
+  observable; the bootstrapper does not guess that registry deletion is safe.
 - Repair revalidates retained media, restages selected current components, regenerates installer-owned configuration, and preserves user data.
 - Reinstall uses explicit same-version development policy; official releases do not treat different bytes under one version as an upgrade.
 - Downgrade is rejected unless an explicit reviewed policy permits it without violating rollback protection.

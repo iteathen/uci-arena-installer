@@ -865,7 +865,7 @@ TEST_CASE("feature reconciliation is catalog-owned and identity agnostic") {
     fs::remove_all(root);
 }
 
-TEST_CASE("repair plan restages components that are already current") {
+TEST_CASE("repair restages current components while upgrade refreshes exact artifacts") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const fs::path active_root = paths.install_root / "components" / "manager.core" / "1.0.0";
@@ -896,6 +896,7 @@ TEST_CASE("repair plan restages components that are already current") {
                {"component_version", "1.0.0"},
                {"state", "installed_managed"},
                {"active_root", active_root.string()},
+               {"artifact_sha256", std::string(64, '0')},
            }
                .dump(2);
     const json catalog{
@@ -918,6 +919,79 @@ TEST_CASE("repair plan restages components that are already current") {
     REQUIRE(repair.at("repair") == true);
     REQUIRE(repair.at("actions").at(0).at("action") == "repair");
     REQUIRE(repair.at("actions").at(0).contains("artifact"));
+
+    const json upgrade = SetupEngine::plan(
+        catalog, paths, "manager_only", {}, true, false, false, false, false,
+        true);
+    REQUIRE(upgrade.at("repair") == false);
+    REQUIRE(upgrade.at("upgrade") == true);
+    REQUIRE(upgrade.at("actions").at(0).at("action") == "refresh");
+    REQUIRE(upgrade.at("actions").at(0).contains("artifact"));
+    REQUIRE(upgrade.at("space").at("staging_bytes") == 0);
+    fs::remove_all(root);
+}
+
+TEST_CASE("exact-current upgrade refreshes receipts without quiescing providers") {
+    const fs::path root = temporary_directory();
+    SetupPaths paths = paths_under(root);
+    paths.bundle_owner = "new-bundle-owner";
+    const std::string component_id = "replaceable.current.consumer";
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile");
+    const fs::path receipt_path =
+        paths.data_root / "receipts" / (component_id + ".json");
+    json consumer_receipt = json::parse(std::ifstream(receipt_path));
+    consumer_receipt["state"] = "installed_managed";
+    consumer_receipt["startup"] = {{"installed", true}, {"active", true}};
+    std::ofstream(receipt_path, std::ios::binary | std::ios::trunc)
+        << consumer_receipt.dump(2);
+
+    const json exact_artifact{{"sha256", std::string(64, 'a')}};
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array(
+             {{{"action", "refresh"},
+               {"component_id", "runtime.host"},
+               {"version", "1.0.0"},
+               {"dependencies", json::array()},
+               {"enabled", true},
+               {"artifact", exact_artifact}},
+              {{"action", "refresh"},
+               {"component_id", component_id},
+               {"version", "1.0.0"},
+               {"dependencies", json::array({"runtime.host"})},
+               {"enabled", true},
+               {"artifact", exact_artifact}}})},
+    };
+
+    const json applied =
+        SetupEngine::apply(json::object(), plan, paths, true, true);
+    INFO(applied.dump(2));
+    REQUIRE(applied.at("state") == "committed");
+    const json refreshed_receipt = json::parse(std::ifstream(receipt_path));
+    REQUIRE(refreshed_receipt.at("bundle_owner") == "new-bundle-owner");
+    REQUIRE(refreshed_receipt.at("startup").at("installed") == true);
+    REQUIRE(refreshed_receipt.at("startup").at("active") == true);
+    REQUIRE(fs::is_directory(
+        paths.install_root / "components" / component_id / "1.0.0"));
+    REQUIRE(json::parse(std::ifstream(configuration)).at("enabled") == true);
+
+    const json transaction = json::parse(std::ifstream(
+        paths.data_root / "transactions" /
+        (applied.at("transaction_id").get<std::string>() + ".json")));
+    REQUIRE(transaction.at("startup_quiescence").empty());
+    REQUIRE(transaction.at("refreshed_current_components") ==
+            json::array({component_id, "runtime.host"}));
+    REQUIRE(transaction.at("refreshed_current_consumers") ==
+            json::array({component_id}));
+    REQUIRE(transaction.at("actions").at(0).at("state") ==
+            "refreshed_current");
+    REQUIRE(transaction.at("actions").at(1).at("state") ==
+            "refreshed_current");
     fs::remove_all(root);
 }
 
@@ -2563,7 +2637,7 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
     fs::remove_all(root);
 }
 
-TEST_CASE("dependency replacement refreshes unchanged consumers before resume") {
+TEST_CASE("dependency replacement refreshes exact-current consumers before resume") {
     bool fail_after_refresh = false;
     std::string component_id = "replaceable.dependency.consumer";
     SECTION("committed consumer selects replacement dependency") {}
@@ -2647,7 +2721,13 @@ TEST_CASE("dependency replacement refreshes unchanged consumers before resume") 
                         {{"type", "archive"},
                          {"source", replacement_archive.filename().string()},
                          {"sha256", sha256_path(replacement_archive)},
-                         {"size_bytes", fs::file_size(replacement_archive)}}}}})},
+                         {"size_bytes", fs::file_size(replacement_archive)}}}},
+                      {{"action", "refresh"},
+                       {"component_id", component_id},
+                       {"version", "1.0.0"},
+                       {"dependencies", json::array({"runtime.host"})},
+                       {"enabled", true},
+                       {"artifact", {{"sha256", std::string(64, 'a')}}}}})},
     };
 
     if (fail_after_refresh) {
@@ -2657,6 +2737,10 @@ TEST_CASE("dependency replacement refreshes unchanged consumers before resume") 
         const json runtime_receipt = json::parse(std::ifstream(
             paths.data_root / "receipts" / "runtime.host.json"));
         REQUIRE(runtime_receipt.at("component_version") == "1.0.0");
+        const json restored_consumer =
+            json::parse(std::ifstream(consumer_receipt_path));
+        REQUIRE_FALSE(restored_consumer.contains("refreshed_at"));
+        REQUIRE(restored_consumer.at("startup").at("installed") == true);
         REQUIRE(fs::is_directory(old_runtime_root));
         const auto transactions = fs::directory_iterator(
             paths.data_root / "transactions");
@@ -2676,8 +2760,9 @@ TEST_CASE("dependency replacement refreshes unchanged consumers before resume") 
         const json transaction = json::parse(std::ifstream(
             paths.data_root / "transactions" /
             (applied.at("transaction_id").get<std::string>() + ".json")));
-        REQUIRE(transaction.at("refreshed_dependency_consumers") ==
+        REQUIRE(transaction.at("refreshed_current_consumers") ==
                 json::array({component_id}));
+        REQUIRE(transaction.at("refreshed_dependency_consumers").empty());
         REQUIRE(transaction.at("startup_quiescence").at(0).at("state") ==
                 "resumed");
     }
