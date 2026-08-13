@@ -1600,6 +1600,12 @@ vm_mounts:
         candidate tag; workflow-owned authority forbids a candidate tag. An
         omitted, unknown, or contradictory selection fails before candidate
         creation, runner-token acquisition, runner registration, or dispatch.
+      - Preflight derives the selected workflow's publication authority from
+        its checked-in release steps. A workflow that only verifies and uploads
+        to an existing release requires pre-provisioned-candidate authority; a
+        workflow that creates its release requires workflow-owned authority.
+        A requested mode that disagrees with those steps fails before any
+        runner or release mutation.
       - A component may declare its immutable version statically or bind the
         workflow_dispatch version through the release build, component-artifact
         construction, and immutable release tag. Dynamic-version preflight
