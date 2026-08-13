@@ -5,6 +5,7 @@ import process from "node:process";
 const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?$/u;
 const COMPONENT_ID = /^[a-z0-9][a-z0-9._-]*$/u;
 const COMMIT = /^[0-9a-f]{40}$/u;
+const PUBLICATION_MODES = new Set(["preprovisioned-candidate", "workflow-owned"]);
 
 export function validateReleaseIntegration({
   releaseRef,
@@ -74,6 +75,31 @@ export function validateCandidateReleaseTag({ candidateReleaseTag, expectedVersi
     throw new Error("candidate release tag is not bound to the requested version");
   }
   return candidateReleaseTag;
+}
+
+export function validatePublicationAuthority({
+  publicationMode,
+  candidateReleaseTag,
+  expectedVersion,
+}) {
+  if (!publicationMode) {
+    throw new Error("publication authority must be selected explicitly");
+  }
+  if (!PUBLICATION_MODES.has(publicationMode)) {
+    throw new Error(`publication authority is invalid: ${publicationMode}`);
+  }
+  const releaseTag = validateCandidateReleaseTag({ candidateReleaseTag, expectedVersion });
+  if (publicationMode === "preprovisioned-candidate") {
+    if (!releaseTag) {
+      throw new Error("preprovisioned-candidate publication requires a candidate release tag");
+    }
+  } else if (releaseTag) {
+    throw new Error("workflow-owned publication forbids a candidate release tag");
+  }
+  return {
+    publication_mode: publicationMode,
+    candidate_release_tag: releaseTag,
+  };
 }
 
 function readJson(filename, label) {
@@ -197,6 +223,7 @@ export function validateReleaseSource({
   allowUnmergedDiagnostic = false,
   runnerWorkRoot,
   repositorySlug,
+  publicationMode = "",
   candidateReleaseTag = "",
   forwardedWorkflowInputs = [],
 }) {
@@ -270,7 +297,11 @@ export function validateReleaseSource({
     allowUnmergedDiagnostic,
   });
   const pathBudget = validateRunnerPathBudget({ runnerWorkRoot, repositorySlug });
-  const releaseTag = validateCandidateReleaseTag({ candidateReleaseTag, expectedVersion });
+  const publication = validatePublicationAuthority({
+    publicationMode,
+    candidateReleaseTag,
+    expectedVersion,
+  });
   return {
     schema: "arena_local_release_preflight_v1",
     version: expectedVersion,
@@ -278,8 +309,8 @@ export function validateReleaseSource({
     version_sources: versions.length,
     runner_labels: requiredRunnerLabels.length,
     workflow: path.relative(repositoryRoot, workflowPath).split(path.sep).join("/"),
-    candidate_release_tag: releaseTag,
     forwarded_workflow_inputs: forwardedWorkflowInputs.length,
+    ...publication,
     ...integration,
     ...pathBudget,
   };
@@ -310,6 +341,7 @@ function parse(argv) {
     allowUnmergedDiagnostic: values["allow-unmerged-diagnostic"] === "true",
     runnerWorkRoot: values["runner-work-root"],
     repositorySlug: values.repository,
+    publicationMode: values["publication-mode"] ?? "",
     candidateReleaseTag: values["candidate-release-tag"] ?? "",
     forwardedWorkflowInputs: values["workflow-input"],
   };
