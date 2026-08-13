@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  collectEphemeralRunnerLabelSets,
   collectWorkflowDispatchInputs,
   validateReleaseIntegration,
   validateCandidateReleaseTag,
@@ -70,9 +71,74 @@ test("release preflight binds versions, signing, dispatch, and runner labels", (
     });
     assert.equal(result.version_sources, 3);
     assert.equal(result.runner_labels, 6);
+    assert.equal(result.runner_count, 1);
+    assert.deepEqual(result.runner_label_sets, [fixtureRoot.labels]);
   } finally {
     rmSync(fixtureRoot.root, { recursive: true, force: true });
   }
+});
+
+test("release preflight derives distinct Engine resolve and build runner labels", () => {
+  const fixtureRoot = fixture();
+  try {
+    const base = ["self-hosted", "Windows", "X64", "ephemeral", "uci-suite"];
+    const resolve = [...base, "engine-release-resolve"];
+    const build = [...base, "engine-release-build"];
+    const workflow = readFileSync(fixtureRoot.workflowPath, "utf8").replace(
+      /^  release:[\s\S]*$/mu,
+      [
+        "  resolve:",
+        `    runs-on: \${{ fromJSON('[${resolve.map((label) => `\"${label}\"`).join(",")}]') }}`,
+        "    steps:",
+        "      - run: cosign attest-blob artifact",
+        "      - run: cosign verify-blob-attestation artifact",
+        "  build:",
+        `    runs-on: \${{ fromJSON('[${build.map((label) => `\"${label}\"`).join(",")}]') }}`,
+        "    steps:",
+        "      - run: cosign attest-blob artifact",
+        "      - run: cosign verify-blob-attestation artifact",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(fixtureRoot.workflowPath, workflow);
+    assert.deepEqual(collectEphemeralRunnerLabelSets(workflow, base), [resolve, build]);
+    const input = {
+      repositoryRoot: fixtureRoot.root,
+      expectedVersion: "1.2.3",
+      expectedComponentId: "provider.component",
+      workflowPath: fixtureRoot.workflowPath,
+      requiredRunnerLabels: base,
+      releaseRef: "main",
+      localHead: HEAD,
+      remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT,
+      repositorySlug: "owner/provider",
+      publicationMode: "workflow-owned",
+      requestedRunnerCount: 0,
+    };
+    const result = validateReleaseSource(input);
+    assert.equal(result.runner_count, 2);
+    assert.deepEqual(result.runner_label_sets, [resolve, build]);
+    assert.throws(
+      () => validateReleaseSource({ ...input, requestedRunnerCount: 1 }),
+      /does not match workflow job count 2/u,
+    );
+  } finally {
+    rmSync(fixtureRoot.root, { recursive: true, force: true });
+  }
+});
+
+test("release preflight preserves one runner for each repeated job label set", () => {
+  const base = ["self-hosted", "Windows", "X64", "ephemeral", "uci-suite"];
+  const encoded = JSON.stringify([...base, "same-job"]);
+  const workflow = [
+    `    runs-on: \${{ fromJSON('${encoded}') }}`,
+    `    runs-on: \${{ fromJSON('${encoded}') }}`,
+  ].join("\n");
+  assert.deepEqual(
+    collectEphemeralRunnerLabelSets(workflow, base),
+    [JSON.parse(encoded), JSON.parse(encoded)],
+  );
 });
 
 test("release preflight rejects optional inputs absent from workflow dispatch", () => {
@@ -182,7 +248,7 @@ test("dynamic Manager releases bind one dispatch version through build artifact 
       "  id-token: write",
       "jobs:",
       "  release:",
-      "    runs-on: '[\"self-hosted\",\"Windows\",\"X64\",\"ephemeral\",\"uci-suite\",\"manager-release\"]'",
+      "    runs-on: ${{ fromJSON('[\"self-hosted\",\"Windows\",\"X64\",\"ephemeral\",\"uci-suite\",\"manager-release\"]') }}",
       "    env:",
       "      RELEASE_VERSION: ${{ inputs.version }}",
       "    steps:",
@@ -250,7 +316,7 @@ test("dynamic Engine releases bind a validated resolve-job version chain", () =>
       "          version=\"${DISPATCH_VERSION}\"",
       "          printf 'version=%s\\n' \"${version}\" >> \"${GITHUB_OUTPUT}\"",
       "  build:",
-      "    runs-on: '[\"self-hosted\",\"Windows\",\"X64\",\"ephemeral\",\"uci-suite\",\"engine-release\"]'",
+      "    runs-on: ${{ fromJSON('[\"self-hosted\",\"Windows\",\"X64\",\"ephemeral\",\"uci-suite\",\"engine-release\"]') }}",
       "    env:",
       "      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}",
       "    steps:",
@@ -405,10 +471,14 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.doesNotMatch(source, /registration-token" --jq \.token\)\.Trim\(\)/u);
   assert.match(source, /drainDeadline[\s\S]*?AddMinutes\(5\)/u);
   assert.match(source, /\$cleanupAuthorized\s*=\s*\$false/u);
-  assert.match(source, /\[ValidateRange\(1, 4\)\]\[int\]\$RunnerCount/u);
-  assert.match(source, /foreach \(\$runnerIndex in 1\.\.\$RunnerCount\)/u);
+  assert.match(source, /\[ValidateRange\(0, 4\)\]\[int\]\$RunnerCount = 0/u);
+  assert.match(source, /--runner-count', \$RunnerCount/u);
+  assert.match(source, /runner_label_sets = \$contract\.runner_label_sets/u);
+  assert.match(source, /for \(\$runnerIndex = 1; \$runnerIndex -le \$contract\.runner_count/u);
+  assert.match(source, /\$effectiveRunnerLabels = @\(\$contract\.runner_label_sets\[\$runnerIndex - 1\]\)/u);
+  assert.match(source, /--labels \(\$effectiveRunnerLabels -join ','\)/u);
   assert.match(source, /\$runnerProcesses \+= \$runnerProcess/u);
-  assert.match(source, /runner_count = \$RunnerCount/u);
+  assert.match(source, /runner_count = \$contract\.runner_count/u);
   assert.match(source, /stdout_logs = \$stdoutLogs[\s\S]*?stderr_logs = \$stderrLogs/u);
   assert.match(source, /preserving ephemeral runner roots for the active workflow/u);
   assert.match(source, /\$priorRunIds\s*=\s*@\(\$priorRuns[\s\S]*?databaseId/u);
@@ -418,7 +488,9 @@ test("PowerShell runner preflight keeps filtered tool candidates array-shaped", 
   assert.match(source, /Invoke-WorkflowDispatch -Arguments \$dispatchArguments/u);
   assert.doesNotMatch(source, /& gh @dispatchArguments/u);
   assert.match(source, /\[Console\]::Error\.WriteLine\([\s\S]*?\$releaseStage/u);
-  assert.match(source, /foreach \(\$runnerProcess in \$runnerProcesses\)[\s\S]*?\[void\]\$runnerProcess\.WaitForExit/u);
+  assert.match(source, /function Stop-RunnerProcessTree[\s\S]*?Get-CimInstance Win32_Process/u);
+  assert.match(source, /Stop-RunnerProcessTree -RootProcessId \$rootProcessId[\s\S]*?-RunnerRoot \$runnerRoots/u);
+  assert.match(source, /Runner process tree exceeds the cleanup bound/u);
   assert.match(source, /\} else \{[\s\S]*?'run', 'view'/u);
   assert.match(source, /foreach \(\$runnerRoot in \$runnerRoots\)[\s\S]*?Remove-Item/u);
   assert.match(source, /lastMonitorFailure[\s\S]*?Start-Sleep -Seconds 10/u);

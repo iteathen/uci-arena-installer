@@ -1606,14 +1606,20 @@ vm_mounts:
         present in its checked-in definitions. Valid sibling definitions do not
         become identity drift; an undeclared requested component still fails
         before runner registration.
-      - One command may provision a caller-selected pool of one through four
+      - One command derives every selected workflow job's complete self-hosted
+        label set and provisions the exact bounded pool of one through four
         repository-scoped, update-disabled ephemeral runners before dispatching
-        exactly one bounded workflow attempt. This supports workflows with
-        sequential self-hosted jobs, including the Engine resolve/build split,
-        without manual runner registration or a second dispatch. Every runner
-        receives an independent just-in-time registration token, accepts at
-        most one job, suppresses the token from output, and is removed after
-        the attempt.
+        exactly one bounded workflow attempt. An optional caller count must
+        equal that derived pool; zero selects automatic derivation. This
+        supports workflows with distinct sequential self-hosted jobs, including
+        the Engine resolve/build split, without manual label knowledge, runner
+        registration, or a second dispatch. Preflight rejects a missing,
+        malformed, or unschedulable label set. Every runner receives
+        an independent just-in-time registration token, accepts at most one job,
+        suppresses the token from output, and is removed after the attempt.
+        Cleanup terminates the complete local runner process tree before
+        removing its verified scratch root, including when a queued run is
+        cancelled before any ephemeral runner accepts a job.
       - Registration-token acquisition uses the same bounded three-attempt
         GitHub JSON retry contract as monitoring. A transient CLI, transport,
         TLS, or malformed-response failure never reaches string operations as
