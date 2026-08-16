@@ -101,12 +101,24 @@
           "minItems": 2,
           "maxItems": 64,
           "items": {"$ref": "#/$defs/evidence_asset"},
-          "contains": {
-            "type": "object",
-            "properties": {"kind": {"const": "licenses"}},
-            "required": ["kind"]
-          },
-          "minContains": 1
+          "allOf": [
+            {
+              "contains": {
+                "type": "object",
+                "properties": {"kind": {"const": "licenses"}},
+                "required": ["kind"]
+              },
+              "minContains": 1
+            },
+            {
+              "contains": {
+                "type": "object",
+                "properties": {"kind": {"const": "test_receipt"}},
+                "required": ["kind"]
+              },
+              "minContains": 1
+            }
+          ]
         }
       }
     }
