@@ -37,6 +37,20 @@ CUPID is always inside SOLID.
 SOLID is always inside LEGO.
 ```
 
+### LEGO does not require artificial subdivision
+
+LEGO identifies coherent ownership, lifecycle, replacement, and failure units. It does **not** require every application to be split into several bricks.
+
+A small application whose state, lifecycle, replacement, and failure boundary are genuinely one coherent unit may correctly consist of one LEGO brick. That application is still LEGO-designed because its boundary and owner are explicit. Creating extra bricks, ports, registries, or interfaces without a real ownership/replacement/failure distinction is over-segmentation, not better LEGO.
+
+The number of bricks must follow the domain:
+
+- one coherent unit -> one LEGO brick;
+- several independently owned, replaceable, or failure-isolated units -> several LEGO bricks;
+- uncertainty about a useful separation -> keep the unit together until a real boundary is proven.
+
+SOLID then organizes responsibilities inside whatever LEGO topology the domain actually requires. KISS may favor a single brick when subdivision adds no valid boundary, but KISS cannot merge bricks whose independent ownership/lifecycle has already been established by LEGO.
+
 This ordering is authoritative:
 
 1. First reject any option that violates LEGO ownership, lifecycle, replacement, or failure boundaries.
@@ -83,7 +97,7 @@ Sol-class organizing model
 
 The organizing model decides before any delegated implementation begins:
 
-- what the meaningful LEGO bricks are;
+- what the meaningful LEGO bricks are, including whether one coherent brick is sufficient;
 - which repository/component owns each responsibility and lifecycle;
 - replacement and failure boundaries between bricks;
 - whether an existing owner must be reused rather than creating another system;
@@ -134,6 +148,8 @@ KISS does not mean fewer invariants, weaker validation, hidden failure, reduced 
 A delegated implementation agent must stop and report `blocked_architecture` rather than doing any of the following unless the task explicitly fixed that exact change in advance:
 
 - create a new cross-component service, registry, state store, transaction engine, release authority, path authority, or lifecycle owner;
+- split one coherent LEGO brick merely to create abstraction;
+- merge independently owned LEGO bricks merely to simplify local code;
 - split, merge, rename, or move a LEGO brick across ownership boundaries;
 - add a new public port/interface because it seems cleaner;
 - change public schemas, persistence meaning, compatibility policy, or lifecycle state machines;
