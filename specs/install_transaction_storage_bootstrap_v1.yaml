@@ -1,0 +1,190 @@
+meta:
+  spec_id: arena_install_transaction_storage_bootstrap_v1
+  version: 1
+  status: active
+  owner: install_transaction
+  parent_issue: 9
+  specializes: arena_install_transaction_v2
+  required_by_issue: 80
+
+authority_relationship: >
+  This specification closes the pre-journal storage bootstrap gap for layout
+  initialization without adding a second transaction owner. InstallTransactionCoordinator
+  still owns the mutation lease and journal. A caller may provide one exact existing
+  bootstrap parent only for layout_initialize so the lease adapter can monotonically
+  establish the exact transactions_root directory chain before taking the lock.
+  The adapter receives paths; it does not infer InstallLayout roots, anchors, policy,
+  or semantic meaning.
+
+problem: >
+  The transaction mutation lease and active journal require transactions_root to
+  exist before any transaction effect can run. During clean layout initialization,
+  target.roots.transactions is itself beneath a not-yet-established layout data
+  path. Creating that path in an unjournaled SetupEngine/InstallLayout side path,
+  or using a hidden nearest-existing-ancestor rule, would create another mutation
+  authority. The transaction infrastructure owner therefore performs only the
+  minimal monotonic directory bootstrap needed to reach its own exact root.
+
+hierarchy:
+  lego:
+    brick: InstallTransactionCoordinator
+    subowner: InstallMutationLeaseProvider transaction-storage bootstrap
+    does_not_own:
+      - layout root selection
+      - policy anchor selection
+      - component/provider directories
+      - installed authority
+      - arbitrary directory creation
+      - rollback of bootstrap scaffolding
+  solid:
+    single_responsibility: establish/admit the exact caller-selected transaction storage root and acquire its one scope mutation lease
+    open_closed: ordinary existing-root transactions remain unchanged when bootstrap parent is absent
+    liskov: once acquire succeeds every caller holds the same exact root/lease semantics
+    interface_segregation: bootstrap parent appears only on transaction plan and lease acquisition; no general mkdir port is exposed
+    dependency_inversion: layout initialization supplies exact paths; native adapters implement secure component-wise admission/creation
+  cupid:
+    - explicit caller parent
+    - idempotent monotonic scaffolding
+    - one persistent lock location
+    - exact no-follow admission after every create/race
+  kiss: >
+    Walk one bounded relative directory chain and then run the existing lease
+    acquisition. Do not add a bootstrap transaction, database, directory service,
+    path registry, cleanup workflow, or semantic root resolver.
+
+public_plan_delta:
+  owner_header: include/arena/application/installer/install_transaction.hpp
+  exact_field:
+    struct: InstallTransactionPlan
+    name: transactions_bootstrap_parent
+    type: std::optional<std::filesystem::path>
+    position: immediately after transactions_root
+  plan_rules:
+    - operation layout_initialize requires transactions_bootstrap_parent present
+    - every other operation requires transactions_bootstrap_parent absent
+    - transactions_root and bootstrap parent are absolute, lexically normalized, bounded, and not filesystem roots
+    - bootstrap parent is a strict path ancestor of transactions_root under target-platform comparison
+    - relative suffix from bootstrap parent to transactions_root has 1..32 components
+    - each relative component is one nonempty safe leaf within existing neutral leaf/path bounds
+    - the caller chooses both paths; common validation never climbs ancestors or derives a parent
+  persistence: >
+    transactions_bootstrap_parent is pre-journal infrastructure input and is not
+    serialized into arena_install_transaction_v2. Once the active journal exists,
+    transactions_root exists and recovery needs only its existing public
+    transactions_root + scope inputs. A crash before the first journal may leave
+    only empty/private directory scaffolding and is safely retried.
+
+lease_port_delta:
+  owner_header: include/arena/ports/install_transaction.hpp
+  exact_shape: |
+    class InstallMutationLeaseProvider {
+      public:
+        virtual ~InstallMutationLeaseProvider() = default;
+        [[nodiscard]] std::unique_ptr<InstallMutationLease> acquire(
+            const std::filesystem::path& transactions_root,
+            const std::optional<std::filesystem::path>& bootstrap_parent,
+            arena::ports::InstallScope scope,
+            std::chrono::milliseconds timeout);
+      protected:
+        [[nodiscard]] virtual std::unique_ptr<InstallMutationLease>
+        acquire_validated(
+            const std::filesystem::path& transactions_root,
+            const std::optional<std::filesystem::path>& bootstrap_parent,
+            arena::ports::InstallScope scope,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+  common_rules:
+    - public acquire validates root/optional parent shape and captures one deadline once
+    - bootstrap parent absent means the existing transactions_root must already admit as an exact ordinary directory
+    - bootstrap parent present permits only monotonic creation of missing directory components on the strict relative path from that exact parent to transactions_root
+    - no sibling, ancestor above parent, or unrelated directory may be created
+    - bootstrap parent itself is never created, removed, replaced, renamed, or recursively cleaned
+
+native_bootstrap_algorithm:
+  before_lock:
+    - exact-admit bootstrap parent no-follow as an ordinary directory; stable native identity is mandatory
+    - revalidate caller root is still a strict bounded descendant using target-platform comparison
+    - walk the frozen relative suffix one component at a time relative to the admitted parent capability/native handle
+    - if a component exists, require exact ordinary non-link/non-reparse directory and continue through that admitted object
+    - if absent, attempt create-new directory with scope-appropriate private/default Installer permissions, then immediately open/admit the created path no-follow
+    - if a concurrent creator wins, admit the resulting exact ordinary directory; never accept a link/reparse/special object
+    - reject substitution, binding change, path escape, wrong object kind, permission failure, or deadline expiration
+    - after reaching transactions_root, require bootstrap parent/path chain binding still exact
+    - only then create/open the persistent .arena-install-mutation.lock and acquire the existing exclusive lease
+  after_lock:
+    - revalidate transactions_root and lock binding before returning lease
+    - journal/history/work creation follows arena_install_transaction_v2 under the now-admitted root
+  concurrency: >
+    Multiple clean-initialize attempts may race only on idempotent directory
+    creation before the lock. They converge on the same exact ordinary path and
+    then serialize on the one persistent mutation lock. No authoritative layout,
+    receipt, locator, provider, service, or payload mutation occurs before lease.
+
+failure_and_recovery:
+  pre_root_failure:
+    - no journal exists
+    - already-created ordinary scaffolding remains; it is never rolled back or recursively deleted
+    - retry re-admits and reuses exact ordinary components
+  pre_journal_crash_after_root:
+    - transactions_root may exist with the persistent/private lock leaf state allowed by the lease adapter
+    - no installation authority has committed
+    - retry uses the same root and normal lease acquisition
+  post_journal_crash:
+    - normal recover(transactions_root, scope) applies; bootstrap parent is unnecessary
+  rationale: >
+    Empty transaction-storage scaffolding is non-authoritative infrastructure.
+    Leaving it is safer than unjournaled cleanup and makes retry/recovery
+    deterministic. Installed authority is still established only by the layout
+    transaction's descriptor/locator effects.
+
+operation_constraints:
+  layout_initialize:
+    bootstrap_parent: required
+    reason: no prior InstalledLayout transaction root is authoritative
+  layout_migrate:
+    bootstrap_parent: forbidden
+    transactions_root: exact current InstalledLayoutAuthority resolved roots.transactions
+    reason: migration must journal/recover through the pre-migration authority until commit
+  ordinary_install_update_repair_replacement:
+    bootstrap_parent: forbidden
+    transactions_root: exact current InstalledLayoutAuthority resolved roots.transactions
+  uninstall:
+    bootstrap_parent: forbidden
+    transactions_root: exact current installed authority until transaction terminal direction
+
+security_bounds:
+  - no environment/default/opposite-scope fallback
+  - no nearest-existing-ancestor discovery
+  - no recursive create_directories from an unadmitted pathname
+  - no symlink/junction/reparse traversal
+  - no filesystem root bootstrap parent or transactions root
+  - no deletion of bootstrap scaffolding during rollback or cleanup
+  - no caller-selected external/user path except the architecture owner supplying an exact validated layout anchor/root relationship
+  - directory creation never implies installed/layout authority and is not receipt evidence
+
+validation:
+  - ordinary existing-root lease unchanged when bootstrap parent absent
+  - layout_initialize missing bootstrap parent rejected before native call
+  - non-layout_initialize supplied bootstrap parent rejected
+  - parent equal root, non-ancestor, escaped, over-depth, unsafe-leaf rejected
+  - clean absent chain created component-by-component then one lease acquired
+  - partially existing chain reused exactly
+  - concurrent create race converges then one lease serializes
+  - linked/reparse/special/substituted parent or intermediate rejected
+  - failure after each newly-created component leaves only reusable ordinary scaffolding and no journal/authority
+  - crash after root before journal is retryable
+  - post-journal recovery needs no bootstrap parent
+  - no semantic root/anchor inference exists in transaction code
+
+implementation_relationship:
+  - TX-01 owns the exact InstallTransactionPlan field and common operation/path validation
+  - TX-02 owns the exact lease-port signature plus Windows/Linux secure bootstrap/admission behavior
+  - TX-06 passes the already-validated optional parent into lease acquisition before journal creation and otherwise keeps one coordinator/state machine
+  - IL-07 is the only v1 caller that supplies the field and derives it from exact validated InstallLayout policy/anchor authority
+
+stop_conditions:
+  - bootstrap requires mutation outside the strict path from exact parent to transactions_root
+  - a second mutation lock/journal owner appears necessary
+  - recovery after journal publication would require bootstrap parent persistence
+  - native code cannot distinguish exact ordinary directory from link/reparse/special object
+  - a caller asks transaction code to choose a layout anchor or semantic root
