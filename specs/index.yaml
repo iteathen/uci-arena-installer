@@ -84,3 +84,71 @@ specs:
       - tests/unit/tuf_trust_tests.cpp
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_release_provenance_v1
+    path: specs/release_provenance_v1.yaml
+    owner: release_provenance
+    applies_to:
+      - specs/schemas/component-release-evidence.schema.json
+      - specs/schemas/component-provenance-statement.schema.json
+      - specs/schemas/provenance-trust-policy.schema.json
+      - specs/schemas/verified-component-provenance.schema.json
+      - specs/schemas/suite-release-lock-v3.schema.json
+      - specs/schemas/provider-release-result.schema.json
+      - specs/schemas/suite-release-lock-v2.schema.json
+      - tools/release/candidate-assets.mjs
+      - tools/release/component-provenance.mjs
+      - tools/release/provenance-trust-policy.mjs
+      - tools/release/provider-provenance.mjs
+      - tools/release/managed-provenance.mjs
+      - tools/release/local-provenance.mjs
+      - tools/release/sign-local-component-provenance.mjs
+      - tools/release/release-lock.mjs
+      - tools/release/clean-build.mjs
+      - tools/release/diagnostic-review-inputs.mjs
+      - tools/release/mirror-provider-assets.mjs
+      - tools/release/local-release-preflight.mjs
+      - release/README.md
+      - specs/installation_contract_v1.yaml
+      - tools/release/candidate-assets.test.mjs
+      - tools/release/component-provenance.test.mjs
+      - tools/release/provenance-trust-policy.test.mjs
+      - tools/release/provider-provenance.test.mjs
+      - tools/release/managed-provenance.test.mjs
+      - tools/release/local-provenance.test.mjs
+      - tools/release/sign-local-component-provenance.test.mjs
+      - tools/release/release-lock.test.mjs
+      - tools/release/clean-build.test.mjs
+      - tools/release/diagnostic-review-inputs.test.mjs
+      - tools/release/mirror-provider-assets.test.mjs
+      - tools/release/local-release-preflight.test.mjs
+      - package.json
+  - spec_id: arena_install_layout_v1
+    path: specs/install_layout_v1.yaml
+    owner: install_layout
+    applies_to:
+      - packaging/install-layout.json
+      - specs/schemas/install-layout-policy.schema.json
+      - specs/schemas/installed-layout.schema.json
+      - specs/schemas/install-layout-locator.schema.json
+      - tools/release/install-layout.mjs
+      - tools/release/install-layout.test.mjs
+      - include/arena/ports/install_layout.hpp
+      - include/arena/platform/install_layout.hpp
+      - include/arena/application/installer/install_layout.hpp
+      - src/application/installer/install_layout.cpp
+      - src/platform/windows/install_layout.cpp
+      - apps/setup/main.cpp
+      - include/arena/application/installer/setup.hpp
+      - packaging/windows/manager-integration.json
+      - packaging/windows/suite-bundle.json
+      - packaging/windows/apply-suite-update.ps1
+      - packaging/windows/scope-markers
+      - tools/release/build-manager-msi.mjs
+      - tools/release/build-manager-msi.test.mjs
+      - tools/release/build-windows-suite-bundle.mjs
+      - tools/release/build-windows-suite-bundle.test.mjs
+      - tools/release/build-suite-update-package.mjs
+      - tests/unit/install_layout_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+      - package.json
