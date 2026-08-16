@@ -13,8 +13,19 @@ node tools/spec-preflight.mjs --task "<task>" --changed-files <likely paths>
 
 3. Read every active spec returned by preflight; rerun when touched paths change materially.
 4. For repository ownership, component contracts, composition, or cross-repository dependencies, also read `docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md` and `specs/suite_lego_boundaries_v1.yaml`.
+5. For Installer hardening issues #6-#10, #15, #51, #76-#80, or any delegated implementation packet derived from them, also read `docs/architecture/INSTALLER_HARDENING_ARCHITECTURE.md` and `docs/architecture/INSTALLER_DELEGATION_CONTRACT.md`.
 
 Do not preload historical release notes, retired installer approaches, provider implementation docs, or unrelated specs.
+
+## Design hierarchy
+
+Apply design doctrine in one strict nesting order:
+
+```text
+LEGO -> SOLID -> CUPID -> KISS
+```
+
+KISS is always inside CUPID, CUPID is always inside SOLID, and SOLID is always inside LEGO. A lower layer may refine only choices that already satisfy every higher layer; it may never override ownership, responsibility, interface, dependency, lifecycle, safety, or truth boundaries fixed above it. A delegated implementation agent reports `blocked_architecture` instead of routing around this hierarchy.
 
 ## Authority and ownership
 
