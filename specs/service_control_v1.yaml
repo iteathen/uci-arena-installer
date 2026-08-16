@@ -35,8 +35,10 @@ hierarchy:
       A new supported platform adds an adapter implementing the same port;
       Installer callers and neutral types do not change.
     liskov: >
-      Every adapter obeys the same result invariants, idempotency rules, timeout
-      semantics, and expected-failure behavior.
+      The non-virtual public operation centrally validates requests, establishes
+      the one deadline, and validates adapter results. Platform adapters implement
+      only the protected validated operation and therefore cannot silently fork
+      public invariants.
     interface_segregation: >
       The public port exposes one perform(request) operation and no
       platform-specific query/control methods.
@@ -58,6 +60,7 @@ public_surface:
   headers:
     neutral_port: include/arena/ports/service_control.hpp
     platform_factory: include/arena/platform/service_control.hpp
+  common_implementation: src/adapters/service_control.cpp
   namespace: arena::ports
   cxx_shape: |
     enum class ServiceAction {
@@ -81,6 +84,13 @@ public_surface:
         failed,
     };
 
+    inline constexpr std::size_t service_name_max_utf8_bytes = 256;
+    inline constexpr std::size_t service_diagnostic_code_max_bytes = 64;
+    inline constexpr std::size_t service_diagnostic_message_max_utf8_bytes = 512;
+    inline constexpr auto service_timeout_minimum = std::chrono::milliseconds{1};
+    inline constexpr auto service_timeout_maximum = std::chrono::seconds{120};
+    inline constexpr auto service_timeout_default = std::chrono::seconds{30};
+
     struct ServiceDiagnostic {
         std::string code;
         std::string message;
@@ -89,7 +99,7 @@ public_surface:
     struct ServiceRequest {
         std::string platform_name;
         ServiceAction action;
-        std::chrono::milliseconds timeout;
+        std::chrono::milliseconds timeout{service_timeout_default};
     };
 
     struct ServiceResult {
@@ -102,14 +112,42 @@ public_surface:
     class ServiceControl {
       public:
         virtual ~ServiceControl() = default;
-        [[nodiscard]] virtual ServiceResult
-        perform(const ServiceRequest& request) = 0;
+
+        [[nodiscard]] ServiceResult
+        perform(const ServiceRequest& request);
+
+      protected:
+        [[nodiscard]] virtual ServiceResult perform_validated(
+            const ServiceRequest& request,
+            std::chrono::steady_clock::time_point deadline) = 0;
     };
   platform_factory_shape: |
     namespace arena::platform {
     [[nodiscard]] std::unique_ptr<arena::ports::ServiceControl>
     make_service_control();
     }
+
+neutral_enforcement:
+  owner: arena::ports::ServiceControl::perform
+  responsibilities:
+    - validate the platform name and timeout before platform work
+    - capture one steady-clock deadline exactly once
+    - call perform_validated with the validated request and absolute deadline
+    - convert ordinary adapter exceptions into one bounded failed result
+    - validate action echo, outcome/state invariants, and diagnostic bounds
+    - fail closed with adapter_contract_violation when an adapter returns an invalid result
+  exception_policy:
+    expected_operational_failures: returned_as_failed_result
+    adapter_std_exception: returned_as_failed_result_with_code_adapter_exception
+    allocation_or_process_fatal_failure: may_propagate
+  fixed_neutral_codes:
+    - invalid_request
+    - adapter_exception
+    - adapter_contract_violation
+  rule: >
+    Platform adapters may return their own bounded diagnostic codes, but they may
+    not reimplement or bypass public request/result validation. Callers never
+    branch on any diagnostic code.
 
 request_contract:
   platform_name:
@@ -133,7 +171,7 @@ request_contract:
     clock: std::chrono::steady_clock
     minimum: 1ms
     maximum: 120s
-    recommended_default: 30s
+    default: 30s
     rule: >
       perform() captures one monotonic deadline exactly once. Every query,
       command, poll, stop/start phase, and cleanup wait for that request shares
@@ -161,6 +199,7 @@ result_contract:
     message:
       maximum_utf8_bytes: 512
       rules:
+        - valid UTF-8 after any bounded truncation
         - no secrets or credential contents
         - no unbounded platform output
         - no command line echo containing sensitive data
@@ -241,8 +280,13 @@ caller_migration:
 validation:
   focused_test_file: tests/unit/service_control_tests.cpp
   required_cases:
-    - invalid empty or oversized service name
-    - timeout below minimum and above maximum
+    - neutral perform rejects invalid empty or oversized service name before adapter invocation
+    - neutral perform rejects forbidden control characters before adapter invocation
+    - neutral perform rejects timeout below minimum and above maximum before adapter invocation
+    - neutral perform captures and passes one deadline
+    - neutral perform converts adapter exception to bounded failed result
+    - neutral perform rejects mismatched action or invalid completed state
+    - neutral perform rejects missing, malformed, or oversized failure diagnostic
     - missing service
     - permission or query failure
     - inactive status
@@ -267,15 +311,22 @@ validation:
 
 implementation_slices:
   - id: SC-01
-    goal: add neutral public types, port, platform factory declaration, and contract tests
+    goal: >
+      Add neutral public types, the template-method port, common request/result
+      enforcement, platform factory declaration, and fake-adapter contract tests.
     may_touch:
       - include/arena/ports/service_control.hpp
       - include/arena/platform/service_control.hpp
+      - src/adapters/service_control.cpp
       - tests/unit/service_control_tests.cpp
       - CMakeLists.txt
+    transitional_rule: >
+      The legacy perform_service_action declaration remains available until
+      SC-04 so current main continues to compile. SC-01 does not call or wrap it.
     must_not_touch:
       - src/application/installer/setup.cpp
-      - platform adapter behavior
+      - src/platform/windows/service_control.cpp
+      - src/platform/linux/service_control.cpp
       - transaction or provider lifecycle code
   - id: SC-02
     goal: implement Windows adapter and focused fake-backend tests
@@ -285,6 +336,9 @@ implementation_slices:
       - tests/unit/service_control_tests.cpp
       - private Windows service-control support files if strictly necessary
       - CMakeLists.txt
+    transitional_rule: >
+      The file may temporarily retain the legacy function for current callers,
+      but new behavior is implemented only through the neutral adapter.
   - id: SC-03
     goal: implement Linux adapter and focused fake-backend tests
     prerequisite: SC-01
@@ -293,6 +347,9 @@ implementation_slices:
       - tests/unit/service_control_tests.cpp
       - private Linux service-control support files if strictly necessary
       - CMakeLists.txt
+    transitional_rule: >
+      The file may temporarily retain the legacy function for current callers,
+      but new behavior is implemented only through the neutral adapter.
   - id: SC-04
     goal: migrate the current Installer caller and remove the legacy int/string action API
     prerequisites:
@@ -301,9 +358,11 @@ implementation_slices:
     may_touch:
       - src/application/installer/setup.cpp
       - include/arena/platform/service_control.hpp
-      - include/arena/ports/service_control.hpp
+      - src/platform/windows/service_control.cpp
+      - src/platform/linux/service_control.cpp
       - tests/unit/setup_tests.cpp
       - tests/unit/service_control_tests.cpp
+      - CMakeLists.txt
     must_not_touch:
       - transaction state machine
       - provider startup contract
@@ -311,6 +370,7 @@ implementation_slices:
 
 delegation_stop_conditions:
   - a public state/action/outcome needs to change
+  - the non-virtual enforcement boundary cannot be implemented as specified
   - another platform-independent public method appears necessary
   - a caller needs provider-specific or product-specific service meaning
   - transaction sequencing or rollback policy must change
