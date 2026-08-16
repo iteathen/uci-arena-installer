@@ -190,6 +190,17 @@ specs:
       - tests/unit/install_layout_tests.cpp
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_install_layout_transaction_execution_v1
+    path: specs/install_layout_transaction_execution_v1.yaml
+    owner: install_layout
+    applies_to:
+      - include/arena/application/installer/install_layout.hpp
+      - src/application/installer/install_layout.cpp
+      - apps/setup/main.cpp
+      - include/arena/application/installer/setup.hpp
+      - tests/unit/install_layout_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
   - spec_id: arena_install_transaction_v2
     path: specs/install_transaction_v2.yaml
     owner: install_transaction
@@ -229,6 +240,20 @@ specs:
       - include/arena/application/installer/install_transaction.hpp
       - src/application/installer/install_transaction.cpp
       - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - spec_id: arena_install_transaction_storage_bootstrap_v1
+    path: specs/install_transaction_storage_bootstrap_v1.yaml
+    owner: install_transaction
+    applies_to:
+      - include/arena/ports/install_transaction.hpp
+      - include/arena/platform/install_transaction.hpp
+      - include/arena/application/installer/install_transaction.hpp
+      - src/adapters/install_transaction.cpp
+      - src/platform/windows/install_transaction.cpp
+      - src/platform/linux/install_transaction.cpp
+      - src/application/installer/install_transaction.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - tests/unit/install_layout_tests.cpp
       - CMakeLists.txt
   - spec_id: arena_install_transaction_derived_state_v1
     path: specs/install_transaction_derived_state_v1.yaml
