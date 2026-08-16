@@ -1,0 +1,323 @@
+meta:
+  spec_id: arena_service_control_v1
+  version: 1
+  status: active
+  owner: service_control
+  parent_issue: 6
+
+purpose: >
+  Give Installer callers one platform-neutral, substitutable service-control
+  contract. Windows SCM and Linux systemd details remain private adapters.
+
+hierarchy:
+  lego:
+    brick: ServiceControl
+    owns:
+      - translating one typed service request into platform service-manager operations
+      - observing the final neutral service state
+      - enforcing one bounded operation timeout
+      - returning bounded platform diagnostics
+    does_not_own:
+      - install transaction sequencing or commit
+      - provider lifecycle or requalification
+      - process supervision outside platform service management
+      - installation layout
+      - service registration policy
+      - Manager or provider behavior
+    topology_rule: >
+      ServiceControl is one coherent Installer brick with platform adapters.
+      Do not split it into registries or action-specific public services without
+      a proven independent ownership, lifecycle, replacement, or failure boundary.
+  solid:
+    single_responsibility: >
+      The port expresses service-manager intent and neutral results only.
+    open_closed: >
+      A new supported platform adds an adapter implementing the same port;
+      Installer callers and neutral types do not change.
+    liskov: >
+      Every adapter obeys the same result invariants, idempotency rules, timeout
+      semantics, and expected-failure behavior.
+    interface_segregation: >
+      The public port exposes one perform(request) operation and no
+      platform-specific query/control methods.
+    dependency_inversion: >
+      Installer lifecycle code depends on arena::ports::ServiceControl.
+      Platform composition supplies the concrete adapter.
+  cupid:
+    - composable through the fixed request/result port
+    - unix-like bounded private helpers with explicit data flow
+    - predictable idempotency, timeout, state, and diagnostic behavior
+    - idiomatic C++20 and native platform APIs
+    - domain names describe services, actions, states, and outcomes
+  kiss: >
+    Choose the least complex private adapter implementation that completely
+    satisfies this contract. KISS may not replace final-state verification with
+    command-exit success, omit error evidence, or add a second public abstraction.
+
+public_surface:
+  headers:
+    neutral_port: include/arena/ports/service_control.hpp
+    platform_factory: include/arena/platform/service_control.hpp
+  namespace: arena::ports
+  cxx_shape: |
+    enum class ServiceAction {
+        start,
+        stop,
+        restart,
+        status,
+    };
+
+    enum class ServiceOutcome {
+        completed,
+        failed,
+    };
+
+    enum class ServiceState {
+        unknown,
+        inactive,
+        activating,
+        active,
+        deactivating,
+        failed,
+    };
+
+    struct ServiceDiagnostic {
+        std::string code;
+        std::string message;
+    };
+
+    struct ServiceRequest {
+        std::string platform_name;
+        ServiceAction action;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct ServiceResult {
+        ServiceAction action;
+        ServiceOutcome outcome;
+        ServiceState state;
+        std::optional<ServiceDiagnostic> diagnostic;
+    };
+
+    class ServiceControl {
+      public:
+        virtual ~ServiceControl() = default;
+        [[nodiscard]] virtual ServiceResult
+        perform(const ServiceRequest& request) = 0;
+    };
+  platform_factory_shape: |
+    namespace arena::platform {
+    [[nodiscard]] std::unique_ptr<arena::ports::ServiceControl>
+    make_service_control();
+    }
+
+request_contract:
+  platform_name:
+    meaning: opaque platform service identifier supplied by Installer integration policy
+    minimum_utf8_bytes: 1
+    maximum_utf8_bytes: 256
+    forbidden:
+      - embedded_nul
+      - newline
+      - carriage_return
+    rule: >
+      ServiceControl does not maintain a product/service registry and does not
+      translate product ids into platform service names.
+  action:
+    allowed:
+      - start
+      - stop
+      - restart
+      - status
+  timeout:
+    clock: std::chrono::steady_clock
+    minimum: 1ms
+    maximum: 120s
+    recommended_default: 30s
+    rule: >
+      perform() captures one monotonic deadline exactly once. Every query,
+      command, poll, stop/start phase, and cleanup wait for that request shares
+      the same deadline. Restart may not reset the deadline between stop and start.
+
+result_contract:
+  action: echoes the request action
+  outcome:
+    completed: requested semantic operation reached its required final state
+    failed: request validation, platform operation, query, transition, or deadline failed
+  state:
+    unknown: no trustworthy neutral state was obtained
+    inactive: service is not executing; platform stopped/inactive/paused states map here
+    activating: service is transitioning toward active
+    active: service is executing and platform reports active/running
+    deactivating: service is transitioning toward inactive
+    failed: platform reports a terminal failed state
+  diagnostic:
+    required_when_outcome_failed: true
+    optional_when_outcome_completed: true
+    code:
+      maximum_bytes: 64
+      pattern: '^[A-Za-z0-9_.:-]+$'
+      meaning: bounded adapter diagnostic only; callers do not branch on it
+    message:
+      maximum_utf8_bytes: 512
+      rules:
+        - no secrets or credential contents
+        - no unbounded platform output
+        - no command line echo containing sensitive data
+  invariants:
+    - completed start returns state active
+    - completed restart returns state active
+    - completed stop returns state inactive
+    - completed status returns a state other than unknown
+    - failed returns a diagnostic and may return the last trustworthy observed state
+    - operational platform failures are returned as ServiceOutcome::failed, not raw integers
+    - ordinary expected platform failures do not escape as runtime_error
+
+idempotency:
+  start:
+    active: completed_active_without_unnecessary_mutation
+    inactive: transition_to_active
+    activating: wait_within_same_deadline
+    deactivating: wait_then_start_within_same_deadline
+    failed_or_unknown: fail_closed_unless_platform_can_safely_recover_within_contract
+  stop:
+    inactive: completed_inactive_without_unnecessary_mutation
+    active: transition_to_inactive
+    activating: resolve_then_stop_within_same_deadline
+    deactivating: wait_within_same_deadline
+    failed_or_unknown: fail_closed_unless_platform_can_safely_stop_and_verify
+  restart:
+    meaning: ensure one complete stop/start lifecycle and return active
+    inactive: start_within_same_deadline
+    active: stop_then_start_within_same_deadline
+    transitional: resolve_then_complete_restart_within_same_deadline
+  status:
+    mutation: forbidden
+
+platform_mapping:
+  windows:
+    adapter_file: src/platform/windows/service_control.cpp
+    examples:
+      SERVICE_RUNNING: active
+      SERVICE_START_PENDING: activating
+      SERVICE_CONTINUE_PENDING: activating
+      SERVICE_STOP_PENDING: deactivating
+      SERVICE_PAUSE_PENDING: deactivating
+      SERVICE_STOPPED: inactive_unless_exit_status_proves_failed
+      SERVICE_PAUSED: inactive
+    rules:
+      - use SCM APIs directly
+      - query and command errors become failed results with bounded Win32 diagnostics
+      - wait hints may influence bounded poll intervals but cannot extend the request deadline
+  linux:
+    adapter_file: src/platform/linux/service_control.cpp
+    neutral_source: systemd_active_state
+    examples:
+      active: active
+      reloading: activating
+      activating: activating
+      deactivating: deactivating
+      inactive: inactive
+      failed: failed
+      maintenance: failed
+    rules:
+      - invoke /usr/bin/systemctl without shell interpretation
+      - command exit success alone never proves final semantic state
+      - capture only bounded state/diagnostic output
+      - child execution and polling share the request deadline
+
+caller_migration:
+  current_consumer: src/application/installer/setup.cpp
+  current_use: Manager service restart after transaction work
+  required_change: >
+    Consume ServiceResult and require completed/active for restart. Do not inspect
+    raw SCM values, systemctl exit codes, or diagnostic codes.
+  staged_dependency_rule: >
+    Issue #6 may obtain the default adapter from the platform factory at the
+    current SetupEngine facade boundary. Issue #9 later injects the same neutral
+    port into InstallTransactionCoordinator. Issue #6 must not invent transaction
+    dependency injection or a second service abstraction.
+
+validation:
+  focused_test_file: tests/unit/service_control_tests.cpp
+  required_cases:
+    - invalid empty or oversized service name
+    - timeout below minimum and above maximum
+    - missing service
+    - permission or query failure
+    - inactive status
+    - activating status
+    - active status
+    - deactivating status
+    - failed status
+    - idempotent start while active
+    - idempotent stop while inactive
+    - start from inactive
+    - stop from active
+    - restart from active
+    - restart from inactive
+    - transition timeout
+    - restart shares one deadline across stop and start
+    - bounded diagnostics
+    - caller accepts only completed active restart
+  platform_testing_rule: >
+    Platform implementations may use private fakeable backends/clocks/sleepers
+    for focused tests. Such seams remain private implementation details and may
+    not create another public port or alter the neutral contract.
+
+implementation_slices:
+  - id: SC-01
+    goal: add neutral public types, port, platform factory declaration, and contract tests
+    may_touch:
+      - include/arena/ports/service_control.hpp
+      - include/arena/platform/service_control.hpp
+      - tests/unit/service_control_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - src/application/installer/setup.cpp
+      - platform adapter behavior
+      - transaction or provider lifecycle code
+  - id: SC-02
+    goal: implement Windows adapter and focused fake-backend tests
+    prerequisite: SC-01
+    may_touch:
+      - src/platform/windows/service_control.cpp
+      - tests/unit/service_control_tests.cpp
+      - private Windows service-control support files if strictly necessary
+      - CMakeLists.txt
+  - id: SC-03
+    goal: implement Linux adapter and focused fake-backend tests
+    prerequisite: SC-01
+    may_touch:
+      - src/platform/linux/service_control.cpp
+      - tests/unit/service_control_tests.cpp
+      - private Linux service-control support files if strictly necessary
+      - CMakeLists.txt
+  - id: SC-04
+    goal: migrate the current Installer caller and remove the legacy int/string action API
+    prerequisites:
+      - SC-02
+      - SC-03
+    may_touch:
+      - src/application/installer/setup.cpp
+      - include/arena/platform/service_control.hpp
+      - include/arena/ports/service_control.hpp
+      - tests/unit/setup_tests.cpp
+      - tests/unit/service_control_tests.cpp
+    must_not_touch:
+      - transaction state machine
+      - provider startup contract
+      - Manager or provider repositories
+
+delegation_stop_conditions:
+  - a public state/action/outcome needs to change
+  - another platform-independent public method appears necessary
+  - a caller needs provider-specific or product-specific service meaning
+  - transaction sequencing or rollback policy must change
+  - installation layout or service registration policy must change
+  - tests appear to require real production service mutation rather than a private adapter seam
+
+completion: >
+  Issue #6 completes only after SC-01 through SC-04 are integrated, both platform
+  adapters satisfy identical neutral semantics, the legacy int/string API is
+  removed, the current caller consumes the neutral result, and focused tests pass.

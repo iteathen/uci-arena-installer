@@ -24,3 +24,15 @@ specs:
       - AGENTS.md
       - docs/architecture
       - specs/suite_lego_boundaries_v1.yaml
+  - spec_id: arena_service_control_v1
+    path: specs/service_control_v1.yaml
+    owner: service_control
+    applies_to:
+      - include/arena/ports/service_control.hpp
+      - include/arena/platform/service_control.hpp
+      - src/platform/windows/service_control.cpp
+      - src/platform/linux/service_control.cpp
+      - src/application/installer/setup.cpp
+      - tests/unit/service_control_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
