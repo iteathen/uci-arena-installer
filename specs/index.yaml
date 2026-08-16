@@ -84,3 +84,41 @@ specs:
       - tests/unit/tuf_trust_tests.cpp
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_release_provenance_v1
+    path: specs/release_provenance_v1.yaml
+    owner: release_provenance
+    applies_to:
+      - specs/schemas/component-release-evidence.schema.json
+      - specs/schemas/component-provenance-statement.schema.json
+      - specs/schemas/provenance-trust-policy.schema.json
+      - specs/schemas/verified-component-provenance.schema.json
+      - specs/schemas/suite-release-lock-v3.schema.json
+      - specs/schemas/provider-release-result.schema.json
+      - specs/schemas/suite-release-lock-v2.schema.json
+      - tools/release/candidate-assets.mjs
+      - tools/release/component-provenance.mjs
+      - tools/release/provenance-trust-policy.mjs
+      - tools/release/provider-provenance.mjs
+      - tools/release/managed-provenance.mjs
+      - tools/release/local-provenance.mjs
+      - tools/release/sign-local-component-provenance.mjs
+      - tools/release/release-lock.mjs
+      - tools/release/clean-build.mjs
+      - tools/release/diagnostic-review-inputs.mjs
+      - tools/release/mirror-provider-assets.mjs
+      - tools/release/local-release-preflight.mjs
+      - release/README.md
+      - specs/installation_contract_v1.yaml
+      - tools/release/candidate-assets.test.mjs
+      - tools/release/component-provenance.test.mjs
+      - tools/release/provenance-trust-policy.test.mjs
+      - tools/release/provider-provenance.test.mjs
+      - tools/release/managed-provenance.test.mjs
+      - tools/release/local-provenance.test.mjs
+      - tools/release/sign-local-component-provenance.test.mjs
+      - tools/release/release-lock.test.mjs
+      - tools/release/clean-build.test.mjs
+      - tools/release/diagnostic-review-inputs.test.mjs
+      - tools/release/mirror-provider-assets.test.mjs
+      - tools/release/local-release-preflight.test.mjs
+      - package.json
