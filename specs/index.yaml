@@ -216,3 +216,28 @@ specs:
       - src/application/installer/install_transaction.cpp
       - tests/unit/install_transaction_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_artifact_acquisition_v1
+    path: specs/artifact_acquisition_v1.yaml
+    owner: artifact_acquisition
+    applies_to:
+      - specs/schemas/install-catalog.schema.json
+      - include/arena/application/installer/artifact_acquirer.hpp
+      - include/arena/ports/artifact_cache.hpp
+      - include/arena/platform/artifact_cache.hpp
+      - src/application/installer/artifact_acquirer.cpp
+      - src/adapters/artifact_cache.cpp
+      - src/platform/windows/artifact_cache.cpp
+      - src/platform/linux/artifact_cache.cpp
+      - include/arena/application/installer/archive_expander.hpp
+      - include/arena/ports/archive_extraction.hpp
+      - include/arena/platform/archive_extraction.hpp
+      - src/application/installer/archive_expander.cpp
+      - src/adapters/archive_extraction.cpp
+      - src/platform/windows/archive_extraction.cpp
+      - src/platform/linux/archive_extraction.cpp
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp
+      - tests/unit/artifact_acquirer_tests.cpp
+      - tests/unit/archive_expander_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
