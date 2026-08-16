@@ -58,6 +58,19 @@ specs:
       - tests/unit/provider_lifecycle_tests.cpp
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_provider_lifecycle_transactional_v1
+    path: specs/provider_lifecycle_transactional_v1.yaml
+    owner: provider_lifecycle
+    applies_to:
+      - include/arena/ports/provider_lifecycle.hpp
+      - src/adapters/provider_lifecycle.cpp
+      - src/adapters/cli_provider_lifecycle.cpp
+      - src/application/installer/provider_lifecycle_contract.cpp
+      - src/application/installer/setup.cpp
+      - src/application/installer/install_transaction.cpp
+      - tests/unit/provider_lifecycle_tests.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - tests/unit/setup_tests.cpp
   - spec_id: arena_exact_filesystem_state_v1
     path: specs/exact_filesystem_state_v1.yaml
     owner: exact_filesystem_state
@@ -164,4 +177,26 @@ specs:
       - tools/release/build-suite-update-package.mjs
       - tests/unit/install_layout_tests.cpp
       - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+  - spec_id: arena_install_transaction_v2
+    path: specs/install_transaction_v2.yaml
+    owner: install_transaction
+    applies_to:
+      - specs/schemas/install-transaction-v2.schema.json
+      - specs/schemas/install-transaction-effect-v1.schema.json
+      - specs/schemas/install-transaction.schema.json
+      - include/arena/ports/install_transaction.hpp
+      - include/arena/platform/install_transaction.hpp
+      - include/arena/application/installer/install_transaction.hpp
+      - src/adapters/install_transaction.cpp
+      - src/platform/windows/install_transaction.cpp
+      - src/platform/linux/install_transaction.cpp
+      - src/application/installer/install_transaction.cpp
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp
+      - src/application/installer/removal_lifecycle.cpp
+      - apps/setup/main.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - tests/unit/install_layout_tests.cpp
       - CMakeLists.txt
