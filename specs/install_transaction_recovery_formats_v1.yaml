@@ -1,0 +1,237 @@
+meta:
+  spec_id: arena_install_transaction_recovery_formats_v1
+  version: 1
+  status: active
+  owner: install_transaction
+  parent_issue: 9
+  specializes: arena_install_transaction_v2
+
+authority_relationship: >
+  This specification freezes byte-level recovery formats whose semantics are
+  already owned by arena_install_transaction_v2: deterministic journal/effect
+  JSON bytes, managed-tree snapshot digests, file-set prepared manifests, and
+  commit-evidence aggregation. It is an internal SOLID format module of the
+  existing InstallTransactionCoordinator LEGO, not a new storage or filesystem
+  authority.
+
+hierarchy:
+  lego:
+    brick: InstallTransactionCoordinator
+    rule: one transaction owner; these formats exist only for its durable recovery evidence
+  solid:
+    single_responsibility: stable exact byte representation for crash recovery
+    open_closed: incompatible format change requires a new explicit format version
+    liskov: recovery on another process/version interprets identical bytes identically
+    interface_segregation: callers do not choose serializer/hash algorithms
+    dependency_inversion: journal/effect logic consumes these fixed format functions
+  cupid:
+    - deterministic streaming formats
+    - bounded one-purpose serializers/parsers
+    - predictable exact digests
+    - idiomatic nlohmann JSON and SHA-256
+  kiss: >
+    Use direct fixed serialization. Do not introduce a generic canonicalization
+    framework, database, protobuf layer, content-addressed store, or alternate
+    serializer.
+
+json_document_bytes:
+  applies_to:
+    - arena_install_transaction_v2 active/history journal
+    - arena_install_transaction_effect_v1 records
+    - small prepared metadata/index documents
+  algorithm:
+    - construct nlohmann::json objects using normal object semantics
+    - object keys serialize in the deterministic ordering supplied by the repository's default nlohmann::json object type
+    - no floating-point values are permitted in these recovery documents
+    - serialize with `dump(2)`
+    - append exactly one LF byte
+    - UTF-8 only
+    - SHA-256 is over exactly those bytes
+  parser:
+    - exact-read through issue #7
+    - duplicate-rejecting bounded JSON parse
+    - reject unknown fields through the applicable schema/typed validator
+  rule: >
+    Pretty-printing is part of this internal persisted format. Do not substitute
+    compact dump, locale formatting, platform newlines, generic canonical JSON,
+    or TUF's OLPC serializer.
+
+managed_tree_snapshot_v1:
+  schema_name: arena_managed_tree_snapshot_v1
+  digest_output:
+    tree_sha256: lowercase SHA-256
+    file_count: checked uint64
+    directory_count: checked uint64 including root
+    total_file_bytes: checked uint64
+  path_encoding:
+    - every native leaf is converted losslessly to valid UTF-8
+    - Unicode normalization is forbidden; preserve exact filename scalar sequence
+    - relative record paths use `/` separators independent of platform
+    - root path is `.`
+    - no record path begins with `/`, contains dot/dot-dot components, NUL, CR, or LF
+    - Windows case-colliding sibling names are rejected because recovery cannot safely treat them as one portable managed tree
+  child_order:
+    - enumerate one directory's immediate child names
+    - reject more than 1048576 immediate children before unbounded materialization
+    - sort by unsigned UTF-8 byte lexicographic order of the exact leaf name
+    - process in that order
+    - re-enumerate after processing and require the exact same sorted child-name vector before accepting the directory
+  traversal_order: depth-first preorder
+  stream_header_exact_utf8: "arena_managed_tree_snapshot_v1\n"
+  record_rendering:
+    directory:
+      object_fields:
+        kind: directory
+        path: relative path
+      bytes: compact `nlohmann::json` dump of that fixed object plus one LF
+    file:
+      object_fields:
+        executable: boolean
+        kind: file
+        path: relative path
+        sha256: lowercase content SHA-256
+        size_bytes: uint64
+      bytes: compact `nlohmann::json` dump of that fixed object plus one LF
+      executable:
+        windows: false
+        linux: true when any owner/group/other executable bit is set, otherwise false
+  hash_algorithm: >
+    Initialize SHA-256, feed the exact header bytes, then feed each exact record
+    line in traversal order. The final digest is tree_sha256. Record JSON uses
+    the fixed object keys above and compact dump; default nlohmann object ordering
+    therefore produces a stable key order.
+  file_hashing:
+    - use the exact admitted regular-file capability and read_at only
+    - stream bounded chunks with checked 64-bit offsets
+    - reobserve open object and path binding after content hashing
+    - require unchanged object/metadata identity and exact byte count
+  directory_rules:
+    - root and every child directory are exact admitted capabilities
+    - reject symlink/reparse/junction and every special object
+    - reject a nested mount/bind volume boundary beneath the admitted root; root itself may reside on any supported volume
+    - enforce transaction tree-depth/path budgets
+    - do not accumulate a whole-tree path list in memory
+  compatibility_rule: >
+    Any future change to header, record fields, path encoding, executable
+    semantics, traversal, sorting, or hash stream requires
+    arena_managed_tree_snapshot_v2. Existing v1 transaction recovery continues
+    to use this exact v1 algorithm.
+
+file_set_prepared_manifest_v1:
+  purpose: >
+    Persist the exact mapping and prepared stage/backup evidence needed to inspect
+    or compensate a partial multi-file activation without placing an arbitrarily
+    large mapping array in the active journal/effect record.
+  index_schema: arena_transaction_file_set_index_v1
+  index_file: effects/<effect-index>-<operation-id>.file-set-index.json
+  index_bytes: json_document_bytes
+  index_fields:
+    - schema = arena_transaction_file_set_index_v1
+    - schema_version = 1
+    - transaction_id
+    - operation_id
+    - entry_count
+    - chunks array in activation order
+  chunk_descriptor_fields:
+    - first_index
+    - entry_count
+    - path relative to transaction work root
+    - size_bytes
+    - sha256
+  chunks:
+    schema_header_line:
+      exact_object:
+        schema: arena_transaction_file_set_chunk_v1
+        schema_version: 1
+        transaction_id: exact transaction id
+        operation_id: exact operation id
+        first_index: uint64
+      bytes: compact nlohmann JSON plus LF
+    entry_line_fields:
+      - index: exact zero-based uint64
+      - source: absolute normalized path
+      - destination: absolute normalized path
+      - size_bytes: uint64
+      - sha256: lowercase SHA-256
+      - destination_policy: require_absent | capture_for_compensation
+      - stage_path: exact private destination-volume stage path
+      - prior_sha256: lowercase SHA-256 or null
+      - backup_path: exact private sibling backup path or null
+    entry_line_bytes: compact nlohmann JSON plus LF
+    order: exact caller effect-entry order; no sorting/reordering
+    maximum_chunk_bytes: 33554432
+    maximum_entry_line_bytes: 262144
+    publication: >
+      Each immutable chunk is published under the transaction work root through
+      DurableStatePublisher with absent precondition. The index is published last
+      with absent precondition and references only already durable exact chunks.
+  effect_record_reference: >
+    activate_file_set.prepared.manifest points to the exact index file, not a
+    chunk. Recovery exact-reads index and every chunk, validates all digests,
+    contiguous indices, total entry_count, uniqueness and path/effect invariants,
+    then streams entries without whole-manifest materialization.
+  maximum_entries: 1048576
+  rule: >
+    Large supported file sets scale by immutable chunks rather than by increasing
+    journal/effect-record size or adding a second durable writer.
+
+publish_state_work_files:
+  candidate:
+    - exact raw candidate bytes, not base64/JSON-wrapped
+    - immutable work-root file published with absent precondition
+    - maximum 67108864 bytes from DurableStatePublisher contract
+  prior:
+    - exact raw prior target bytes when prior exists
+    - immutable work-root file published with absent precondition
+    - digest must equal the target precondition digest
+  references:
+    - effect record stores path, exact size, and SHA-256 only
+
+provider_request_digest:
+  purpose: bind the exact forward/compensation requests prepared before activation
+  encoding:
+    - convert the fixed ProviderLifecycleRequest fields to one JSON object with enum strings
+    - fields: component_id, component_version, operation, executable, working_directory, arguments, policy, timeout_ms
+    - policy fields: wire_protocol, legacy_envelope, require_configuration_match, allow_safe_inactive
+    - serialize using json_document_bytes
+    - SHA-256 exact bytes
+  rule: no environment, provider result, transaction id, or provider-specific reason enters request digest
+
+commit_evidence_digest:
+  field: verified_effect_records_sha256
+  algorithm:
+    - initialize SHA-256
+    - for each effect in exact transaction-plan order require progress verified
+    - feed UTF-8 operation_id
+    - feed one NUL byte
+    - feed the 64 lowercase ASCII bytes of the exact current verified effect-record SHA-256
+    - feed one LF byte
+    - final lowercase SHA-256 is verified_effect_records_sha256
+  effect_count: exact number of ordered effects
+  rule: >
+    commit evidence binds effect identity, order, and exact verified recovery
+    records. It is not a replacement for individual target verification.
+
+history_copy_bytes:
+  rule: >
+    history/<transaction_id>.json is byte-for-byte identical to the terminal
+    active-transaction.json revision it archives. It is not reserialized from a
+    parsed object. Its SHA-256 must equal the exact terminal active journal digest.
+
+recovery_format_validation:
+  - tree snapshot golden vectors for empty tree, nested directories, zero-byte file, executable file, Unicode filenames, and ordering
+  - Windows/Linux same-platform repeat digest stability
+  - filename case-collision rejection on Windows semantics
+  - concurrent file/directory mutation invalidates snapshot
+  - file-set index/chunk boundary at one entry, exact chunk-size edge, multi-chunk, and maximum entry count
+  - missing/reordered/duplicated/foreign chunk fails
+  - exact journal/effect pretty bytes and compact tree/file-set record bytes
+  - provider request digest changes for every fixed request field
+  - commit digest changes for operation id, record digest, or order
+  - terminal history byte equality
+
+stop_conditions:
+  - recovery requires a different serializer or tree digest for the same v1 name
+  - whole-tree or whole-file-set materialization is proposed
+  - file-set chunks require a durable writer other than DurableStatePublisher
+  - platform-specific path or metadata leaks into the public transaction plan beyond the fixed snapshot semantics
