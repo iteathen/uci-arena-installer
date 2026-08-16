@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-transaction-v2.schema.json",
+  "title": "arena_install_transaction_v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "transaction_id",
+    "revision",
+    "operation",
+    "scope",
+    "installation_id",
+    "phase",
+    "effects",
+    "primary_failure",
+    "rollback_failures",
+    "cleanup_failures"
+  ],
+  "properties": {
+    "schema": {"const": "arena_install_transaction_v2"},
+    "schema_version": {"const": 2},
+    "transaction_id": {"$ref": "#/$defs/transaction_id"},
+    "revision": {"type": "integer", "minimum": 1},
+    "operation": {
+      "enum": [
+        "install",
+        "upgrade",
+        "repair",
+        "uninstall",
+        "layout_initialize",
+        "layout_migrate"
+      ]
+    },
+    "scope": {"enum": ["per-user", "per-machine"]},
+    "installation_id": {"$ref": "#/$defs/uuid"},
+    "layout_generation": {"type": "integer", "minimum": 1},
+    "phase": {
+      "enum": [
+        "planned",
+        "prepared",
+        "activating",
+        "verifying",
+        "commit_decided",
+        "cleaning",
+        "committed",
+        "rolling_back",
+        "rolled_back",
+        "rollback_failed"
+      ]
+    },
+    "effects": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8192,
+      "items": {"$ref": "#/$defs/effect_summary"}
+    },
+    "primary_failure": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/failure"}
+      ]
+    },
+    "rollback_failures": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/failure"}
+    },
+    "cleanup_failures": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/failure"}
+    },
+    "commit_evidence": {"$ref": "#/$defs/commit_evidence"},
+    "recovery_blocked": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": ["commit_decided", "cleaning", "committed"]
+          }
+        },
+        "required": ["phase"]
+      },
+      "then": {"required": ["commit_evidence"]}
+    },
+    {
+      "if": {
+        "properties": {"phase": {"const": "committed"}},
+        "required": ["phase"]
+      },
+      "then": {
+        "properties": {"recovery_blocked": {"const": false}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"phase": {"const": "rollback_failed"}},
+        "required": ["phase"]
+      },
+      "then": {
+        "properties": {
+          "rollback_failures": {"minItems": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "transaction_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "relative_record_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^work/[0-9a-f]{32}/effects/[0-9]{4}-[A-Za-z0-9._:-]+\\.json$"
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^[^\\u0000\\r\\n]*$"
+        },
+        "operation_id": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "effect_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "kind",
+        "semantic_role",
+        "progress"
+      ],
+      "properties": {
+        "operation_id": {"$ref": "#/$defs/identifier"},
+        "kind": {
+          "enum": [
+            "ensure_directory",
+            "publish_state",
+            "activate_managed_tree",
+            "activate_file_set",
+            "relocate_managed_tree",
+            "quarantine_owned_path",
+            "provider_lifecycle",
+            "service_control",
+            "layout_locator"
+          ]
+        },
+        "semantic_role": {"$ref": "#/$defs/identifier"},
+        "progress": {
+          "enum": [
+            "planned",
+            "prepared",
+            "activation_started",
+            "activated",
+            "verified",
+            "compensation_started",
+            "compensated",
+            "compensation_failed",
+            "cleanup_started",
+            "cleaned",
+            "cleanup_failed"
+          ]
+        },
+        "record_path": {"$ref": "#/$defs/relative_record_path"},
+        "record_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"progress": {"not": {"const": "planned"}}},
+            "required": ["progress"]
+          },
+          "then": {"required": ["record_path", "record_sha256"]}
+        },
+        {
+          "if": {
+            "properties": {"progress": {"const": "planned"}},
+            "required": ["progress"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["record_path"]},
+                {"required": ["record_sha256"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "commit_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effect_count", "verified_effect_records_sha256"],
+      "properties": {
+        "effect_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "verified_effect_records_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}
