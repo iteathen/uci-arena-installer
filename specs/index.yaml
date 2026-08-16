@@ -58,3 +58,29 @@ specs:
       - tests/unit/provider_lifecycle_tests.cpp
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_exact_filesystem_state_v1
+    path: specs/exact_filesystem_state_v1.yaml
+    owner: exact_filesystem_state
+    applies_to:
+      - include/arena/ports/filesystem_identity.hpp
+      - include/arena/platform/filesystem_identity.hpp
+      - src/adapters/filesystem_identity.cpp
+      - src/platform/windows/filesystem_identity.cpp
+      - src/platform/linux/filesystem_identity.cpp
+      - include/arena/application/installer/exact_document.hpp
+      - src/application/installer/exact_document.cpp
+      - include/arena/ports/durable_state_publisher.hpp
+      - include/arena/platform/durable_state_publisher.hpp
+      - src/adapters/durable_state_publisher.cpp
+      - src/platform/windows/durable_state_publisher.cpp
+      - src/platform/linux/durable_state_publisher.cpp
+      - include/arena/application/installer/tuf_canonical_json.hpp
+      - src/application/installer/tuf_canonical_json.cpp
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp
+      - tests/unit/filesystem_identity_tests.cpp
+      - tests/unit/exact_document_tests.cpp
+      - tests/unit/durable_state_publisher_tests.cpp
+      - tests/unit/tuf_trust_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
