@@ -13,55 +13,48 @@ meta:
     - arena_exact_filesystem_state_v1
 
 authority_relationship: >
-  This specification freezes the final InstallLayout execution adapter after the
-  pure LayoutTransitionPlan exists. InstallLayout chooses target layout policy,
-  exact path/anchor authority, and translation of that plan into the already-fixed
-  transaction effects. InstallTransactionCoordinator alone owns mutation phase,
-  rollback, commit decision, journal, recovery, and conditional locator mutation.
-  No second transaction engine or layout metadata copy is introduced.
+  Freeze the final InstallLayout execution adapter after pure transition planning.
+  InstallLayout owns semantic target paths/anchors and translation of one exact
+  LayoutTransitionPlan. InstallTransactionCoordinator alone owns the mutation
+  lease, journal, prepare barrier, activation, rollback, commit and recovery.
+  No second transaction/layout authority is created.
 
 hierarchy:
   lego:
     brick: InstallLayout transition execution adapter
     consumes:
       - LayoutTransitionPlan
-      - exact target policy bytes + validated target policy
+      - exact target policy bytes and validated target policy
       - optional current InstalledLayoutAuthority
       - InstallLayoutAnchorResolver
       - InstallTransactionCoordinator
-      - FilesystemIdentity for postcommit InstalledLayoutAuthority reload
-      - read-only InstallLayoutLocator for postcommit reload
+      - FilesystemIdentity and read-only InstallLayoutLocator for postcommit authority reload
     does_not_own:
       - transaction phases/effect handlers
-      - provider or service meaning
       - component acquisition/staging
-      - SetupEngine normal component operations
-      - release policy or target policy selection
+      - provider/service meaning
+      - release policy or target-policy selection
       - arbitrary filesystem cleanup
   solid:
-    single_responsibility: translate one immutable layout transition into one fixed transaction plan and reload authority after commit
-    open_closed: a future policy changes validated policy data/planner output, not the transaction engine
-    liskov: initialize and migrate use the same exact effect/coordinator semantics with different prestate binding
-    interface_segregation: existing anchor/filesystem/locator/transaction owners are passed directly; no container/registry is added
-    dependency_inversion: layout execution supplies semantic path authority to fixed transaction ports
+    single_responsibility: translate one immutable layout transition into one fixed transaction and reload exact authority after commit
+    dependency_inversion: semantic path authority is supplied to existing transaction/filesystem/locator owners
   cupid:
-    - immutable transition input
+    - immutable transition evidence
     - explicit current authority or exact absence
-    - deterministic effect order and operation ids
-    - exact target policy bytes
+    - deterministic fixed-effect plan
+    - exact suite-media policy bytes
     - exact postcommit authority reload
   kiss: >
-    Build one vector of fixed effects, call execute once, and conditionally call
-    the existing authority loader. Do not add a migration DSL, workflow engine,
-    effect registry, staging service, generic filesystem transaction, or callback.
+    Build one fixed effect vector, execute once, then reload. No migration DSL,
+    workflow engine, registry, callback, generic staging service, or second journal.
 
 preimplementation_receipt_path_delta:
-  reason: >
-    Layout execution must know whether a receipt is being rewritten in place or
-    published into a new target receipts root. The earlier pure planner shape
-    carried receipt bytes/digest but not the physical source/target receipt paths,
-    which would force IL-07 to reconstruct path authority. Freeze those paths in
-    planner output before IL-05 implementation.
+  problem: >
+    The earlier LayoutReceiptRewrite omitted its physical receipt path. IL-07 may
+    not reconstruct that path from adjacency or current defaults. A future policy
+    could also move roots.receipts, but transaction v2 has no observation-only
+    effect that can bind an old receipt path while publishing a different target.
+    Pretending such a move is safe would leave a race before the mutation lease.
   exact_cpp_shape: |
     struct LayoutReceiptRewrite {
         std::string component_id;
@@ -74,37 +67,34 @@ preimplementation_receipt_path_delta:
   planner_rules:
     source_path:
       migrate: exact current_layout.resolved.roots.receipts/<component_id>.json
-      initialize_with_legacy_receipts: exact recognized legacy data root/receipts/<component_id>.json for the requested scope
+      initialize_with_legacy_receipts: exact recognized legacy data root/receipts/<component_id>.json for requested scope
     target_path: exact target.resolved.roots.receipts/<component_id>.json
+    v1_path_invariant: source_path must equal target_path under Windows case-insensitive semantics
+    unsupported_case: >
+      If any admitted receipt's current/legacy receipts root differs from target
+      roots.receipts, plan_layout_transition fails `unsupported_receipts_root_migration`
+      before returning a plan. Spark must not work around this with copy/delete,
+      pathname cleanup, an eleventh effect, or a pre-execute-only digest check.
     emission:
-      - emit when classified receipt semantics change
-      - also emit when source_path and target_path differ even if receipt semantics are otherwise unchanged
-      - emit nothing only when semantic bytes would be unchanged and source_path equals target_path
+      - emit only when classified receipt semantics change
+      - emit nothing when semantics are unchanged and the exact path invariant holds
     exact_bytes:
-      - next_receipt is rendered default nlohmann dump(2) plus one LF
+      - render next_receipt as default nlohmann dump(2) plus one LF
       - next_receipt_sha256 hashes exactly those bytes
     validation:
-      - source/target are absolute normalized Windows paths
-      - source matches the exact recognized current/legacy receipt-root formula; no adjacency search
-      - target is strictly the target receipts root plus safe component-id filename
-      - target collisions are rejected under Windows case-insensitive semantics
-      - one rewrite per component id
-  source_retirement: >
-    If source_path differs from target_path, v1 publishes the exact next receipt
-    at target_path and leaves the old source receipt physically untouched. After
-    locator/descriptor commit it is non-authoritative. IL-07 does not invent an
-    unjournaled pathname delete or broaden quarantine effects merely to remove
-    stale evidence. A future exact cleanup slice may remove such retired files.
+      - source/target absolute normalized Windows paths
+      - source matches exact current/recognized-legacy receipts-root formula
+      - target equals target roots.receipts plus safe component-id filename
+      - one rewrite per component id; target collisions rejected case-insensitively
   precedence: >
-    For IL-05/IL-07, this exact LayoutReceiptRewrite shape and emission rule
-    specialize the earlier arena_install_layout_execution_v1 shape/rule before
-    either implementation exists.
+    This exact shape and v1 path invariant specialize the earlier
+    arena_install_layout_execution_v1 planner contract before IL-05 implementation.
 
 public_execution_surface:
   header: include/arena/application/installer/install_layout.hpp
   exact_types: |
     struct LayoutTransactionExecutionResult {
-        arena::application::installer::InstallTransactionResult transaction;
+        InstallTransactionResult transaction;
         std::optional<InstalledLayoutAuthority> installed_authority;
         std::optional<std::string> postcommit_authority_error;
     };
@@ -120,289 +110,242 @@ public_execution_surface:
         arena::ports::FilesystemIdentity& filesystem_identity,
         const arena::ports::InstallLayoutLocator& locator);
   rules:
-    - execution is synchronous and calls transaction_coordinator.execute exactly once after validation/plan construction
-    - target_policy_bytes are exact suite-media bytes, not a reserialized JSON substitute
-    - installed_authority is populated only after a committed transaction and successful exact reload
-    - postcommit_authority_error is populated only when transaction is committed but exact authority reload fails
-    - a postcommit reload failure never rewrites transaction state to rolled_back/failed and never invokes compensation
-    - noncommitted transaction results carry no installed_authority and no postcommit authority error
+    - synchronous; execute called exactly once after all validation/translation succeeds
+    - target_policy_bytes are exact suite-media bytes, never a reserialized substitute
+    - installed_authority appears only after committed transaction plus successful exact reload
+    - postcommit_authority_error appears only when transaction committed but reload failed
+    - postcommit reload failure never becomes rollback/failed and never invokes compensation
 
 exact_input_revalidation:
   target_policy:
-    - validated_target_policy still passes validate_install_layout_policy
+    - validated_target_policy passes validate_install_layout_policy
     - SHA-256 of exact target_policy_bytes equals transition.target_policy_sha256
     - bounded duplicate-rejecting parse of target_policy_bytes equals validated_target_policy semantically
-    - resolving validated target policy for transition target scope with supplied anchors equals transition.target.resolved exactly
-    - target InstalledLayout, descriptor bytes/digest, and next_locator revalidate under arena_install_layout_execution_v1
+    - target policy resolved with supplied anchors equals transition.target.resolved exactly
+    - transition target descriptor bytes/digest and next locator revalidate exactly
   initialize:
-    - transition.kind is initialize
-    - current_authority absent
-    - prior generation is 0; prior policy/descriptor/locator absent; next generation is 1
+    - transition kind initialize; current_authority absent
+    - prior generation 0; prior policy/descriptor/locator absent; next generation 1
   migrate:
-    - transition.kind is migrate
-    - current_authority present
-    - current scope/installation_id/generation/policy digest/descriptor digest/locator equal transition prior evidence exactly
-    - supplied current authority is revalidated by exact fields before transaction construction; stale mismatch fails before execute
+    - transition kind migrate; current_authority present
+    - current scope, installation_id, generation, policy digest, descriptor digest and locator equal transition prior evidence
   receipts:
-    - each LayoutReceiptRewrite source/target/digests/bytes revalidates the frozen planner rules
-  failures: fail before transaction execute and mutate no authoritative state
+    - every rewrite satisfies source_path == target_path and exact byte/digest rules
+  failure_rule: any mismatch fails before coordinator execute and authoritative mutation
 
 terminal_anchor_resolution:
-  owner: InstallLayout private helper using already-validated target policy + existing InstallLayoutAnchorResolver
+  owner: InstallLayout private helper using validated policy plus existing InstallLayoutAnchorResolver
   algorithm:
     - choose one named target semantic root
-    - inspect that exact scope's validated policy root definition
-    - follow relative_to links until the one terminal anchor entry is reached
-    - cycles/unknown roots/unknown anchors are impossible for a validated policy but still fail closed if observed
-    - resolve that terminal LayoutAnchor through the supplied anchor resolver
-    - return the exact resolved anchor path; do not climb the already-resolved target filesystem path
+    - follow that scope's validated root `relative_to` chain until its terminal `anchor`
+    - resolve that LayoutAnchor through the existing resolver
+    - never climb the resolved filesystem path or consult environment/default roots
   v1_uses:
-    clean_initialize_transaction_bootstrap_parent: terminal anchor owning target data root
-    component_root_move_staging_parent: terminal anchor owning target install root
-  provider_workspace_note: >
-    provider_workspace moves are user_preserved and therefore receive no
-    destination_staging_parent. Cross-volume preservation remains a transaction
-    prepare failure rather than permission to copy/delete.
-  active_windows_policy_result:
+    initialize_transactions_bootstrap_parent: terminal anchor owning target data root
+    component_move_staging_parent: terminal anchor owning target install root
+  active_windows_policy_vectors:
     per_user_data: user_local_app_data
     per_user_install: user_local_app_data
     per_machine_data: machine_program_data
     per_machine_install: machine_program_files
-  forbidden:
-    - nearest_existing_ancestor
-    - environment/default root fallback
-    - hardcoded drive-letter comparison
-    - deriving an anchor from path prefix when validated policy root graph is available
 
 transaction_root_selection:
   initialize:
     operation: layout_initialize
     transactions_root: transition.target.resolved.roots.transactions
-    transactions_bootstrap_parent: terminal anchor owning transition target data root
-    rationale: bootstrap storage spec establishes only the exact target data/transactions chain before lease/journal
+    transactions_bootstrap_parent: terminal anchor owning target data root
   migrate:
     operation: layout_migrate
     transactions_root: current_authority.layout.resolved.roots.transactions
     transactions_bootstrap_parent: absent
-    rationale: migration journals/recovers through pre-migration installed authority until commit; target transactions root is established by normal layout directory effects for future transactions
+    rationale: migration journals/recovery stay on pre-migration authority until commit
   common:
     scope: transition.target.resolved.scope
     installation_id: transition.installation_id
     layout_generation: transition.next_generation
 
 required_directory_closure:
-  purpose: ensure exact target parents exist before later activation without pre-transaction semantic directory mutation
-  seed_directories:
-    - every target semantic root: integration, data, install, cache, workspace, knowledge, release, receipts, transactions, preservation
-    - parent directory of transition.target.resolved.stable_paths.policy
-    - parent directory of transition.target.resolved.stable_paths.descriptor
-    - parent directory of every LayoutMove destination
-  closure_rules:
-    - for each seed add missing semantic ancestors down to but excluding that seed's exact terminal validated policy anchor
-    - every directory must be equal to/beneath one exact target semantic root or be a parent chain for the two Installer-owned stable policy/descriptor files
-    - deduplicate under Windows case-insensitive path comparison
-    - order strict ancestor before descendant; ties use unsigned UTF-8 generic path bytes for deterministic planning
-    - emit one ensure_directory effect per resulting path using deterministic role/id
-    - layout_initialize data/transactions may already exist from transaction-storage bootstrap; ensure_directory observes/preserves them rather than claiming their creation
-    - never ensure a move destination leaf itself; ensure its parent, then relocate effect owns destination activation
-    - do not create setup-launcher/installer-runtime files or infer that empty stable directories make those external integration artifacts valid
+  seeds:
+    - target roots integration, data, install, cache, workspace, knowledge, release, receipts, transactions, preservation
+    - parent of target stable policy path
+    - parent of target descriptor path
+    - parent of every LayoutMove destination
+  rules:
+    - add ancestors from each seed down to but excluding its exact terminal policy anchor
+    - every path must belong to target semantic-root closure or policy/descriptor parent closure
+    - dedupe using Windows case-insensitive semantics
+    - strict ancestors before descendants; deterministic unsigned UTF-8 path-byte tie break
+    - emit one ensure_directory effect per path
+    - initialize data/transactions created by transaction-storage bootstrap are merely observed/preserved by these effects
+    - never ensure a move destination leaf; relocation owns that leaf
+    - do not create or validate setup-launcher/runtime payloads here
   operation_id: layout.dir.<zero-padded-index>.g<next_generation>
 
-exact_policy_effect:
+policy_effect:
+  kind: publish_state
   target: transition.target.resolved.stable_paths.policy
   candidate: exact target_policy_bytes
-  ordering: after directory closure and before descriptor
-  initialize:
-    precondition: absent
-    rule: occupied target fails rather than adopting unproven/orphan bytes
+  initialize: absent precondition
   migrate:
-    same_path_and_digest_as_current:
-      action: omit policy effect because exact current policy snapshot is already authoritative
-    otherwise:
-      precondition: absent
-      rule: target policy versions use distinct stable paths; occupied target fails
-  maximum_bytes: inherit <=1 MiB exact layout document bound
+    same_current_path_and_digest: omit effect
+    otherwise: absent precondition; occupied target fails
   operation_id: layout.policy.g<next_generation>
+  ordering: after directory closure, before moves/descriptor
 
 owned_move_translation:
   component_root:
-    effect: relocate_managed_tree
+    kind: relocate_managed_tree
     ownership: installer_managed
-    source: LayoutMove.source
-    destination: LayoutMove.destination
+    source: move.source
+    destination: move.destination
     destination_staging_parent: terminal anchor owning target install root
-    preflight: source manifest/digest and prior receipt linkage already validated by planner; transaction exact snapshot remains authoritative prepare evidence
-    operation_id: reuse LayoutMove.operation_id exactly
+    operation_id: exact move.operation_id
   provider_workspace:
-    effect: relocate_managed_tree
+    kind: relocate_managed_tree
     ownership: user_preserved
-    source: LayoutMove.source
-    destination: LayoutMove.destination
+    source: move.source
+    destination: move.destination
     destination_staging_parent: absent
-    operation_id: reuse LayoutMove.operation_id exactly
-    cross_volume: transaction prepare returns unsupported_cross_volume_preserved_tree before mutation
-  ordering: exact planner owned_moves order after policy snapshot and required directories
+    operation_id: exact move.operation_id
+    cross_volume: unsupported_cross_volume_preserved_tree before mutation
+  order: exact LayoutTransitionPlan owned_moves order
   forbidden:
-    - copy/delete user-preserved workspace
-    - changing workspace_placement
-    - adding a special layout move effect
+    - user-preserved copy/delete
+    - workspace_placement conversion
+    - special layout move effect
 
 receipt_rewrite_translation:
-  candidate_bytes: exact default nlohmann dump(2) + LF of rewrite.next_receipt, digest must equal rewrite.next_receipt_sha256
-  when_source_equals_target:
-    effect: publish_state
-    target: rewrite.target_path
-    precondition: exact_sha256(rewrite.prior_receipt_sha256)
-  when_source_differs_target:
-    effect: publish_state
-    target: rewrite.target_path
-    precondition: absent
-    pre_execute_guard: >
-      exact-read source_path through FilesystemIdentity/ExactDocumentReader and
-      require digest equals prior_receipt_sha256 before transaction construction;
-      mutation lease serializes Installer writers once execute begins. The old
-      source remains physically untouched and non-authoritative after commit.
-  maximum_bytes: inherit exact receipt bound
+  precondition: exact_sha256(rewrite.prior_receipt_sha256)
+  target: rewrite.target_path which must equal rewrite.source_path
+  candidate: exact dump(2)+LF bytes of rewrite.next_receipt
+  candidate_digest: must equal rewrite.next_receipt_sha256
+  kind: publish_state
   operation_id: layout.receipt.<component_id>.g<next_generation>
-  ordering: after owned moves and before descriptor
-  rules:
-    - no startup/provider interpretation occurs; receipt bytes are already planner-owned output
-    - no installation_id/layout_generation fields are added to receipt
-    - no pathname-only deletion of prior receipt
+  order: planner receipt_rewrites order after owned moves, before descriptor
+  forbidden:
+    - receipt publication to a different physical path in v1
+    - startup/provider reinterpretation
+    - installation_id/layout_generation receipt fields
+    - pathname deletion of receipts
 
-exact_descriptor_effect:
-  effect: publish_state
+descriptor_effect:
+  kind: publish_state
   target: transition.target.resolved.stable_paths.descriptor
-  candidate: transition.target_descriptor_bytes exactly
-  digest_check: SHA-256 candidate equals transition.target_descriptor_sha256
-  initialize_precondition: absent
-  migrate_precondition:
-    same_target_as_current_descriptor: exact_sha256(transition.prior_descriptor_sha256)
-    different_target_path: absent
+  candidate: transition.target_descriptor_bytes
+  digest: exact transition.target_descriptor_sha256
+  initialize: absent precondition
+  migrate:
+    same_target_as_current_descriptor: exact prior descriptor SHA-256 precondition
+    different_target_path: absent precondition
   operation_id: layout.descriptor.g<next_generation>
-  ordering: after policy/moves/receipt rewrites and before locator
+  order: after policy/moves/receipts, before locator
 
-exact_locator_effect:
-  effect: layout_locator
+locator_effect:
+  kind: layout_locator
   operation_id: layout.locator.g<next_generation>
   initialize:
     expected_prior: absent
     replacement: transition.next_locator
   migrate:
-    expected_prior: transition.prior_locator exact
+    expected_prior: transition.prior_locator
     replacement: transition.next_locator
-  ordering: final authoritative effect
   rules:
-    - replacement must equal locator_from_installed_layout(transition.target, transition.target_descriptor_sha256)
-    - no direct registry write from InstallLayout
-    - locator activation is not commit_decided; transaction coordinator still verifies all effects before commit decision
+    - final authoritative effect
+    - replacement equals locator_from_installed_layout(target, target_descriptor_sha256)
+    - no direct registry write
 
 fixed_effect_order:
   - ensure_directory closure
   - optional target policy publish_state
-  - relocate_managed_tree owned moves in planner order
-  - publish_state receipt rewrites in planner order
+  - relocate_managed_tree owned moves
+  - publish_state receipt rewrites
   - target descriptor publish_state
   - final layout_locator
-  note: no provider_lifecycle, service_control, activate_managed_tree, activate_file_set, publish_derived_state, or quarantine_owned_path is added by IL-07 v1
+  forbidden_effects_for_il07_v1:
+    - provider_lifecycle
+    - service_control
+    - activate_managed_tree
+    - activate_file_set
+    - publish_derived_state
+    - quarantine_owned_path
 
 commit_and_reload:
-  execute:
-    - call one InstallTransactionCoordinator with the exact constructed plan
-    - do not catch/relabel rollback/rollback_failed/commit/cleanup truth as layout state
   noncommitted:
-    - return exact transaction result
-    - installed_authority absent
-    - do not call loader or mutate locator/files outside coordinator
+    - return exact InstallTransactionResult
+    - no authority reload and no external compensation
   committed:
-    - call load_installed_layout_authority with transition target scope and exact target descriptor path
-    - use supplied FilesystemIdentity, anchors, and read-only locator
-    - require returned installation_id/generation/policy/descriptor/locator/roots equal transition target exactly
-    - on success populate installed_authority
-    - on reload failure keep transaction committed, leave installed_authority absent, record bounded postcommit_authority_error, and require caller to stop normal lifecycle until exact authority can be reloaded/repaired
+    - load_installed_layout_authority using target scope and exact target descriptor path
+    - use supplied FilesystemIdentity, anchors and read-only locator
+    - require loaded ID/generation/policy/descriptor/locator/roots equal transition target
+    - success returns installed_authority
+    - reload failure leaves transaction committed, installed_authority absent, bounded postcommit_authority_error present, and blocks normal lifecycle until authority is reloadable/repaired
   cleanup_candidates: >
-    LayoutTransitionPlan cleanup_candidates remain non-authoritative postcommit
-    hints. IL-07 v1 does not pathname-delete them. Leaving an empty retired legacy
-    directory cannot invalidate commit and is safer than inventing an unjournaled
-    exact-delete API.
+    Non-authoritative hints only. IL-07 v1 does not pathname-delete them; cleanup
+    failure/deferral can never invalidate commit.
 
 setup_cli_composition:
-  owner_file: apps/setup/main.cpp
-  initialize_or_migrate_path:
-    - exact-read target policy bytes from suite media using current #7 authority
-    - bounded duplicate-reject parse/validate policy
-    - gather exact current/legacy receipt+manifest evidence under existing InstallLayout observation rules
-    - call plan_layout_transition
-    - if nullopt, load/use current InstalledLayoutAuthority; no transaction
-    - otherwise call execute_layout_transition
-    - continue normal SetupEngine component lifecycle only when result transaction committed and installed_authority present
-    - project SetupPaths only from the returned InstalledLayoutAuthority
-  raw_root_transition: >
-    After IL-07 integration, clean/legacy packaged setup must not enter normal
-    component mutation through raw-root authority. Raw development-only behavior
-    may remain only where an active spec explicitly retains it; it cannot claim an
-    installed layout or bypass initialize/migrate transaction.
+  - exact-read target policy bytes from suite media with #7 authority
+  - duplicate-rejecting parse/validate target policy
+  - gather exact current/legacy receipt+manifest evidence under InstallLayout rules
+  - call plan_layout_transition
+  - nullopt means use exact existing InstalledLayoutAuthority with no layout transaction
+  - otherwise call execute_layout_transition
+  - continue normal SetupEngine lifecycle only when transaction committed and installed_authority present
+  - derive SetupPaths only via setup_paths_from_layout on returned authority
+  - packaged clean/legacy paths never claim installed authority through raw-root reconstruction
 
 allowed_implementation_files:
   - include/arena/application/installer/install_layout.hpp
   - src/application/installer/install_layout.cpp
   - apps/setup/main.cpp
   - tests/unit/install_layout_tests.cpp
-  - tests/unit/setup_tests.cpp only for composition boundary assertions
+  - tests/unit/setup_tests.cpp
   - CMakeLists.txt
-
-forbidden:
-  - changing transaction phases/effect kinds
-  - another transaction journal/lease/rollback implementation
-  - adding layout identity to SetupPaths
-  - SetupEngine artifact acquisition/component transaction translation
-  - direct registry mutation
-  - direct provider/service execution
-  - user-preserved cross-volume copy/delete
-  - nearest-existing-ancestor staging or transaction-root selection
-  - environment/default root fallback
-  - deleting cleanup candidates or retired receipts by pathname
-  - modifying another repository
-  - closing architectural parent issues
-  - defining next_step
 
 prerequisites:
   - IL-02 common InstallLayout domain
-  - IL-03 Windows anchor/locator read adapters
-  - IL-05 pure transition planner with the receipt-path delta in this spec
-  - IL-06 exact InstalledLayoutAuthority loader
+  - IL-03 Windows anchor/read-only locator adapters
+  - IL-05 planner updated to exact receipt path invariant above
+  - IL-06 InstalledLayoutAuthority loader
   - FilesystemIdentity + ExactDocumentReader
   - DurableStatePublisher native adapters
   - TX-01 through TX-06 including arena_install_transaction_storage_bootstrap_v1
-  rule: missing prerequisite is blocked_dependency, never permission to implement a local substitute
+  rule: missing prerequisite is blocked_dependency, not permission for a local substitute
 
 validation:
-  - exact target policy bytes/digest/semantic parse mismatch blocks before execute
-  - initialize rejects current authority/prior evidence and uses target transactions root + exact data terminal anchor bootstrap parent
-  - migrate requires exact current authority and uses current transactions root with no bootstrap parent
-  - terminal anchor resolution follows policy root graph, never filesystem ancestry
-  - active Windows per-user/per-machine anchor vectors match policy
-  - deterministic directory closure and operation IDs
-  - initialize occupied policy/descriptor/receipt target rejection
-  - migrate same-policy snapshot omitted; new policy snapshot absent-preconditioned
-  - component move uses installer_managed + exact install terminal anchor staging parent
-  - provider workspace same-volume succeeds; cross-volume fails before mutation with source preserved
-  - receipt same-path exact replacement and different-path absent target behavior
-  - physical receipt path change emits rewrite even when JSON semantics unchanged
-  - descriptor exact prior-vs-absent precondition based on physical path
-  - locator is final effect and exact next record
-  - transaction coordinator called once
-  - every rollback/rollback_failed/committed result returned truthfully
-  - committed reload success returns exact authority
-  - committed reload failure remains committed and blocks normal lifecycle without compensation
-  - cleanup candidates/retired receipts are not pathname-deleted
-  - no raw-root packaged component mutation after committed layout initialization/migration
+  - target policy bytes/digest/semantic mismatch blocks before execute
+  - initialize uses target transactions root + exact data terminal-anchor bootstrap parent
+  - migrate uses exact current transaction root with no bootstrap parent
+  - anchor lookup follows policy graph, never filesystem ancestry
+  - deterministic directory closure/effect IDs/order
+  - receipt roots differing cause `unsupported_receipts_root_migration` before plan/execute
+  - receipt rewrite is exact in-place publish with exact prior digest
+  - component move uses installer_managed + exact install terminal-anchor staging parent
+  - provider workspace cross-volume fails before mutation and source remains authoritative
+  - locator is final effect
+  - coordinator execute exactly once
+  - rollback/rollback_failed/committed truth not reinterpreted
+  - committed authority reload success/failure behavior exact
+  - no cleanup-candidate pathname deletion
+  - no raw-root packaged component mutation after layout establishment
+
+forbidden:
+  - changing transaction phases/effect kinds
+  - another journal/lease/rollback owner
+  - layout identity in SetupPaths
+  - SetupEngine artifact/component transaction work
+  - direct registry/provider/service mutation
+  - receipt-root relocation in v1
+  - user-preserved cross-volume copy/delete
+  - nearest-existing-ancestor or environment/default fallback
+  - another repository
+  - parent issue closure
+  - defining next_step
 
 stop_conditions:
-  - a layout transition cannot be represented by ensure_directory, publish_state, relocate_managed_tree, and layout_locator only
-  - transaction storage bootstrap would need any path outside exact parent->transactions_root chain
-  - planner cannot freeze exact receipt physical source/target authority
-  - a user-preserved move requires cross-volume copy/delete
-  - exact policy bytes are unavailable at execution
-  - postcommit authority reload would require reconstructing roots instead of using the loader
-  - another repository must change for this slice
+  - fixed ensure_directory/publish_state/relocate_managed_tree/layout_locator effects cannot express transition
+  - target receipts root differs from exact current/legacy receipts root
+  - transaction bootstrap needs a path outside exact parent->transactions_root chain
+  - user-preserved move is cross-volume
+  - exact target policy bytes unavailable
+  - postcommit authority would require reconstructed roots instead of loader
