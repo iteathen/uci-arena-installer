@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-layout-locator.schema.json",
+  "title": "arena_install_layout_locator_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "scope",
+    "installation_id",
+    "layout_generation",
+    "integration_root",
+    "policy_path",
+    "policy_sha256",
+    "descriptor_path",
+    "descriptor_sha256",
+    "setup_launcher_path"
+  ],
+  "properties": {
+    "schema": {"const": "arena_install_layout_locator_v1"},
+    "schema_version": {"const": 1},
+    "scope": {"enum": ["per-user", "per-machine"]},
+    "installation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "layout_generation": {"type": "integer", "minimum": 1},
+    "integration_root": {"$ref": "#/$defs/absolute_windows_path"},
+    "policy_path": {"$ref": "#/$defs/absolute_windows_path"},
+    "policy_sha256": {"$ref": "#/$defs/sha256"},
+    "descriptor_path": {"$ref": "#/$defs/absolute_windows_path"},
+    "descriptor_sha256": {"$ref": "#/$defs/sha256"},
+    "setup_launcher_path": {"$ref": "#/$defs/absolute_windows_path"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolute_windows_path": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 32767,
+      "pattern": "^(?:[A-Za-z]:\\\\|\\\\\\\\[^\\\\/]+\\\\[^\\\\/]+\\\\)[^\\u0000\\r\\n]*$"
+    }
+  }
+}

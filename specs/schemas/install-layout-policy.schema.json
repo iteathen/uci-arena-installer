@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-layout-policy.schema.json",
+  "title": "arena_install_layout_policy_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "policy_id",
+    "policy_version",
+    "platform",
+    "registration",
+    "stable_paths",
+    "scopes"
+  ],
+  "properties": {
+    "schema": {"const": "arena_install_layout_policy_v1"},
+    "schema_version": {"const": 1},
+    "policy_id": {"$ref": "#/$defs/identifier"},
+    "policy_version": {"type": "integer", "minimum": 1},
+    "platform": {"const": "windows-x86_64"},
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subkey", "values"],
+      "properties": {
+        "subkey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!\\\\)(?!.*\\\\\\\\)[A-Za-z0-9 ._-]+(?:\\\\[A-Za-z0-9 ._-]+)*$"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "scope",
+            "installation_id",
+            "layout_generation",
+            "integration_root",
+            "policy_path",
+            "policy_sha256",
+            "descriptor_path",
+            "descriptor_sha256",
+            "setup_launcher_path"
+          ],
+          "properties": {
+            "schema": {"$ref": "#/$defs/registry_value"},
+            "scope": {"$ref": "#/$defs/registry_value"},
+            "installation_id": {"$ref": "#/$defs/registry_value"},
+            "layout_generation": {"$ref": "#/$defs/registry_value"},
+            "integration_root": {"$ref": "#/$defs/registry_value"},
+            "policy_path": {"$ref": "#/$defs/registry_value"},
+            "policy_sha256": {"$ref": "#/$defs/registry_value"},
+            "descriptor_path": {"$ref": "#/$defs/registry_value"},
+            "descriptor_sha256": {"$ref": "#/$defs/registry_value"},
+            "setup_launcher_path": {"$ref": "#/$defs/registry_value"}
+          }
+        }
+      }
+    },
+    "stable_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "descriptor",
+        "scope_marker",
+        "setup_launcher",
+        "installer_runtime",
+        "path_directory"
+      ],
+      "properties": {
+        "policy": {"$ref": "#/$defs/relative_path"},
+        "descriptor": {"$ref": "#/$defs/relative_path"},
+        "scope_marker": {"$ref": "#/$defs/relative_path"},
+        "setup_launcher": {"$ref": "#/$defs/relative_path"},
+        "installer_runtime": {"$ref": "#/$defs/relative_path"},
+        "path_directory": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "scopes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["per-user", "per-machine"],
+      "properties": {
+        "per-user": {"$ref": "#/$defs/scope"},
+        "per-machine": {"$ref": "#/$defs/scope"}
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "registry_value": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    },
+    "segment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!\\.$)(?!\\.\\.$)[^<>:\"/\\\\|?*\\u0000-\\u001F]+$"
+    },
+    "segments": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/segment"}
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[A-Za-z0-9._/-]+$"
+    },
+    "anchored_root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor", "segments"],
+      "properties": {
+        "anchor": {
+          "enum": ["user_local_app_data", "machine_program_files", "machine_program_data"]
+        },
+        "segments": {"$ref": "#/$defs/segments"}
+      }
+    },
+    "relative_root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_to", "segments"],
+      "properties": {
+        "relative_to": {"enum": ["integration", "data"]},
+        "segments": {"$ref": "#/$defs/segments"}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privilege", "roots"],
+      "properties": {
+        "privilege": {"enum": ["user", "machine"]},
+        "roots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "integration",
+            "data",
+            "install",
+            "cache",
+            "workspace",
+            "knowledge",
+            "release",
+            "receipts",
+            "transactions",
+            "preservation"
+          ],
+          "properties": {
+            "integration": {"$ref": "#/$defs/anchored_root"},
+            "data": {"$ref": "#/$defs/anchored_root"},
+            "install": {"$ref": "#/$defs/relative_root"},
+            "cache": {"$ref": "#/$defs/relative_root"},
+            "workspace": {"$ref": "#/$defs/relative_root"},
+            "knowledge": {"$ref": "#/$defs/relative_root"},
+            "release": {"$ref": "#/$defs/relative_root"},
+            "receipts": {"$ref": "#/$defs/relative_root"},
+            "transactions": {"$ref": "#/$defs/relative_root"},
+            "preservation": {"$ref": "#/$defs/relative_root"}
+          }
+        }
+      }
+    }
+  }
+}

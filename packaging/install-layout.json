@@ -1,0 +1,74 @@
+{
+  "schema": "arena_install_layout_policy_v1",
+  "schema_version": 1,
+  "policy_id": "arena_windows_standard",
+  "policy_version": 2,
+  "platform": "windows-x86_64",
+  "registration": {
+    "subkey": "Software\\UCI Arena\\Installer",
+    "values": {
+      "schema": "LayoutLocatorSchema",
+      "scope": "InstallScope",
+      "installation_id": "InstallationId",
+      "layout_generation": "LayoutGeneration",
+      "integration_root": "IntegrationRoot",
+      "policy_path": "LayoutPolicyPath",
+      "policy_sha256": "LayoutPolicySha256",
+      "descriptor_path": "InstalledLayoutPath",
+      "descriptor_sha256": "InstalledLayoutSha256",
+      "setup_launcher_path": "SetupLauncherPath"
+    }
+  },
+  "stable_paths": {
+    "policy": "share/uci-arena/layout-policies/arena_windows_standard-v2.json",
+    "descriptor": "share/uci-arena/installed-layout.json",
+    "scope_marker": "share/uci-arena/install-scope.txt",
+    "setup_launcher": "bin/arena-setup.exe",
+    "installer_runtime": "libexec/uci-arena-installer",
+    "path_directory": "bin"
+  },
+  "scopes": {
+    "per-user": {
+      "privilege": "user",
+      "roots": {
+        "integration": {
+          "anchor": "user_local_app_data",
+          "segments": ["Programs", "UCI Arena Manager"]
+        },
+        "data": {
+          "anchor": "user_local_app_data",
+          "segments": ["UCI Arena Manager"]
+        },
+        "install": {"relative_to": "integration", "segments": ["installed"]},
+        "cache": {"relative_to": "data", "segments": ["cache"]},
+        "workspace": {"relative_to": "data", "segments": ["workspaces"]},
+        "knowledge": {"relative_to": "data", "segments": ["knowledge"]},
+        "release": {"relative_to": "data", "segments": ["release"]},
+        "receipts": {"relative_to": "data", "segments": ["receipts"]},
+        "transactions": {"relative_to": "data", "segments": ["transactions"]},
+        "preservation": {"relative_to": "data", "segments": ["preservation"]}
+      }
+    },
+    "per-machine": {
+      "privilege": "machine",
+      "roots": {
+        "integration": {
+          "anchor": "machine_program_files",
+          "segments": ["UCI Arena Manager"]
+        },
+        "data": {
+          "anchor": "machine_program_data",
+          "segments": ["UCI Arena Manager"]
+        },
+        "install": {"relative_to": "integration", "segments": ["installed"]},
+        "cache": {"relative_to": "data", "segments": ["cache"]},
+        "workspace": {"relative_to": "data", "segments": ["workspaces"]},
+        "knowledge": {"relative_to": "data", "segments": ["knowledge"]},
+        "release": {"relative_to": "data", "segments": ["release"]},
+        "receipts": {"relative_to": "data", "segments": ["receipts"]},
+        "transactions": {"relative_to": "data", "segments": ["transactions"]},
+        "preservation": {"relative_to": "data", "segments": ["preservation"]}
+      }
+    }
+  }
+}
