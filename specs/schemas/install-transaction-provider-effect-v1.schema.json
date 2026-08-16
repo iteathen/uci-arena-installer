@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-transaction-provider-effect-v1.schema.json",
+  "title": "arena_install_transaction_provider_effect_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "transaction_id",
+    "operation_id",
+    "kind",
+    "semantic_role",
+    "progress",
+    "spec",
+    "prepared",
+    "observed",
+    "verification",
+    "compensation",
+    "cleanup"
+  ],
+  "properties": {
+    "schema": {"const": "arena_install_transaction_provider_effect_v1"},
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "operation_id": {"$ref": "#/$defs/identifier"},
+    "kind": {"const": "provider_lifecycle"},
+    "semantic_role": {"$ref": "#/$defs/identifier"},
+    "progress": {
+      "enum": [
+        "prepared",
+        "activation_started",
+        "activated",
+        "verified",
+        "compensation_started",
+        "compensated",
+        "compensation_failed",
+        "cleanup_started",
+        "cleaned",
+        "cleanup_failed"
+      ]
+    },
+    "spec": {"$ref": "#/$defs/spec"},
+    "prepared": {"$ref": "#/$defs/prepared"},
+    "observed": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "provider-lifecycle-result.schema.json"}
+      ]
+    },
+    "verification": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "provider-lifecycle-result.schema.json"}
+      ]
+    },
+    "compensation": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "provider-lifecycle-result.schema.json"}
+      ]
+    },
+    "cleanup": {"type": "null"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 131072,
+      "pattern": "^[^\\u0000\\r\\n]+$"
+    },
+    "provider_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wire_protocol",
+        "legacy_envelope",
+        "require_configuration_match",
+        "allow_safe_inactive"
+      ],
+      "properties": {
+        "wire_protocol": {"enum": ["legacy_v1", "legacy_v2", "typed_v3"]},
+        "legacy_envelope": {"enum": ["root", "startup"]},
+        "require_configuration_match": {"type": "boolean"},
+        "allow_safe_inactive": {"type": "boolean"}
+      }
+    },
+    "provider_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "component_version",
+        "operation",
+        "executable",
+        "working_directory",
+        "arguments",
+        "policy",
+        "timeout_ms"
+      ],
+      "properties": {
+        "component_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "component_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "operation": {
+          "enum": ["install", "uninstall", "pre_replace", "post_replace"]
+        },
+        "executable": {"$ref": "#/$defs/path"},
+        "working_directory": {"$ref": "#/$defs/path"},
+        "arguments": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          }
+        },
+        "policy": {"$ref": "#/$defs/provider_policy"},
+        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000}
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "compensation_request"],
+      "properties": {
+        "request": {"$ref": "#/$defs/provider_request"},
+        "compensation_request": {"$ref": "#/$defs/provider_request"}
+      }
+    },
+    "prepared": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_sha256", "compensation_request_sha256"],
+      "properties": {
+        "request_sha256": {"$ref": "#/$defs/sha256"},
+        "compensation_request_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

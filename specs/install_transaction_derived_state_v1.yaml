@@ -1,0 +1,266 @@
+meta:
+  spec_id: arena_install_transaction_derived_state_v1
+  version: 1
+  status: active
+  owner: install_transaction
+  parent_issue: 9
+  required_by_issue: 51
+  specializes: arena_install_transaction_v2
+
+authority_relationship: >
+  This specification adds one fixed transaction effect for state whose final
+  bytes are a deterministic pure function of already-journaled transaction
+  evidence that does not exist at initial prepare time. It is required for the
+  provider receipt startup result mandated by arena_provider_lifecycle_v1. It
+  remains inside the one InstallTransactionCoordinator LEGO, does not add a
+  callback/plugin system, and does not weaken the all-external-inputs-prepared
+  barrier. All other state whose bytes are known before activation continues to
+  use publish_state.
+
+problem_statement: >
+  A provider install/post_replace result is produced only when the
+  ProviderLifecycle effect executes. New receipts must persist that exact neutral
+  result under `startup`. A static PublishStateEffectSpec cannot know opaque
+  safe_inactive/failed reason data before provider execution, so precomputing a
+  receipt would lie and rerunning the provider to reconstruct it would violate
+  transaction/recovery ownership.
+
+hierarchy:
+  lego:
+    brick: InstallTransactionCoordinator
+    rule: >
+      publish_derived_state is a tenth fixed effect kind inside the existing
+      transaction LEGO because it participates in the same prepare/checkpoint/
+      activate/compensate/recover lifecycle. It is not a generic derived-data
+      service and cannot be dynamically registered.
+  solid:
+    derived_state_effect:
+      single_responsibility: materialize one exact state document from one exact earlier verified effect record, then publish/compensate it like state
+      open_closed: v1 supports exactly one DerivedStateKind; another derivation requires Sol contract review
+      liskov: target publication and compensation have the same external truth as publish_state once candidate bytes exist
+      interface_segregation: derivation reads only the exact source effect evidence named by the plan and one frozen base document
+      dependency_inversion: ProviderLifecycle JSON semantics come from provider_lifecycle_result_to_json and its schema, not transaction enum/string duplication
+    prepare_barrier:
+      rule: >
+        Every external input and rollback input remains frozen before transaction
+        activation. Only transaction-produced source evidence and the pure
+        deterministic final merge are deferred. No filesystem/provider/service/
+        network query is deferred to derive candidate bytes.
+  cupid:
+    - composable base document + exact source effect evidence -> exact candidate document
+    - predictable two-stage preparation with a durable materialization checkpoint
+    - one-purpose source validation, merge, receipt validation, publication, and compensation helpers
+    - idiomatic C++20 variant/nlohmann values and #7 exact state publication
+    - domain-based derived-state/provider-receipt vocabulary
+  kiss: >
+    Use one fixed derivation switch with one current member. Do not add a
+    callback, lambda, template language, JSON patch engine, expression evaluator,
+    plugin registry, provider re-query, or generic dependency graph.
+
+public_surface_extension:
+  header: include/arena/application/installer/install_transaction.hpp
+  cxx_shape: |
+    enum class DerivedStateKind {
+        provider_lifecycle_receipt_v1,
+    };
+
+    struct PublishDerivedStateEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::filesystem::path target;
+        DerivedStateKind kind;
+        nlohmann::json base_document;
+        std::string source_effect_operation_id;
+        arena::ports::PublicationPrecondition precondition;
+        std::optional<std::string> expected_prior_sha256;
+        std::uint64_t maximum_bytes;
+        std::chrono::milliseconds timeout;
+    };
+  transaction_enum_extension:
+    TransactionEffectKind: add publish_derived_state after publish_state
+  variant_extension:
+    TransactionEffectSpec: add PublishDerivedStateEffectSpec after PublishStateEffectSpec
+  rules:
+    - this is the only public transaction extension
+    - source_effect_operation_id names one earlier effect in the same ordered plan
+    - no arbitrary derivation function/object crosses the public surface
+
+plan_validation:
+  common:
+    - all normal publish_state target/precondition/maximum/timeout rules apply
+    - source_effect_operation_id is a valid operation id and is not self
+    - source effect exists exactly once and appears earlier in plan order
+    - source effect kind is provider_lifecycle
+  provider_lifecycle_receipt_v1:
+    - source provider forward operation is install or post_replace only
+    - base_document is an object and does not contain `startup`
+    - base_document validates as arena_install_receipt_v1 with optional startup absent
+    - base receipt component_id and component_version exactly equal source provider forward request identity
+    - base receipt state is installed_managed or installed_disabled, never broken
+    - target is the exact receipt path chosen by the existing component/transaction planner; derivation does not discover receipt paths
+    - maximum_bytes is sufficient for base bytes plus the maximum legal provider result document under checked arithmetic and no greater than DurableStatePublisher global bound
+  dependency_cycle_rule: >
+    Because source must be an earlier provider_lifecycle effect and no derived
+    effect may source another derived effect in v1, a derivation cycle is
+    structurally impossible. Coordinator must not build a generic dependency
+    graph.
+
+initial_prepare:
+  rules:
+    - serialize exact base_document using transaction JSON bytes: nlohmann default object semantics, dump(2), one LF
+    - publish those raw base bytes as an immutable private work file with absent precondition and store exact path/size/SHA-256 in the derived effect record
+    - exact-capture prior target bytes when precondition is exact_sha256, exactly as publish_state does
+    - when precondition is absent, prove expected prior digest absent and store prior=null
+    - persist source_effect_operation_id, source effect plan identity, base file reference, prior file reference, and materialized_candidate=null
+    - no provider result is read and no target mutation occurs
+  prepared_truth: >
+    A publish_derived_state effect may reach transaction phase `prepared` with
+    `materialized_candidate=null`. This is the only fixed effect allowed to have
+    that state. Its external rollback inputs are already complete; candidate
+    materialization depends only on earlier transaction-produced evidence.
+
+materialization_checkpoint:
+  timing: >
+    When coordinator reaches this effect in activation order, candidate
+    materialization occurs while the effect is still progress `prepared`, before
+    the journal may record this effect as `activation_started`.
+  prerequisites:
+    - source provider effect current journal summary progress is verified
+    - source effect record path/digest are exact and current journal binds them
+    - exact-read source effect record and validate its schema/kind/operation id
+    - source verification is an exact arena_provider_lifecycle_result_v1 document
+    - source result disposition is ready or source-request-policy-permitted safe_inactive
+    - source result operation is install or post_replace and identity matches the base receipt
+    - source effect record digest cannot change after derived materialization; later cleanup may not rewrite verified provider evidence
+  candidate_derivation:
+    - exact-read and parse the immutable prepared base document work file
+    - revalidate base document and exact base digest
+    - construct `startup` only through the exact neutral provider lifecycle result JSON document; no provider-specific field interpretation
+    - set final_document = base_document with exactly one `startup` member equal to that document
+    - validate final_document against the active install-receipt schema and ProviderLifecycle receipt semantics
+    - serialize final_document with transaction JSON bytes: dump(2) + one LF
+    - enforce candidate nonempty and <= maximum_bytes
+    - publish exact raw candidate bytes to a random/private immutable work file using DurableStatePublisher absent precondition
+    - exact-read candidate work file and require exact size/SHA-256
+  durable_binding_before_target_mutation:
+    - update derived effect record while progress remains prepared with source_effect_record_sha256 and materialized_candidate path/size/SHA-256
+    - durably publish the updated effect record
+    - durably publish a journal revision binding that exact updated record digest while effect progress remains prepared
+    - only after that journal revision is activated may coordinator publish the normal `activation_started` checkpoint for this effect
+    - target publication is forbidden before both durable bindings exist
+  crash_rules:
+    - crash before materialized candidate is bound: no target mutation is possible; recovery may delete private partial work or rematerialize deterministically
+    - crash after materialized candidate binding but before activation_started: no target mutation is possible; recovery may exact-validate and reuse the bound candidate or rematerialize byte-identically
+    - crash after activation_started: compensation/inspection follows publish_state external semantics using the bound materialized candidate
+
+activation_verification_compensation:
+  activation:
+    - invoke DurableStatePublisher using the same target/precondition semantics as publish_state and the bound materialized candidate bytes
+    - publication uncertainty resolution is identical to publish_state
+  verification:
+    - exact-read target and require exact materialized candidate digest/size
+  compensation:
+    - prior existed: republish exact prepared prior bytes with materialized candidate digest precondition
+    - prior absent: exact-delete only the materialized candidate target under the transaction exact-path compensation rule
+    - foreign/substituted target is rollback failure
+  cleanup:
+    - remove only exact private base/candidate/prior work files after terminal direction permits cleanup
+  commit_rule: >
+    commit_evidence binds the final verified derived effect-record digest, which
+    includes the exact source provider effect-record digest and materialized
+    candidate identity.
+
+provider_lifecycle_result_evidence:
+  producer: ProviderLifecycle effect implemented by TX-05
+  exact_json_owner: provider_lifecycle_result_to_json from arena_provider_lifecycle_serialization_v1
+  provider_effect_record_rule: >
+    Provider lifecycle effect `observed`, `verification`, and `compensation`
+    documents are the exact arena_provider_lifecycle_result_v1 JSON form, including
+    schema/schema_version, not a transaction-private reduced copy. Legacy provider
+    wire formats are neutralized before persistence.
+  immutable_verified_record: >
+    After a provider effect reaches verified and its record digest is journaled,
+    later transaction execution does not rewrite that effect record except by
+    compensation progress during rollback. A derived effect may source only the
+    verified forward result before rollback begins.
+
+receipt_schema_relationship:
+  file: specs/schemas/install-receipt.schema.json
+  target_startup_shape:
+    oneOf:
+      - exact arena_provider_lifecycle_result_v1 for new writes
+      - bounded legacy startup receipt object for existing installations
+  new_write_rule: >
+    PL-04 and transaction-derived receipts always write the typed neutral result.
+    Legacy startup shape remains read compatibility only and is never produced by
+    publish_derived_state.
+
+recovery_format_extension:
+  derived_effect_record_schema: specs/schemas/install-transaction-derived-state-effect-v1.schema.json
+  schema: arena_install_transaction_derived_state_effect_v1
+  reason_for_separate_schema: >
+    The already-merged generic effect-record v1 has nine fixed kinds. No
+    implementation has started, but keeping that frozen schema intact avoids a
+    large unrelated rewrite. Transaction v2 recovery dispatch uses the derived
+    schema only when journal summary kind is publish_derived_state; every other
+    kind continues using arena_install_transaction_effect_v1.
+  journal_kind: publish_derived_state
+  base_document_work_file:
+    - raw JSON bytes, dump(2)+LF
+    - immutable under transaction work root
+    - reference path/size/SHA-256 in prepared record
+  materialized_candidate_work_file:
+    - absent/null at initial prepare
+    - raw final receipt bytes after materialization
+    - immutable under transaction work root
+    - exact path/size/SHA-256 in updated prepared record
+  source_binding:
+    - source_effect_operation_id
+    - source_effect_record_sha256 only after materialization
+  prior_reference: same exact raw-prior work-file semantics as publish_state
+
+implementation_slice_ownership:
+  TX-01:
+    - add tenth effect enum/value/public spec/variant
+    - plan validation for source ordering/kind/base receipt
+    - journal summary kind parsing/serialization
+    - derived effect-record schema parsing/serialization and prepared-state rules
+    - no candidate materialization or ProviderLifecycle serializer implementation
+  PL-01:
+    - implement provider_lifecycle_result_to_json pure serializer
+  PL-04:
+    - update install-receipt schema/read compatibility and use typed serializer for new direct receipt evidence where relevant
+  TX-05:
+    - persist provider observed/verification/compensation as exact neutral result JSON
+    - implement publish_derived_state materialization + activation/verification/compensation because it depends on integrated ProviderLifecycle serialization/receipt semantics
+  TX-06:
+    - coordinator recognizes the unique pre-activation materialization checkpoint and requires its updated record/journal binding before activation_started
+    - no generic effect dependency graph is added
+  TX-07:
+    - provider install/post_replace receipt uses publish_derived_state with exact earlier provider effect id; caller does not synthesize provider result
+
+validation:
+  - plan rejects missing/later/non-provider source effect and source pre_replace/uninstall
+  - plan rejects base receipt startup present, wrong component/version, broken state, invalid receipt
+  - initial prepare freezes base/prior bytes and has candidate null
+  - provider ready result materializes exact typed startup receipt
+  - provider safe_inactive with opaque reason materializes that exact reason without interpretation
+  - provider failed result cannot materialize/activate receipt
+  - source result identity/operation mismatch fails before receipt activation
+  - source provider record digest substitution fails
+  - base work-file substitution fails
+  - final receipt schema failure blocks target mutation
+  - deterministic rematerialization produces byte-identical candidate
+  - crash before materialization, after work-file publication, after record binding, after journal binding, before activation_started, and after activation_started
+  - no target mutation before updated record+journal binding
+  - publication/compensation matrix identical to publish_state after candidate exists
+  - commit digest changes with source provider result or candidate digest
+  - source provider reason id/message never selects behavior
+  - no callback/plugin/JSON patch framework introduced
+
+stop_conditions:
+  - a derived receipt requires provider-specific semantics beyond the neutral result
+  - final state depends on an external query not frozen or transaction-produced
+  - a generic derivation callback/graph seems necessary
+  - candidate cannot be durably bound before activation_started
+  - install receipt schema cannot represent the exact neutral result without incompatible major change

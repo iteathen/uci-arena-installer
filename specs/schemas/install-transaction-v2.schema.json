@@ -167,6 +167,7 @@
           "enum": [
             "ensure_directory",
             "publish_state",
+            "publish_derived_state",
             "activate_managed_tree",
             "activate_file_set",
             "relocate_managed_tree",

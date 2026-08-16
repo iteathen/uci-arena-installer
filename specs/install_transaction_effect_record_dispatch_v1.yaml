@@ -1,0 +1,89 @@
+meta:
+  spec_id: arena_install_transaction_effect_record_dispatch_v1
+  version: 1
+  status: active
+  owner: install_transaction
+  parent_issue: 9
+  specializes: arena_install_transaction_v2
+
+authority_relationship: >
+  This specification freezes which exact durable effect-record schema is selected
+  from the already-journaled TransactionEffectKind. It remains an internal
+  persistence detail of the one InstallTransactionCoordinator LEGO and avoids
+  duplicating neutral ProviderLifecycle documents or rewriting the previously
+  frozen generic nine-effect recovery schema solely to add the derived-state
+  exception.
+
+hierarchy:
+  lego:
+    brick: InstallTransactionCoordinator
+  solid:
+    single_responsibility: select one exact effect-record schema by fixed effect kind
+    open_closed: a materially new specialized record requires explicit Sol contract review
+    liskov: journal summary kind and parsed effect record always agree exactly
+    interface_segregation: no application caller chooses a recovery schema
+    dependency_inversion: recovery dispatch depends on TransactionEffectKind, not filenames or record contents guessed first
+  cupid:
+    - predictable fixed kind-to-schema mapping
+    - composable with journal exact record path/digest
+    - domain-based effect kind names
+  kiss: >
+    Use one direct switch on TransactionEffectKind. Do not add a schema registry,
+    MIME negotiation, reflection, plugin lookup, or fallback parser chain.
+
+schema_by_kind:
+  ensure_directory: arena_install_transaction_effect_v1
+  publish_state: arena_install_transaction_effect_v1
+  activate_managed_tree: arena_install_transaction_effect_v1
+  activate_file_set: arena_install_transaction_effect_v1
+  relocate_managed_tree: arena_install_transaction_effect_v1
+  quarantine_owned_path: arena_install_transaction_effect_v1
+  service_control: arena_install_transaction_effect_v1
+  layout_locator: arena_install_transaction_effect_v1
+  provider_lifecycle: arena_install_transaction_provider_effect_v1
+  publish_derived_state: arena_install_transaction_derived_state_effect_v1
+
+schema_files:
+  arena_install_transaction_effect_v1: specs/schemas/install-transaction-effect-v1.schema.json
+  arena_install_transaction_provider_effect_v1: specs/schemas/install-transaction-provider-effect-v1.schema.json
+  arena_install_transaction_derived_state_effect_v1: specs/schemas/install-transaction-derived-state-effect-v1.schema.json
+
+record_path_rule:
+  - all three schemas use the same journal summary record_path naming convention under the transaction work root
+  - the journal summary `kind` is authoritative for the expected schema before record bytes are interpreted
+  - exact record bytes are admitted/read and SHA-256 checked before parse
+  - parsed record transaction_id, operation_id, kind, and semantic_role must equal the journal summary/active transaction
+  - a generic effect record is never accepted for provider_lifecycle or publish_derived_state
+  - a specialized record is never accepted for another kind
+  - there is no try-one-schema-then-another behavior
+
+provider_record_rationale: >
+  Provider lifecycle effect evidence persists exact
+  arena_provider_lifecycle_result_v1 documents, including schema/version, so
+  transaction-derived receipts can source the same neutral result without a
+  reduced transaction-private copy.
+
+derived_record_rationale: >
+  publish_derived_state has a unique valid prepared state where external/base/
+  prior inputs are frozen but materialized_candidate and source-effect-record
+  binding are still null. Its schema therefore differs materially from ordinary
+  publish_state rather than weakening the generic effect-record invariants.
+
+commit_evidence_rule: >
+  All schemas still produce one exact current record SHA-256. Commit evidence is
+  unchanged: operation id + NUL + exact current record digest + LF in plan order.
+  The commit algorithm is schema-agnostic after record validation.
+
+validation:
+  - every effect kind selects exactly one schema
+  - generic record rejected for provider/derived summary
+  - provider record rejected for generic/derived summary
+  - derived record rejected for generic/provider summary
+  - mismatched operation id/transaction id/semantic role/kind rejected
+  - malformed/unknown schema does not trigger fallback parsing
+  - commit digest remains sensitive only to exact final record digests/order
+
+stop_conditions:
+  - a caller must choose a schema
+  - recovery requires trial parsing or content sniffing
+  - a new record schema is proposed without a materially different persisted invariant

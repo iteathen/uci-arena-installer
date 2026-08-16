@@ -32,13 +32,10 @@
       ]
     },
     "startup": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": ["installed"],
-      "properties": {
-        "installed": {"type": "boolean"},
-        "matchesCurrentConfiguration": {"type": "boolean"}
-      }
+      "oneOf": [
+        {"$ref": "provider-lifecycle-result.schema.json"},
+        {"$ref": "#/$defs/legacy_startup_receipt"}
+      ]
     },
     "dependencies": {
       "type": "array",
@@ -66,6 +63,15 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "legacy_startup_receipt": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["installed"],
+      "properties": {
+        "installed": {"type": "boolean"},
+        "matchesCurrentConfiguration": {"type": "boolean"}
+      }
+    },
     "activated_file": {
       "type": "object",
       "additionalProperties": false,

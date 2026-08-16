@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-transaction-derived-state-effect-v1.schema.json",
+  "title": "arena_install_transaction_derived_state_effect_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "transaction_id",
+    "operation_id",
+    "kind",
+    "semantic_role",
+    "progress",
+    "spec",
+    "prepared",
+    "observed",
+    "verification",
+    "compensation",
+    "cleanup"
+  ],
+  "properties": {
+    "schema": {"const": "arena_install_transaction_derived_state_effect_v1"},
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "operation_id": {"$ref": "#/$defs/identifier"},
+    "kind": {"const": "publish_derived_state"},
+    "semantic_role": {"$ref": "#/$defs/identifier"},
+    "progress": {
+      "enum": [
+        "prepared",
+        "activation_started",
+        "activated",
+        "verified",
+        "compensation_started",
+        "compensated",
+        "compensation_failed",
+        "cleanup_started",
+        "cleaned",
+        "cleanup_failed"
+      ]
+    },
+    "spec": {"$ref": "#/$defs/spec"},
+    "prepared": {"$ref": "#/$defs/prepared"},
+    "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/publication_observed"}]},
+    "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_verification"}]},
+    "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/state_compensation"}]},
+    "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/private_cleanup"}]}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 131072,
+      "pattern": "^[^\\u0000\\r\\n]+$"
+    },
+    "file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "derived_state_kind",
+        "source_effect_operation_id",
+        "maximum_bytes",
+        "precondition",
+        "timeout_ms"
+      ],
+      "properties": {
+        "target": {"$ref": "#/$defs/path"},
+        "derived_state_kind": {"const": "provider_lifecycle_receipt_v1"},
+        "source_effect_operation_id": {"$ref": "#/$defs/identifier"},
+        "maximum_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "precondition": {"enum": ["absent", "exact_sha256"]},
+        "expected_prior_sha256": {"$ref": "#/$defs/sha256"},
+        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"precondition": {"const": "exact_sha256"}},
+            "required": ["precondition"]
+          },
+          "then": {"required": ["expected_prior_sha256"]}
+        },
+        {
+          "if": {
+            "properties": {"precondition": {"const": "absent"}},
+            "required": ["precondition"]
+          },
+          "then": {"not": {"required": ["expected_prior_sha256"]}}
+        }
+      ]
+    },
+    "prepared": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_document",
+        "prior",
+        "materialized_candidate",
+        "source_effect_record_sha256"
+      ],
+      "properties": {
+        "base_document": {"$ref": "#/$defs/file_ref"},
+        "prior": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/file_ref"}
+          ]
+        },
+        "materialized_candidate": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/file_ref"}
+          ]
+        },
+        "source_effect_record_sha256": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/sha256"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"materialized_candidate": {"type": "null"}},
+            "required": ["materialized_candidate"]
+          },
+          "then": {
+            "properties": {"source_effect_record_sha256": {"type": "null"}}
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "materialized_candidate": {"type": "object"}
+            },
+            "required": ["materialized_candidate"]
+          },
+          "then": {
+            "properties": {
+              "source_effect_record_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      ]
+    },
+    "publication_observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome"],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "activated",
+            "not_activated",
+            "activated_durability_unproven",
+            "indeterminate"
+          ]
+        },
+        "observed_target_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "file_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size_bytes", "sha256"],
+      "properties": {
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "state_compensation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "enum": ["restored_prior", "restored_absent", "failed"]
+        },
+        "observed_target_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "private_cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["private_files_removed"],
+      "properties": {
+        "private_files_removed": {"type": "boolean"}
+      }
+    }
+  }
+}
