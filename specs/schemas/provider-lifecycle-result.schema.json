@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/provider-lifecycle-result.schema.json",
+  "title": "arena_provider_lifecycle_result_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "component_id",
+    "component_version",
+    "operation",
+    "disposition",
+    "observed"
+  ],
+  "properties": {
+    "schema": {"const": "arena_provider_lifecycle_result_v1"},
+    "schema_version": {"const": 1},
+    "component_id": {"$ref": "#/$defs/identifier"},
+    "component_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "operation": {
+      "enum": ["install", "uninstall", "pre_replace", "post_replace"]
+    },
+    "disposition": {"enum": ["ready", "safe_inactive", "failed"]},
+    "observed": {"$ref": "#/$defs/observed"},
+    "reason": {"$ref": "#/$defs/reason"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "disposition": {"enum": ["safe_inactive", "failed"]}
+        },
+        "required": ["disposition"]
+      },
+      "then": {"required": ["reason"]}
+    },
+    {
+      "if": {
+        "properties": {"disposition": {"const": "safe_inactive"}},
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "operation": {"enum": ["install", "post_replace"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {"const": "install"},
+          "disposition": {"const": "ready"}
+        },
+        "required": ["operation", "disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {
+            "$ref": "#/$defs/install_ready"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {"const": "install"},
+          "disposition": {"const": "safe_inactive"}
+        },
+        "required": ["operation", "disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {
+            "$ref": "#/$defs/install_safe_inactive"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {"const": "uninstall"},
+          "disposition": {"const": "ready"}
+        },
+        "required": ["operation", "disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {
+            "$ref": "#/$defs/uninstall_ready"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {"const": "pre_replace"},
+          "disposition": {"const": "ready"}
+        },
+        "required": ["operation", "disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {
+            "$ref": "#/$defs/pre_replace_ready"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {"const": "post_replace"},
+          "disposition": {"const": "ready"}
+        },
+        "required": ["operation", "disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {
+            "$ref": "#/$defs/post_replace_ready"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {"const": "post_replace"},
+          "disposition": {"const": "safe_inactive"}
+        },
+        "required": ["operation", "disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {
+            "$ref": "#/$defs/post_replace_safe_inactive"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "bounded_text": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^[^\\u0000\\r\\n]*$"
+    },
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["installation", "activity", "configuration", "replacement"],
+      "properties": {
+        "installation": {"enum": ["installed", "absent", "unknown"]},
+        "activity": {"enum": ["active", "inactive", "unknown"]},
+        "configuration": {
+          "enum": ["matches", "mismatch", "not_applicable", "unknown"]
+        },
+        "replacement": {
+          "enum": ["safe", "unsafe", "not_applicable", "unknown"]
+        }
+      }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "message": {"$ref": "#/$defs/bounded_text"}
+      }
+    },
+    "install_ready": {
+      "allOf": [
+        {"$ref": "#/$defs/observed"},
+        {
+          "properties": {
+            "installation": {"const": "installed"},
+            "activity": {"const": "active"},
+            "configuration": {"const": "matches"},
+            "replacement": {"const": "not_applicable"}
+          }
+        }
+      ]
+    },
+    "install_safe_inactive": {
+      "allOf": [
+        {"$ref": "#/$defs/observed"},
+        {
+          "properties": {
+            "installation": {"const": "installed"},
+            "activity": {"const": "inactive"},
+            "configuration": {"const": "matches"},
+            "replacement": {"const": "not_applicable"}
+          }
+        }
+      ]
+    },
+    "uninstall_ready": {
+      "allOf": [
+        {"$ref": "#/$defs/observed"},
+        {
+          "properties": {
+            "installation": {"const": "absent"},
+            "activity": {"const": "inactive"},
+            "configuration": {"const": "not_applicable"},
+            "replacement": {"const": "not_applicable"}
+          }
+        }
+      ]
+    },
+    "pre_replace_ready": {
+      "allOf": [
+        {"$ref": "#/$defs/observed"},
+        {
+          "properties": {
+            "installation": {"const": "installed"},
+            "activity": {"const": "inactive"},
+            "configuration": {"const": "matches"},
+            "replacement": {"const": "safe"}
+          }
+        }
+      ]
+    },
+    "post_replace_ready": {
+      "allOf": [
+        {"$ref": "#/$defs/observed"},
+        {
+          "properties": {
+            "installation": {"const": "installed"},
+            "activity": {"const": "active"},
+            "configuration": {"const": "matches"},
+            "replacement": {"const": "safe"}
+          }
+        }
+      ]
+    },
+    "post_replace_safe_inactive": {
+      "allOf": [
+        {"$ref": "#/$defs/observed"},
+        {
+          "properties": {
+            "installation": {"const": "installed"},
+            "activity": {"const": "inactive"},
+            "configuration": {"const": "matches"},
+            "replacement": {"const": "safe"}
+          }
+        }
+      ]
+    }
+  }
+}
