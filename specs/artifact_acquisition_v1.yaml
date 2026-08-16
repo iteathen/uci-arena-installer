@@ -129,12 +129,16 @@ fixed_bounds:
   cache_lock_timeout_maximum: 120s
   connect_timeout_default: 15s
   connect_timeout_maximum: 120s
+  overall_timeout_minimum: 1s
   overall_timeout_default: 168h
   overall_timeout_maximum: 168h
   low_speed_bytes_per_second: 1024
   low_speed_window: 120s
   https_redirects: 5
   transfer_chunk_bytes: 65536
+  archive_timeout_minimum: 1s
+  archive_timeout_default: 24h
+  archive_timeout_maximum: 168h
   archive_entries: 1048576
   archive_path_metadata_utf8_bytes: 67108864
   archive_depth: 1024
@@ -307,6 +311,7 @@ artifact_cache_port:
     - cryptographically random 128-bit id supplied by common code
     - create-new ordinary private same-directory file; never truncate/reuse an existing path
     - writer enforces no write beyond expected_size_bytes
+    - common transfer code checks cancellation/deadline before and after each bounded candidate write; a native write already executing in the local filesystem kernel is not falsely claimed to be asynchronously cancellable
     - finish flushes file and closes/seals writable state sufficiently for exact re-admission
     - explicit cleanup removes only the exact candidate created by that object and reports bounded failure
   corrupt_target_disposal:
@@ -380,9 +385,9 @@ https_transfer_policy:
     - CURLOPT_MAXFILESIZE_LARGE = expected_size_bytes as defense in depth where supported
     - CURLOPT_NOPROGRESS = 0 and XFERINFO callback checks stop token and absolute deadline
   hard_byte_rule: >
-    The write callback is authoritative for expanded HTTP response bytes written
-    to the candidate. Before every write, checked arithmetic requires total plus
-    chunk <= expected_size_bytes; otherwise abort transfer. Do not rely solely on
+    The write callback is authoritative for response bytes written to the
+    candidate. Before every write, checked arithmetic requires total plus chunk
+    <= expected_size_bytes; otherwise abort transfer. Do not rely solely on
     Content-Length or libcurl's max-file-size behavior.
   digest_rule:
     - SHA-256 is over exact bytes delivered to candidate after libcurl's normal HTTP transfer decoding
@@ -400,50 +405,21 @@ catalog_relative_transfer:
   - streamed source hash must equal expected SHA-256
   - candidate is still independently exact-verified before activation
 
-archive_public_surface:
-  header: include/arena/application/installer/archive_expander.hpp
-  namespace: arena::application::installer
+archive_extraction_port:
+  header: include/arena/ports/archive_extraction.hpp
+  namespace: arena::ports
   cxx_shape: |
     enum class ArchiveTargetPlatform {
         windows_x86_64,
         linux_x86_64,
     };
 
-    struct ArchiveExpansionRequest {
-        std::filesystem::path destination_root;
-        std::uint64_t expected_expanded_file_bytes{};
-        ArchiveTargetPlatform target_platform{};
-        std::chrono::milliseconds timeout{std::chrono::hours{24}};
-        std::stop_token stop_token;
-    };
-
-    struct ExpandedArchive {
-        std::filesystem::path root;
-        std::uint64_t file_count{};
-        std::uint64_t directory_count{};
-        std::uint64_t total_file_bytes{};
-    };
-
-    class ArchiveExpander final {
-      public:
-        explicit ArchiveExpander(
-            arena::ports::ArchiveExtractionPlatform& extraction_platform);
-
-        [[nodiscard]] ExpandedArchive expand(
-            arena::ports::AdmittedRegularFile& archive_file,
-            const ArchiveExpansionRequest& request) const;
-    };
-  rules:
-    - archive bytes always come from one already-admitted file capability; archive pathname is never passed to libarchive
-    - request destination is caller-owned transaction/private staging choice but must be absent before begin
-    - expected_expanded_file_bytes is positive and exact for suite component archives; TX-07 derives it from the trusted catalog component installed_bytes
-    - archive expansion timeout min 1s/max 168h; one absolute deadline captured once
-
-archive_extraction_port:
-  header: include/arena/ports/archive_extraction.hpp
-  namespace: arena::ports
-  cxx_shape: |
     using ArchivePathCollisionKey = std::array<std::byte, 32>;
+
+    struct ArchiveExtractionDiagnostic {
+        std::string code;
+        std::string message;
+    };
 
     struct ArchiveTargetPath {
         std::string portable_relative_path;
@@ -471,7 +447,7 @@ archive_extraction_port:
             std::uint64_t expected_size_bytes,
             bool executable) = 0;
         virtual void finish() = 0;
-        [[nodiscard]] virtual std::optional<ArtifactCacheDiagnostic> cleanup() noexcept = 0;
+        [[nodiscard]] virtual std::optional<ArchiveExtractionDiagnostic> cleanup() noexcept = 0;
     };
 
     class ArchiveExtractionPlatform {
@@ -495,12 +471,44 @@ archive_extraction_port:
     make_archive_extraction_platform(
         arena::ports::FilesystemIdentity& filesystem_identity);
     }
-  note: >
-    ArchiveExpansionRequest/ArchiveTargetPlatform declarations may be moved to a
-    small neutral header if required to avoid an application-header dependency;
-    Spark may not otherwise change the public semantics or create an additional
-    port. Sol should choose the exact include placement before ARC-01 begins if
-    the C++ include graph requires it.
+  boundary_rule: >
+    ArchiveTargetPlatform and ArchiveExtractionDiagnostic belong to the archive
+    extraction port itself. No cache type, application type, or native platform
+    type crosses this LEGO boundary.
+
+archive_public_surface:
+  header: include/arena/application/installer/archive_expander.hpp
+  namespace: arena::application::installer
+  cxx_shape: |
+    struct ArchiveExpansionRequest {
+        std::filesystem::path destination_root;
+        std::uint64_t expected_expanded_file_bytes{};
+        arena::ports::ArchiveTargetPlatform target_platform{};
+        std::chrono::milliseconds timeout{std::chrono::hours{24}};
+        std::stop_token stop_token;
+    };
+
+    struct ExpandedArchive {
+        std::filesystem::path root;
+        std::uint64_t file_count{};
+        std::uint64_t directory_count{};
+        std::uint64_t total_file_bytes{};
+    };
+
+    class ArchiveExpander final {
+      public:
+        explicit ArchiveExpander(
+            arena::ports::ArchiveExtractionPlatform& extraction_platform);
+
+        [[nodiscard]] ExpandedArchive expand(
+            arena::ports::AdmittedRegularFile& archive_file,
+            const ArchiveExpansionRequest& request) const;
+    };
+  rules:
+    - archive bytes always come from one already-admitted file capability; archive pathname is never passed to libarchive
+    - request destination is caller-owned transaction/private staging choice but must be absent before begin
+    - expected_expanded_file_bytes is positive and exact for suite component archives; TX-07 derives it from the trusted catalog component installed_bytes
+    - archive expansion timeout obeys the fixed archive timeout bounds and one absolute deadline is captured once
 
 archive_input_contract:
   libarchive:
@@ -575,6 +583,7 @@ archive_data_stream:
   - no whole-entry allocation
   - output file is created new through ArchiveExtractionSession only after entry/path/type/size metadata passes
   - write exactly declared bytes; output writer itself enforces no write beyond expected entry size
+  - common code checks cancellation/deadline before and after each bounded output write; a native local-filesystem write already in progress is not falsely claimed to be asynchronously cancellable
   - finish output file flushes required file durability and closes writable state
   - directory creation/file opening never uses archive_read_extract/archive_write_disk
   - on any entry/parser/output/cancellation/deadline failure, call explicit session cleanup and return the primary failure with bounded cleanup evidence
@@ -597,8 +606,9 @@ archive_platform_rules:
 
 catalog_and_component_relationship:
   catalog_schema:
-    - arena_install_catalog_v1 artifact size_bytes becomes minimum 1 for new/current validation
-    - archive type v1 means gzip-compressed tar only; no format field is added because all suite archive producers already publish `.tar.gz` and v1 intentionally owns one archive format
+    - arena_install_catalog_v1 artifact `type` is required for current v1 validation and is exactly `archive` or `file_set`
+    - artifact size_bytes becomes minimum 1 for current v1 validation
+    - archive type v1 means gzip-compressed tar only; no format field is added because suite archive producers publish `.tar.gz` and v1 intentionally owns one archive format
     - file_set remains a manifest artifact; each acquired file has positive exact size/SHA-256 from the verified file-set manifest
   archive_expanded_size:
     - TX-07 supplies trusted component `installed_bytes` as expected_expanded_file_bytes for archive artifacts
@@ -694,12 +704,12 @@ validation:
     - per-digest cross-process serialization and release after crash/handle close
     - private cache directory/lock/candidate/quarantine hostile link/reparse/special substitution
     - same-directory no-replace activation and post-classification
-    - cleanup only exact transaction-created cache objects
+    - cleanup only exact acquisition-created cache objects
     - Windows/Linux native evidence
   archive_common:
     - tar+gzip valid archive and explicit rejection of other filters/formats
     - custom capability read callback; source pathname never opened by libarchive
-    - exact ARCHIVE_EOF required; WARN/FAILED/FATAL/truncated/trailing parser errors fail
+    - exact ARCHIVE_EOF required; WARN/FAILED/FATAL/truncated parser errors fail
     - symlink/hardlink/device/FIFO/socket/sparse/encrypted/ACL/xattr/special-bit rejection
     - safe path/depth/metadata/entry/ratio/exact-expanded-byte limits
     - duplicate/case collision/file-directory collision and implicit parent behavior
@@ -713,7 +723,7 @@ validation:
     - exact private-root cleanup on injected failures
     - Windows/Linux native evidence
   integration:
-    - catalog artifact size zero rejected under current v1 validation
+    - catalog artifact missing type or size zero rejected under current v1 validation
     - archive expanded bytes equal trusted component installed_bytes
     - file-set caller delegates ordered source fallback to ArtifactAcquirer
     - old acquire_artifact/extract_archive/shared partial/caller-source-loop no longer normal authority after joint TX-07
