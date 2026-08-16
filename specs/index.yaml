@@ -252,6 +252,19 @@ specs:
       - specs/schemas/install-transaction-derived-state-effect-v1.schema.json
       - src/application/installer/install_transaction.cpp
       - tests/unit/install_transaction_tests.cpp
+  - spec_id: arena_setup_transaction_integration_v1
+    path: specs/setup_transaction_integration_v1.yaml
+    owner: setup_transaction_integration
+    applies_to:
+      - include/arena/application/installer/setup.hpp
+      - src/application/installer/setup.cpp
+      - apps/setup/main.cpp
+      - tests/unit/setup_tests.cpp
+      - include/arena/application/installer/install_transaction.hpp
+      - src/application/installer/install_transaction.cpp
+      - specs/schemas/install-transaction-v2.schema.json
+      - specs/schemas/install-transaction-effect-v1.schema.json
+      - CMakeLists.txt
   - spec_id: arena_artifact_acquisition_v1
     path: specs/artifact_acquisition_v1.yaml
     owner: artifact_acquisition
