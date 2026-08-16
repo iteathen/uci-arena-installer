@@ -208,3 +208,11 @@ specs:
       - src/application/installer/install_transaction.cpp
       - tests/unit/install_transaction_tests.cpp
       - CMakeLists.txt
+  - spec_id: arena_install_transaction_effect_constraints_v1
+    path: specs/install_transaction_effect_constraints_v1.yaml
+    owner: install_transaction
+    applies_to:
+      - include/arena/application/installer/install_transaction.hpp
+      - src/application/installer/install_transaction.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
