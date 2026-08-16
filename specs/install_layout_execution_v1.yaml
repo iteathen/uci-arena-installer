@@ -1,0 +1,563 @@
+meta:
+  spec_id: arena_install_layout_execution_v1
+  version: 1
+  status: active
+  owner: install_layout
+  parent_issue: 80
+  specializes: arena_install_layout_v1
+
+authority_relationship: >
+  This specification exactifies the execution-facing InstallLayout interfaces
+  that arena_install_layout_v1 intentionally left conceptual. It is authoritative
+  for IL-05, IL-06, and the layout side of IL-07. It does not create a second
+  layout owner or transaction owner. The semantic policy, descriptor, locator,
+  and root meanings remain owned by arena_install_layout_v1. Issue #7 owns exact
+  physical document admission and durable file publication. Issue #9 alone owns
+  mutation leases, journals, effect execution, compensation, commit, recovery,
+  and post-commit cleanup.
+
+purpose: >
+  Make layout observation, transition planning, installed-authority loading, and
+  packaged-update invocation fully specified before delegation. A Spark agent
+  must never decide what a legacy receipt means, which receipt paths move, how a
+  provider workspace is placed, how a descriptor is rendered, whether a locator
+  is current, or when a raw-root fallback is acceptable.
+
+hierarchy:
+  lego:
+    brick: InstallLayout
+    rule: >
+      The planner and installed-authority loader are internal application modules
+      of the existing InstallLayout LEGO. They share its semantic owner and do not
+      form new products, registries, path authorities, or transaction systems.
+  solid:
+    receipt_evidence:
+      single_responsibility: represent already-admitted exact receipt and manifest meaning for pure planning
+      interface_segregation: contains no filesystem handle, registry handle, or mutation method
+    transition_planner:
+      single_responsibility: map exact current evidence plus one target policy to one deterministic immutable transition plan
+      open_closed: future policy versions add explicit rules rather than caller path branches
+      liskov: initialize and migrate plans obey the same move/rewrite/descriptor/locator invariants
+      dependency_inversion: issue #9 consumes the plan and selects mechanisms
+    authority_loader:
+      single_responsibility: turn one exact locator plus exact policy/descriptor bytes into one validated InstalledLayoutAuthority
+      interface_segregation: callers receive validated domain values, not registry/file parsing details
+      dependency_inversion: loader consumes FilesystemIdentity, ExactDocumentReader, anchor resolver, and read-only locator ports
+    updater_adapter:
+      single_responsibility: locate and launch the exact installed setup authority for one update package
+      dependency_inversion: PowerShell consumes locator/descriptor values; it does not own semantic roots
+  cupid:
+    - composable normalized evidence, plan, authority, and SetupPaths values
+    - unix-like exact admission, rewrite, descriptor rendering, locator comparison, and invocation helpers
+    - predictable no-fallback failure and deterministic plan bytes
+    - idiomatic C++20 values plus narrow Windows PowerShell/.NET registry use
+    - domain-based component-root, provider-workspace, descriptor, locator, generation, and authority vocabulary
+  kiss: >
+    Use the smallest complete helpers inside these fixed responsibilities. KISS
+    cannot justify receipt-wide string replacement, forcing provider-owned
+    product_data workspaces into workspace_root, current-default reconstruction,
+    unbound descriptor rendering, registry-as-root-authority, a second journal,
+    or a raw-root fallback in the packaged update path.
+
+architecture_corrections:
+  provider_workspace_placement: >
+    arena_install_layout_v1's conceptual phrase "target managed workspace is
+    workspace/<manifest workspace_name>" is specialized here. Existing provider
+    manifests already own workspace_placement. InstallLayout must preserve that
+    meaning rather than reinterpret provider data:
+      workspace_root -> target.roots.workspace/<workspace_name>
+      product_data   -> target.roots.data/provider-data/<workspace_name>
+    Because the target v2 data root equals the legacy scope-correct data root,
+    product_data workspaces normally remain in place. Only exact receipt-owned
+    workspaces whose source differs from their manifest-derived target move.
+  receipt_generation_ownership: >
+    Component receipts do not gain installation_id or layout_generation fields
+    in layout v1. Layout generation is owned by the installed-layout descriptor,
+    locator, and issue #9 journal. A receipt rewrite changes only path-bearing
+    component facts required by an owned move and otherwise preserves component
+    semantics.
+  initialize_semantics: >
+    initialize means establishment of descriptor authority from generation 0 to
+    generation 1. It covers both a genuinely clean installation and an exact
+    legacy installation with receipts but no valid descriptor/locator. migrate
+    means descriptor-authoritative generation N to N+1 and preserves the existing
+    installation_id.
+
+public_domain_additions:
+  header: include/arena/application/installer/install_layout.hpp
+  cxx_shape: |
+    enum class LayoutTransitionKind {
+        initialize,
+        migrate,
+    };
+
+    enum class LayoutMoveKind {
+        component_root,
+        provider_workspace,
+    };
+
+    struct LayoutReceiptEvidence {
+        std::string receipt_sha256;
+        nlohmann::json receipt;
+        std::string manifest_sha256;
+        nlohmann::json manifest;
+    };
+
+    struct LayoutMove {
+        std::string operation_id;
+        LayoutMoveKind kind;
+        std::string component_id;
+        std::filesystem::path source;
+        std::filesystem::path destination;
+        std::string prior_receipt_sha256;
+        std::string source_manifest_sha256;
+    };
+
+    struct LayoutReceiptRewrite {
+        std::string component_id;
+        std::string prior_receipt_sha256;
+        nlohmann::json next_receipt;
+        std::string next_receipt_sha256;
+    };
+
+    struct LayoutPlanningInput {
+        arena::ports::InstallScope scope{};
+        std::string proposed_installation_id;
+        std::optional<InstalledLayout> current_layout;
+        std::optional<std::string> current_descriptor_sha256;
+        std::optional<arena::ports::InstallLayoutLocatorRecord> current_locator;
+        std::vector<LayoutReceiptEvidence> receipts;
+    };
+
+    struct LayoutTransitionPlan {
+        std::string schema{"arena_install_layout_transition_v1"};
+        LayoutTransitionKind kind{};
+        std::string installation_id;
+        std::uint64_t prior_generation{};
+        std::uint64_t next_generation{};
+        std::optional<std::string> prior_policy_sha256;
+        std::optional<std::string> prior_descriptor_sha256;
+        std::string target_policy_sha256;
+        InstalledLayout target;
+        std::string target_descriptor_bytes;
+        std::string target_descriptor_sha256;
+        std::vector<LayoutMove> owned_moves;
+        std::vector<LayoutReceiptRewrite> receipt_rewrites;
+        std::optional<arena::ports::InstallLayoutLocatorRecord> prior_locator;
+        arena::ports::InstallLayoutLocatorRecord next_locator;
+        std::vector<std::filesystem::path> cleanup_candidates;
+    };
+
+    struct InstalledLayoutAuthority {
+        arena::ports::InstallLayoutLocatorRecord locator;
+        InstalledLayout layout;
+        std::string descriptor_sha256;
+    };
+
+    [[nodiscard]] std::optional<LayoutTransitionPlan>
+    plan_layout_transition(
+        const nlohmann::json& validated_target_policy,
+        std::string_view target_policy_sha256,
+        const LayoutPlanningInput& input,
+        const arena::ports::InstallLayoutAnchorResolver& anchors);
+
+    [[nodiscard]] InstalledLayoutAuthority
+    load_installed_layout_authority(
+        arena::ports::InstallScope scope,
+        const std::optional<std::filesystem::path>& expected_descriptor_path,
+        arena::ports::FilesystemIdentity& filesystem_identity,
+        const arena::ports::InstallLayoutAnchorResolver& anchors,
+        const arena::ports::InstallLayoutLocator& locator);
+  public_surface_rules:
+    - these are the only IL-05/IL-06 public additions
+    - no filesystem mutation, registry mutation, journal, retry, service, or provider method appears here
+    - no legacy variant enum is public; variant classification is evidence, not caller policy
+    - no generic path-rewrite or JSON migration API is public
+    - no transaction effect interface is added here
+
+normalized_receipt_evidence:
+  caller_obligation: >
+    LayoutReceiptEvidence is created only after exact receipt bytes and exact
+    arena-component.json bytes have been admitted through issue #7 and parsed
+    without duplicate keys. The component payload/manifest has passed the
+    existing component validator for the receipt id/version before planning.
+  required_receipt:
+    - schema arena_install_receipt_v1 and schema_version 1
+    - component_id and component_version are valid and agree with manifest
+    - state is installed_managed or installed_disabled
+    - active_root is an absolute valid Windows path
+    - artifact_sha256 is lowercase SHA-256
+    - receipt_sha256 and manifest_sha256 are lowercase SHA-256 of the exact admitted documents
+  uniqueness:
+    - one receipt evidence row per component_id
+    - duplicate component ids fail closed
+  non_component_data_receipts: >
+    Managed-copy knowledge receipts whose active_root is inside the exact
+    scope-correct knowledge root are data-owned evidence and are not component
+    store moves. They remain byte-semantically unchanged unless another exact
+    owned move references one of their classified path fields.
+
+transition_entry_rules:
+  initialize:
+    preconditions:
+      - current_layout absent
+      - current_descriptor_sha256 absent
+      - current_locator absent
+      - proposed_installation_id is a valid lowercase canonical UUID
+    result:
+      - kind initialize
+      - installation_id equals proposed_installation_id
+      - prior_generation 0
+      - next_generation 1
+      - prior_policy_sha256 absent
+      - prior_descriptor_sha256 absent
+      - prior_locator absent
+      - receipts may be empty for clean install or nonempty for explicit legacy integration upgrade
+  migrate:
+    preconditions:
+      - current_layout present and already validated
+      - current_descriptor_sha256 is lowercase SHA-256
+      - current_locator present and exactly equals locator_from_installed_layout(current_layout, current_descriptor_sha256)
+      - proposed_installation_id is empty
+      - current_layout scope equals input scope
+    result:
+      - kind migrate
+      - installation_id preserved exactly
+      - prior_generation equals current layout generation
+      - next_generation equals prior plus one with overflow rejection
+      - prior policy and descriptor digests exact
+      - prior_locator exact
+  no_transition:
+    - when a descriptor-authoritative current layout already resolves exactly to the target policy and no receipt path requires a target rewrite, return std::nullopt
+    - initialize never returns nullopt because descriptor authority is being established
+  target_policy:
+    - validated_target_policy must pass validate_install_layout_policy
+    - target_policy_sha256 must be lowercase 64-hex
+    - target policy resolves for the input scope using the supplied anchor resolver
+
+legacy_component_root_classification:
+  exact_legacy_bases:
+    per-user:
+      - data/installed/components
+      - target install/components
+    per-machine:
+      - integration/components
+      - data/installed/components
+      - target install/components
+  active_root_rule: >
+    A movable managed component receipt active_root must equal exactly one
+    recognized base/<component_id>/<component_version>. Merely being adjacent to
+    a recognized root, sharing a prefix string, or existing under Program Files
+    or ProgramData is not authority.
+  split_state:
+    - distinct receipts may occupy different recognized bases
+    - each receipt is classified independently from its exact active_root
+    - one component may never have two receipt rows or two source roots
+  rejection:
+    - unrecognized component source
+    - wrong id/version suffix
+    - duplicate, nested, overlapping, linked, or escaping source evidence
+    - an active root that collides with another component destination
+  target_component_root: target.roots.install/components/<component_id>/<component_version>
+
+provider_workspace_rules:
+  recognition:
+    - a receipt whose exact manifest has installer_integration is evaluated for one provider workspace
+    - workspace_name is the already-validated manifest/integration identifier
+    - workspace_placement is exactly workspace_root or product_data
+    - receipt data_paths contains exactly one absolute path
+    - receipt configuration_path is nonempty and an exact descendant of that data path
+    - receipt ownership contains exactly one matching directory_tree entry for the workspace with ownership_class user_preserved, normal_uninstall preserve, purge explicit_recursive, source component_data_path
+  target:
+    workspace_root: target.roots.workspace/<workspace_name>
+    product_data: target.roots.data/provider-data/<workspace_name>
+  move_rule:
+    - source equals target -> no workspace move
+    - source differs -> one provider_workspace move
+    - source authority comes from the exact receipt/ownership evidence, not legacy adjacency
+    - external/operator paths and unrelated user-preserved ownership entries never move
+  semantics_rule: >
+    InstallLayout preserves workspace_placement. It may not force product_data to
+    workspace_root or vice versa to simplify migration.
+
+owned_move_contract:
+  operation_ids:
+    component_root: layout.component.<component_id>.g<next_generation>
+    provider_workspace: layout.workspace.<component_id>.g<next_generation>
+  rules:
+    - operation id is deterministic and unique within plan
+    - source and destination are absolute normalized Windows paths
+    - source and destination differ case-insensitively
+    - source/destination pairs do not overlap any other move source/destination
+    - destination is exactly policy/manifest derived; caller may not supply it
+    - prior_receipt_sha256 and source_manifest_sha256 bind the evidence used to authorize the move
+    - planner does not choose copy, rename, stage, backup, cross-volume, permissions, retry, or cleanup mechanism
+    - issue #9 revalidates the exact prestate before executing any move
+
+receipt_rewrite_contract:
+  render_bytes: >
+    next_receipt_sha256 is SHA-256 of UTF-8 bytes produced by nlohmann::json
+    default object ordering with dump(2) plus exactly one trailing LF. This
+    deterministic rendering is used only for newly published rewritten receipts.
+  one_rewrite_per_changed_receipt: true
+  processed_path_fields:
+    - active_root
+    - optional compatibility locator_path
+    - every data_paths item
+    - configuration_path when nonempty
+    - every ownership[].path
+    - every activated_files[].path
+    - every activated_resources[].path
+    - every activated_resources[].activated_files[].path
+  prefix_rule: >
+    Rewrite only when a processed absolute path equals a move source or is a
+    strict descendant under host-independent Windows case-insensitive path
+    semantics. Replace that exact source prefix with the matching destination.
+    Moves are nonoverlapping, so at most one match is valid.
+  unchanged_fields:
+    - component identity/version/state/artifact digest
+    - installed_at
+    - bundle_owner
+    - dependencies
+    - service_contract relative paths and digests
+    - startup evidence unless it is rejected by the unclassified-path rule
+    - knowledge/data paths not under an owned move
+    - external/operator-owned paths
+  no_layout_metadata: >
+    Do not add installation_id or layout_generation to arena_install_receipt_v1.
+    Descriptor/locator/journal own those facts.
+  unclassified_path_rule: >
+    After processing the classified fields, recursively inspect every remaining
+    receipt value. If an unclassified string is an absolute Windows path equal to
+    or below any move source, fail planning with unsupported_receipt_path_field.
+    Never perform receipt-wide string replacement or guess an extension's path
+    meaning.
+  no_change_rule:
+    - no receipt rewrite is emitted when the rendered semantic receipt is unchanged
+    - next receipt must still satisfy the active receipt schema and existing component-specific compatibility validation
+
+installed_descriptor_rendering:
+  exact_json_shape:
+    schema: arena_installed_layout_v1
+    schema_version: 1
+    installation_id: plan installation id
+    layout_generation: next generation
+    platform: windows-x86_64
+    scope: input scope
+    policy:
+      policy_id: target policy id
+      policy_version: target policy version
+      path: target resolved stable policy path
+      sha256: target policy digest
+    integration_root: target resolved integration root
+    roots: exact resolved data/install/cache/workspace/knowledge/release/receipts/transactions/preservation
+    stable_paths: exact resolved descriptor/scope_marker/setup_launcher/installer_runtime/path_directory
+  byte_rendering: nlohmann::json default object ordering, dump(2), one trailing LF
+  digest: lowercase SHA-256 over target_descriptor_bytes
+  rules:
+    - target InstalledLayout is constructed from the same values before rendering
+    - rendered descriptor must validate through validate_installed_layout using the same target policy/anchors
+    - next_locator is exactly locator_from_installed_layout(target, target_descriptor_sha256)
+    - planner never writes descriptor bytes
+
+cleanup_candidates:
+  rules:
+    - may include only recognized legacy component-store directories made non-authoritative by all planned moves
+    - never include data root, workspace root, knowledge root, receipts root, user data, provider product_data, external paths, or a directory still referenced by any receipt
+    - candidates are hints for post-commit exact empty-directory cleanup only
+    - issue #9 must revalidate emptiness/identity before cleanup
+    - cleanup failure cannot invalidate commit authority
+
+installed_authority_loader:
+  maximum_policy_bytes: 1048576
+  maximum_descriptor_bytes: 1048576
+  flow:
+    - read requested scope locator through InstallLayoutLocator
+    - read opposite scope locator and require it absent; both-live is contradictory installation state
+    - requested locator must be present
+    - if expected_descriptor_path is supplied, it must equal locator.descriptor_path under exact Windows comparison
+    - admit locator descriptor parent and exact-read descriptor leaf through FilesystemIdentity/ExactDocumentReader
+    - require exact descriptor digest equals locator.descriptor_sha256
+    - bounded duplicate-rejecting parse descriptor bytes
+    - admit locator policy parent and exact-read policy leaf through the same issue #7 owners
+    - require exact policy digest equals locator.policy_sha256
+    - bounded duplicate-rejecting parse and validate policy
+    - validate_installed_layout(policy, policy_digest, descriptor, anchors)
+    - derive locator_from_installed_layout(layout, descriptor_digest) and require exact equality with registry locator
+    - admit the exact setup_launcher_path as a regular file and require same-object path binding
+    - return InstalledLayoutAuthority only after all checks pass
+  forbidden_fallbacks:
+    - repository packaging/install-layout.json
+    - process environment
+    - scope marker path reconstruction
+    - executable adjacency
+    - opposite-scope locator
+    - raw CLI roots
+  errors:
+    - none/partial/both locators, digest mismatch, stale generation, scope/id/path mismatch, exact-read failure, descriptor/policy parse/validation failure, or launcher physical failure are fatal bounded layout-authority errors
+
+windows_setup_cli_contract:
+  new_option:
+    name: --installed-layout
+    value: absolute descriptor path
+  descriptor_mode:
+    - requires --install-scope per-user or per-machine
+    - composes FilesystemIdentity, Windows anchor resolver, and read-only locator
+    - calls load_installed_layout_authority(scope, supplied_path, ...)
+    - projects SetupPaths only with setup_paths_from_layout
+    - raw --install-root/--data-root/--cache-root/--workspace-root/--knowledge-root values may not override or supplement descriptor mode
+  transitional_raw_mode: >
+    IL-06 does not delete the existing explicit/default-root CLI because current
+    clean-install and development flows still need it until IL-07. Raw mode is
+    not installed authority and the packaged routine updater must never use it.
+    IL-07 must remove it from normal packaged clean/update/repair/uninstall paths
+    or gate it as explicit development/legacy integration input.
+  result_truth:
+    - descriptor mode may expose bounded layout installation_id/generation/scope in machine result evidence
+    - it must not emit registry internals or absolute paths solely for diagnostics
+
+windows_update_adapter:
+  file: packaging/windows/apply-suite-update.ps1
+  fixed_parameters_after_il06:
+    - Scope: auto | per-user | per-machine
+    - ValidateMediaOnly
+  remove_parameters:
+    - ManagerProgramRoot
+    - DataRoot
+    - InstallRoot
+    - CacheRoot
+    - KnowledgeRoot
+  locator_read:
+    - use Microsoft.Win32.RegistryKey APIs with explicit 64-bit view
+    - auto reads HKCU and HKLM exact subkey and requires exactly one complete record
+    - explicit scope requires that scope complete and opposite scope absent
+    - validate exact value names/types/schema/scope/UUID/generation/digests/absolute paths
+    - REG_EXPAND_SZ or provider-expanded environment values are forbidden
+  prelaunch_validation:
+    - exact hash policy and descriptor files against locator digests
+    - parse descriptor only after digest validation
+    - descriptor scope/id/generation/policy/integration/setup paths agree with locator
+    - setup launcher is exact non-reparse regular file at locator path
+    - runtime manifest is located from descriptor stable_paths.installer_runtime, not a formula
+    - data/release roots for temporary media and retained payloads come from descriptor roots, not environment
+  setup_arguments:
+    - --install-scope <locator scope>
+    - --installed-layout <locator descriptor path>
+    - catalog/trust/result/invocation flags only
+    - no semantic root arguments
+  incomplete_or_legacy:
+    - absent/partial/malformed locator or descriptor is a hard normal-update refusal
+    - report that one full integration upgrade/repair is required
+    - do not fall back to environment/default roots
+
+update_package_builder:
+  file: tools/release/build-suite-update-package.mjs
+  rule: >
+    Package generation may adapt invocation/help/tests to the stable updater but
+    does not embed semantic installed roots, locator values, or an installation-
+    specific descriptor. The update package remains installation-independent.
+
+il05_slice:
+  prerequisites:
+    - issue #113 IL-02 integrated
+    - issue #98 ExactDocument contract integrated for production evidence admission; pure tests may use normalized rows
+  allowed_files:
+    - include/arena/application/installer/install_layout.hpp
+    - src/application/installer/install_layout.cpp
+    - tests/unit/install_layout_tests.cpp
+    - CMakeLists.txt
+  exact_goal: implement the public planning types/function, deterministic descriptor bytes/digest, exact move/rewrite rules, and pure tests
+  forbidden:
+    - filesystem or registry mutation
+    - SetupEngine apply flow
+    - transaction journal/effects
+    - packaging or updater
+
+il06_slice:
+  prerequisites:
+    - IL-02, IL-03, IL-04 integrated
+    - FI-02 and ED-01 integrated
+  allowed_files:
+    - include/arena/application/installer/install_layout.hpp
+    - src/application/installer/install_layout.cpp
+    - apps/setup/main.cpp
+    - include/arena/application/installer/setup.hpp only for descriptor-mode composition/result plumbing if strictly required
+    - packaging/windows/apply-suite-update.ps1
+    - tools/release/build-suite-update-package.mjs
+    - focused existing/new tests for those files
+    - CMakeLists.txt
+  exact_goal: implement InstalledLayoutAuthority loader, descriptor-mode setup composition, and descriptor-only packaged update invocation
+  completion_limit: >
+    Normal descriptor-authoritative installed update/repair/read paths are
+    available and packaged routine update no longer has raw-root formulas.
+    Clean initialization and legacy migration mutation remain IL-07/#9.
+  forbidden:
+    - policy/descriptor/receipt/locator mutation
+    - transaction phase changes
+    - Manager dispatch or bootstrap
+
+il07_boundary:
+  spark_status: not_ready_until_issue_9_contract_is_frozen
+  layout_responsibility:
+    - supply exact LayoutTransitionPlan to the one issue #9 coordinator
+    - verify issue #9 publishes exact target policy bytes matching target_policy_sha256
+    - verify issue #9 publishes exact receipt rewrite bytes, target_descriptor_bytes, and conditional locator effect
+    - after commit, normal lifecycle reloads InstalledLayoutAuthority rather than carrying raw roots
+  issue_9_responsibility:
+    - scope mutation lease
+    - stable transaction id
+    - journal schema/state machine
+    - effect prepare/activate/verify/compensate records
+    - component/workspace move mechanism and cross-volume handling
+    - DurableStatePublisher calls for policy/receipts/descriptor
+    - conditional registry locator writer effect
+    - commit_decided, rollback, recovery, cleanup
+  rule: >
+    Do not issue a Spark IL-07 implementation packet until Sol freezes the exact
+    issue #9 coordinator/effect interfaces. Missing transaction interfaces are a
+    dependency, never permission for InstallLayout to implement a transaction.
+
+validation:
+  planner:
+    - clean initialize with no receipts
+    - legacy initialize for each recognized component store and split receipts
+    - descriptor-authoritative migrate and no-transition
+    - generation/id/precondition contradictions
+    - product_data workspace remains exact when target same
+    - workspace_root legacy receipt path moves to target workspace root
+    - receipt path rewrite covers every classified field and no unrelated path
+    - unclassified stale absolute path fails
+    - deterministic operation ids, descriptor bytes/digest, next locator, receipt bytes/digests
+    - no overlapping/duplicate/broad moves or unsafe cleanup candidates
+  loader:
+    - exact valid per-user/per-machine authority
+    - none, both, wrong scope, stale generation/id, path/digest mismatch
+    - policy/descriptor substitution, duplicate-key, bounds, reparse/binding failure
+    - current repository policy differs but installed exact policy still validates
+    - exact setup launcher physical admission
+    - zero environment/default fallback
+  updater:
+    - auto and explicit scope exact registry behavior
+    - wrong registry type/partial record/both scopes
+    - descriptor/policy/setup substitution
+    - runtime/release/data paths come from descriptor
+    - exact setup arguments contain --installed-layout and no root flags
+    - incomplete/legacy state refuses normal update
+    - update package remains installation-independent
+
+delegation_stop_conditions:
+  - a receipt path field requires semantic guessing rather than the classified rewrite contract
+  - a provider workspace placement other than workspace_root or product_data appears
+  - a public mutation method seems necessary on InstallLayout
+  - current repository policy/environment/default roots seem necessary after a locator exists
+  - registry must become semantic root authority
+  - descriptor bytes cannot be deterministic without a new schema
+  - move execution mechanism must be selected inside the planner
+  - IL-07 requires a journal/effect interface not yet frozen by issue #9
+  - another repository must change
+
+completion_relationship: >
+  This spec is complete when IL-05 and IL-06 can be delegated without any
+  architectural choice and when the layout side of IL-07 is fixed sufficiently
+  that only issue #9's still-Sol-owned transaction interfaces remain as a
+  prerequisite.
