@@ -1,0 +1,628 @@
+meta:
+  spec_id: arena_install_layout_v1
+  version: 1
+  status: active
+  owner: install_layout
+  parent_issue: 80
+
+authority_relationship: >
+  Specialized active authority for semantic installation roots, resolved
+  installed-layout descriptors, Windows known-folder resolution, stable locator
+  registration, packaging projections, legacy layout observation, and pure
+  transition planning. It supersedes independently authored Windows root
+  formulas in manager-integration.json, suite-bundle.json, PowerShell update
+  scripts, and setup CLI defaults for the target architecture. Issue #7 owns
+  physical exact-file/state mechanisms. Issue #9 remains the sole mutation,
+  journal, compensation, commit, and recovery authority for policy/descriptor/
+  locator initialization and layout migration.
+
+purpose: >
+  Give clean install, package update, repair, migration, uninstall, stable
+  Manager dispatch, and fresh-install bootstrap one exact answer to “where is
+  this installation?” The source policy is semantic data rather than WiX,
+  PowerShell, environment, or application code. Once committed, the exact
+  installed policy snapshot and descriptor—not current repository defaults—are
+  authority for that installation.
+
+confirmed_current_defect:
+  evidence:
+    - manager-integration.json owns one program/data/runtime/launcher/scope-marker path map
+    - suite-bundle.json independently owns install/data/cache/knowledge roots
+    - apply-suite-update.ps1 independently reconstructs roots from environment variables
+    - full per-machine bundle supplies Program Files/UCI Arena Manager as SetupPaths.install_root
+    - routine updater defaults SetupPaths.install_root to ProgramData/UCI Arena Manager/installed
+  conclusion: >
+    A per-machine full install and routine package update can address different
+    component stores. This is a confirmed competing-authority defect, not only a
+    future drift risk.
+
+hierarchy:
+  lego:
+    brick: InstallLayout
+    owns:
+      - one versioned semantic source policy per supported platform generation
+      - known-folder anchor resolution
+      - exact resolved root and stable-path validation
+      - installed policy snapshot and installed-layout descriptor meaning
+      - SetupPaths projection
+      - scope-specific stable locator meaning
+      - pure legacy observation and target transition planning
+      - Node/WiX/PowerShell/runtime projections of the same policy
+    replacement_boundary: layout policy/version and platform adapters
+    failure_boundary: policy, anchor, locator, descriptor, overlap, legacy observation, or transition-plan failure
+    does_not_own:
+      - exact physical file identity or publication: issue 7
+      - transaction lease/journal/activation/compensation/commit/recovery: issue 9
+      - provider lifecycle, Manager behavior, bootstrap technology, or application data meaning
+      - arbitrary user-selected installation roots in v1
+    topology_rule: >
+      Policy, resolver, locator, descriptor, and transition planner remain one
+      LEGO because they share one semantic owner and lifecycle. Platform and
+      packaging implementations are adapters inside that brick, not new root
+      authorities. InstallLayout never becomes a second transaction engine.
+  solid:
+    single_responsibility:
+      - policy validator owns semantic expressions/static invariants
+      - anchor adapter resolves known folders only
+      - descriptor validator owns resolved installed-state truth
+      - locator adapter locates policy/descriptor/setup entrypoints only
+      - transition planner compares exact observed state to one target without mutation
+      - packaging adapters render policy into platform packaging syntax only
+    open_closed:
+      - future platform adds adapters without caller root branches
+      - future policy version is data plus an explicit transition, not copied formulas
+    liskov:
+      - Node and C++ resolve identical roots for identical policy/scope/anchors
+      - every locator remains a pointer until exact policy/descriptor validation succeeds
+    interface_segregation:
+      - release tools consume policy projections, not registry APIs
+      - runtime consumes InstalledLayout/SetupPaths, not WiX strings
+      - updater consumes locator pointers and passes descriptor path, not roots
+      - transaction consumes LayoutTransitionPlan, not discovery logic
+    dependency_inversion:
+      - InstallLayout consumes issue #7 exact documents/publication
+      - Windows capabilities sit behind anchor/locator adapters
+      - issue #9 consumes frozen transition/policy/descriptor effects
+      - issues #77/#79 consume InstalledLayout/locator rather than defining paths
+  cupid:
+    - composable policy, anchor, locator, descriptor, projection, and transition values
+    - unix-like validators/resolvers with one bounded role
+    - predictable scope, root, generation, and locator behavior
+    - idiomatic Node ESM, C++20, known-folder, and registry APIs
+    - domain-based integration/data/install/cache/workspace/knowledge/release/receipt/transaction/preservation terms
+  kiss: >
+    Use the least complex complete implementation inside the fixed policy and
+    ports. KISS cannot justify current-default reconstruction, environment root
+    authority, WiX strings in policy, a second path map, unvalidated registry
+    pointers, legacy ownership inferred from adjacency, or mutation outside #9.
+
+source_policy:
+  schema: arena_install_layout_policy_v1
+  schema_file: specs/schemas/install-layout-policy.schema.json
+  source_file: packaging/install-layout.json
+  active:
+    policy_id: arena_windows_standard
+    policy_version: 2
+    platform: windows-x86_64
+  semantic_anchors:
+    user_local_app_data:
+      windows_api: FOLDERID_LocalAppData
+      allowed_scope: per-user
+    machine_program_files:
+      windows_api: FOLDERID_ProgramFiles
+      allowed_scope: per-machine
+    machine_program_data:
+      windows_api: FOLDERID_ProgramData
+      allowed_scope: per-machine
+  forbidden_anchor_sources:
+    - process environment variables
+    - current working directory
+    - executable adjacency without policy validation
+    - provider/application configuration
+    - registry values other than the fixed locator pointers
+  expression_rules:
+    - integration/data are anchored roots
+    - every other root is relative only to integration or data
+    - no derived-root chaining/cycles
+    - no absolute/dot/dot-dot/separator/control/trailing-dot-or-space/reserved-device segment
+    - Windows case-insensitive collision semantics
+  target_layout:
+    per-user:
+      integration: user_local_app_data/Programs/UCI Arena Manager
+      data: user_local_app_data/UCI Arena Manager
+      install: integration/installed
+      cache: data/cache
+      workspace: data/workspaces
+      knowledge: data/knowledge
+      release: data/release
+      receipts: data/receipts
+      transactions: data/transactions
+      preservation: data/preservation
+    per-machine:
+      integration: machine_program_files/UCI Arena Manager
+      data: machine_program_data/UCI Arena Manager
+      install: integration/installed
+      cache: data/cache
+      workspace: data/workspaces
+      knowledge: data/knowledge
+      release: data/release
+      receipts: data/receipts
+      transactions: data/transactions
+      preservation: data/preservation
+    rationale: >
+      Stable integration and immutable/versioned application payloads live under
+      the scope-correct executable root; mutable/preserved state lives under the
+      scope-correct data root. A separate installed subroot prevents MSI-owned
+      stable files and transaction-owned component roots from sharing ownership.
+  stable_paths:
+    policy: share/uci-arena/layout-policies/arena_windows_standard-v2.json
+    descriptor: share/uci-arena/installed-layout.json
+    scope_marker: share/uci-arena/install-scope.txt
+    setup_launcher: bin/arena-setup.exe
+    installer_runtime: libexec/uci-arena-installer
+    path_directory: bin
+  policy_snapshot_ownership:
+    - suite media carries exact source policy bytes
+    - #9 publishes the exact policy snapshot to the versioned stable path before descriptor authority
+    - descriptor pins exact policy id/version/path/SHA-256
+    - a future policy version uses a different versioned path and does not overwrite the prior snapshot
+    - prior policy snapshots remain while any current/recovery descriptor references them
+    - MSI never owns, overwrites, or removes active policy snapshots/descriptors
+  root_invariants:
+    - integration/data absolute normalized non-root and neither contains the other
+    - install exactly integration/installed
+    - mutable roots exact distinct direct children of data for policy v2
+    - stable paths exact descendants of integration and mutually noncolliding
+    - no case-insensitive aliases
+    - existing roots/ancestors pass issue #7 physical admission before use/mutation
+    - per-user mutation is non-elevated; per-machine mutation requires legitimate elevation
+    - arbitrary custom roots unsupported in v1
+
+installed_descriptor:
+  schema: arena_installed_layout_v1
+  schema_file: specs/schemas/installed-layout.schema.json
+  destination: integration/share/uci-arena/installed-layout.json
+  identity:
+    installation_id: generated once and retained across migrations
+    platform: windows-x86_64
+    scope: per-user or per-machine
+  generation:
+    - initialization is generation 1
+    - each committed transition increments exactly one
+    - no rollback/retry may skip or double-increment
+  validation:
+    - exact-read duplicate-rejecting policy and descriptor through issue #7
+    - policy digest/id/version/path match descriptor
+    - resolve policy with descriptor scope and exact platform anchors
+    - integration/root/stable paths equal resolved policy exactly
+    - descriptor self-path equals resolved descriptor path
+    - current repository policy is irrelevant to an older installation
+    - malformed/missing/linked/reparse-substituted/wrong-scope/overlapping descriptor fails before mutation
+  publication:
+    - policy snapshot and descriptor use issue #7 absent/exact-prior preconditions
+    - only activated outcome establishes authority
+    - durability-unproven or indeterminate is transaction failure/recovery evidence
+    - never delete prior descriptor/policy before replacement
+  SetupPaths_projection:
+    install_root: roots.install
+    data_root: roots.data
+    cache_root: roots.cache
+    workspace_root: roots.workspace
+    knowledge_root: roots.knowledge
+    invocation_only:
+      - bundle_owner
+      - restart_manager_service
+      - manager_service_access
+    rule: >
+      Every packaged production path derives only from InstalledLayout. Raw root
+      CLI flags may remain test/development-only and cannot discover/create/
+      update installed authority.
+
+common_runtime_contract:
+  files:
+    port_header: include/arena/ports/install_layout.hpp
+    domain_header: include/arena/application/installer/install_layout.hpp
+    common_source: src/application/installer/install_layout.cpp
+    platform_header: include/arena/platform/install_layout.hpp
+    windows_source: src/platform/windows/install_layout.cpp
+  domain_types: |
+    enum class InstallScope { per_user, per_machine };
+    enum class LayoutAnchor {
+        user_local_app_data,
+        machine_program_files,
+        machine_program_data,
+    };
+
+    struct InstallLayoutRoots {
+        std::filesystem::path integration;
+        std::filesystem::path data;
+        std::filesystem::path install;
+        std::filesystem::path cache;
+        std::filesystem::path workspace;
+        std::filesystem::path knowledge;
+        std::filesystem::path release;
+        std::filesystem::path receipts;
+        std::filesystem::path transactions;
+        std::filesystem::path preservation;
+    };
+
+    struct InstallLayoutStablePaths {
+        std::filesystem::path policy;
+        std::filesystem::path descriptor;
+        std::filesystem::path scope_marker;
+        std::filesystem::path setup_launcher;
+        std::filesystem::path installer_runtime;
+        std::filesystem::path path_directory;
+    };
+
+    struct ResolvedInstallLayout {
+        std::string policy_id;
+        std::uint64_t policy_version;
+        InstallScope scope;
+        InstallLayoutRoots roots;
+        InstallLayoutStablePaths stable_paths;
+    };
+
+    struct InstalledLayout {
+        std::string installation_id;
+        std::uint64_t layout_generation;
+        std::string policy_sha256;
+        ResolvedInstallLayout resolved;
+    };
+  ports: |
+    class InstallLayoutAnchorResolver {
+      public:
+        virtual ~InstallLayoutAnchorResolver() = default;
+        [[nodiscard]] virtual std::filesystem::path
+        resolve(LayoutAnchor anchor) const = 0;
+    };
+
+    struct InstallLayoutLocatorRecord {
+        InstallScope scope;
+        std::filesystem::path integration_root;
+        std::filesystem::path policy_path;
+        std::filesystem::path descriptor_path;
+        std::filesystem::path setup_launcher_path;
+    };
+
+    class InstallLayoutLocator {
+      public:
+        virtual ~InstallLayoutLocator() = default;
+        [[nodiscard]] virtual std::optional<InstallLayoutLocatorRecord>
+        read(InstallScope scope) const = 0;
+    };
+  common_functions: |
+    [[nodiscard]] nlohmann::json
+    validate_install_layout_policy(const nlohmann::json& candidate);
+
+    [[nodiscard]] ResolvedInstallLayout
+    resolve_install_layout(const nlohmann::json& validated_policy,
+                           InstallScope scope,
+                           const InstallLayoutAnchorResolver& anchors);
+
+    [[nodiscard]] InstalledLayout
+    validate_installed_layout(const nlohmann::json& validated_policy,
+                              std::string_view policy_sha256,
+                              const nlohmann::json& descriptor,
+                              const InstallLayoutAnchorResolver& anchors);
+
+    [[nodiscard]] SetupPaths
+    setup_paths_from_layout(const InstalledLayout& layout,
+                            std::string bundle_owner,
+                            bool restart_manager_service,
+                            bool manager_service_access);
+  rules:
+    - domain types/functions stay platform-neutral and contain no registry/WiX/known-folder identifiers
+    - anchor/locator ports contain no environment/default reconstruction method
+    - factories are in arena::platform and return narrow ports
+    - Node/C++ golden fixtures produce identical resolved strings under synthetic anchors
+
+windows_anchor_adapter:
+  - resolve known folders through SHGetKnownFolderPath or equivalent exact API
+  - no environment fallback
+  - user anchor forbidden for machine scope and machine anchors forbidden for user scope
+  - absolute normalized result; existing path physically admitted when required
+  - bounded typed failure; no opposite-scope fallback
+
+windows_locator:
+  registry_subkey: Software/UCI Arena/Installer
+  hives:
+    per-user: HKCU 64-bit view
+    per-machine: HKLM 64-bit view
+  values:
+    LayoutLocatorSchema: arena_install_layout_locator_v1
+    InstallScope: per-user or per-machine
+    IntegrationRoot: integration pointer
+    LayoutPolicyPath: active exact policy snapshot pointer
+    InstalledLayoutPath: active descriptor pointer
+    SetupLauncherPath: stable launcher pointer
+  ownership:
+    - registry values are pointer/entrypoint registration only, never semantic root authority
+    - #9 writes/replaces/removes locator values transactionally with descriptor authority
+    - MSI does not claim locator authority
+  discovery:
+    - auto reads both exact hives and requires exactly one valid record
+    - explicit scope reads exact hive; cross-scope live conflict fails where exclusivity applies
+    - exact policy resolution must reproduce integration and every stable pointer
+    - exact descriptor must agree with policy/scope/root
+    - setup launcher exact stable path and physical admission before launch
+    - malformed/missing/contradictory/stale/link/reparse locator fails before mutation
+    - no current-default reconstruction
+  updater_rule: >
+    apply-suite-update.ps1 reads the locator, validates one scope and stable-path
+    relationship, launches the registered setup launcher, and passes
+    `--installed-layout <descriptor>`. It never computes semantic roots from
+    environment variables.
+
+node_packaging_projection:
+  module: tools/release/install-layout.mjs
+  owns:
+    - exact manual policy validation and semantic invariants
+    - synthetic-anchor resolution for tests
+    - WiX path expressions from semantic roots
+    - stable relative destinations and locator value names
+    - deterministic golden projection
+  wix_mapping:
+    user_local_app_data: LocalAppDataFolder
+    machine_program_files: ProgramFiles64Folder
+    machine_program_data: CommonAppDataFolder
+  post_migration_ownership:
+    packaging/install-layout.json:
+      - all root expressions
+      - stable relative destinations
+      - registry subkey/value names
+    packaging/windows/manager-integration.json:
+      - display/manufacturer, Manager role names, shortcut/service identity, upgrade codes, non-layout OS policy
+      - no roots/data/runtime/launcher/scope-marker/PATH formulas
+    packaging/windows/suite-bundle.json:
+      - display/manufacturer, feature controls, scope UI/elevation/upgrade codes
+      - no install/data/cache/workspace/knowledge/release formula
+  package_rules:
+    - manager MSI and suite bundle consume one validated policy projection
+    - MSI owns stable binaries, runtime, scope marker, PATH/service/shortcut registrations only
+    - MSI does not install/remove policy snapshot, descriptor, locator, or component store
+    - suite media carries exact target policy to arena-setup initialization/migration
+    - #9 publishes policy/descriptor/locator
+    - MSI repair never overwrites descriptor/policy snapshot or transaction-owned payload
+    - component invocation passes policy/descriptor operation, not duplicate roots
+
+legacy_observation:
+  policy_id: arena_windows_legacy_0_3x
+  known_anchors:
+    per-user:
+      integration: user_local_app_data/Programs/UCI Arena Manager
+      data: user_local_app_data/UCI Arena Manager
+    per-machine:
+      integration: machine_program_files/UCI Arena Manager
+      data: machine_program_data/UCI Arena Manager
+  recognized_install_variants:
+    per-user_full_or_routine: data/installed
+    per-machine_full_bundle: integration
+    per-machine_routine_drift: data/installed
+    split_receipt_state: exact active receipts span recognized variants
+  rules:
+    - enabled only by explicit full integration-protocol migration
+    - inspect exact scope marker/runtime/receipt bytes through issue #7
+    - derive each active component source root from its receipt, never guessed variant
+    - classify variants for evidence only
+    - unrecognized/escaping/linked/modified/duplicate/contradictory roots fail
+    - split state allowed only with one exact authoritative receipt per component
+    - user/external data never inferred from adjacency
+    - exact manifest/receipt-owned workspaces may move; external/operator paths remain
+    - no legacy formula remains in normal post-migration updater
+
+layout_transition_plan:
+  owner: InstallLayout pure planner
+  consumer: issue 9 InstallTransactionCoordinator
+  conceptual_shape: |
+    enum class LayoutTransitionKind { initialize, migrate };
+
+    struct LayoutMove {
+        std::string operation_id;
+        std::string owner_kind;
+        std::filesystem::path source;
+        std::filesystem::path destination;
+        std::string expected_identity_sha256;
+    };
+
+    struct LayoutReceiptRewrite {
+        std::string component_id;
+        std::string prior_receipt_sha256;
+        nlohmann::json next_receipt;
+    };
+
+    struct LayoutTransitionPlan {
+        std::string schema = "arena_install_layout_transition_v1";
+        LayoutTransitionKind kind;
+        std::string installation_id;
+        std::uint64_t prior_generation;
+        std::uint64_t next_generation;
+        std::optional<std::string> prior_policy_sha256;
+        std::optional<std::string> prior_descriptor_sha256;
+        std::string target_policy_sha256;
+        InstalledLayout target;
+        std::vector<LayoutMove> owned_moves;
+        std::vector<LayoutReceiptRewrite> receipt_rewrites;
+        InstallLayoutLocatorRecord locator;
+        std::vector<std::filesystem::path> cleanup_candidates;
+    };
+  planner_rules:
+    - initialize generation 0 to 1, new installation id, absent policy/descriptor preconditions
+    - migrate preserves installation id and increments generation exactly one
+    - target component root install/components/<id>/<version>
+    - target managed workspace workspace/<manifest workspace_name>
+    - each move exact receipt/manifest-owned with deterministic operation id
+    - no duplicate destination, overlap, broad recursive move, or mechanism assumption
+    - external/user/preserved paths excluded
+    - receipt rewrites only exact path/generation changes required by owned moves
+    - locator exact target pointers
+    - cleanup candidates non-authoritative empty legacy directories only
+    - no mutation/service/provider/publication/transaction operation
+  issue_9_boundary:
+    - #9 acquires one scope lease and journals every effect
+    - #9 selects stage/copy/activate mechanism, including cross-volume handling
+    - #9 publishes policy/receipts/descriptor through issue #7
+    - #9 performs locator writes as typed compensatable Windows effects
+    - before commit_decided every effect is compensatable and prior authority preserved
+    - cleanup is post-commit exact/retryable
+    - #80 never creates journal/lease/commit/recovery
+  dependency_cycle_resolution: >
+    #9 implementation may start after IL-02/IL-05 freeze types and transition
+    semantics. #80 final acceptance waits for #9 execution, but #9 does not wait
+    for another #80 transaction implementation.
+
+normal_lifecycle:
+  clean_install:
+    - MSI installs stable integration binaries/runtime/marker only
+    - suite media supplies exact target policy to new arena-setup
+    - #9 initialize transition publishes policy generation-1 descriptor and locator with component installation
+    - failure rolls stable/transaction state back truthfully
+  normal_update_repair_uninstall:
+    - locate exact registry record
+    - exact-read installed policy and descriptor
+    - validate scope/generation/resolved paths
+    - derive SetupPaths only from descriptor
+    - execute lifecycle under its owner
+    - never reconstruct current defaults
+  legacy_upgrade:
+    - explicit full integration-protocol upgrade observes legacy state and creates target plan
+    - #9 migrates before descriptor-authoritative status
+    - future package updates require descriptor/locator
+  incomplete_state:
+    - stable MSI/marker without locator/descriptor is incomplete clean install or unmigrated legacy state
+    - normal package update refuses and requests one-time integration upgrade/repair
+    - no raw-root fallback
+
+validation:
+  policy:
+    - active policy valid
+    - invalid scope/anchor/segment/cycle/case collision/overlap/privilege/unknown field rejected
+    - exact target roots under synthetic anchors
+    - Node/WiX/C++ golden equality
+  descriptor:
+    - exact policy/generation/scope/root/path accepted
+    - policy digest/id/version/path/current-default mismatch cases
+    - invalid UUID/generation/absolute/normalization/case/overlap/path escape
+    - physical substitution through issue #7
+  locator:
+    - valid HKCU/HKLM, auto exactly one
+    - none/both/wrong-hive/malformed/contradictory/stale/pointer escape rejected
+    - updater contains no environment root formulas
+  packaging:
+    - MSI/bundle identical policy projection
+    - one synthetic policy change updates every projection with no other root edit
+    - old integration/suite policy files contain no semantic roots
+    - repair preserves transaction-owned layout/payload
+  legacy:
+    - personal, machine-full, machine-routine-drift, and exact split receipts
+    - foreign/duplicate/escaping/linked/modified state rejected
+    - external data preserved
+  transition:
+    - deterministic initialize/migrate
+    - exact destinations/receipt rewrites/generation/id
+    - no duplicate/overlap/broad move
+    - #9 failure injection around policy/move/receipt/descriptor/locator/commit
+    - repeated recovery/retry
+  acceptance:
+    - clean per-user/per-machine one policy/descriptor
+    - package update exact descriptor store both scopes
+    - per-machine full/update no divergence
+    - repository N+1 cannot redirect installed N
+    - explicit migration commits/rolls back under #9
+    - #77/#79 consume same locator/descriptor without roots
+
+implementation_slices:
+  - id: IL-01
+    goal: Node policy validator/resolver/WiX projection and active-policy tests
+    may_touch:
+      - packaging/install-layout.json
+      - tools/release/install-layout.mjs
+      - tools/release/install-layout.test.mjs
+      - package.json
+    must_not_touch: [C++ runtime, packaging consumers, locator, transaction]
+  - id: IL-02
+    goal: C++ policy/descriptor types, resolution/validation, SetupPaths projection, fake-anchor tests
+    prerequisites: [FI-01, ED-01]
+    may_touch:
+      - include/arena/ports/install_layout.hpp
+      - include/arena/application/installer/install_layout.hpp
+      - src/application/installer/install_layout.cpp
+      - tests/unit/install_layout_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [Windows adapter, SetupEngine lifecycle, packaging]
+  - id: IL-03
+    goal: Windows known-folder resolver and registry locator adapter
+    prerequisites: [IL-02, FI-02]
+    may_touch:
+      - include/arena/platform/install_layout.hpp
+      - src/platform/windows/install_layout.cpp
+      - tests/unit/install_layout_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [packaging, publication, transaction]
+  - id: IL-04
+    goal: migrate Windows packaging projections to one policy; stable MSI stops owning semantic layout state
+    prerequisite: IL-01
+    may_touch:
+      - packaging/windows/manager-integration.json
+      - packaging/windows/suite-bundle.json
+      - tools/release/build-manager-msi.mjs
+      - tools/release/build-manager-msi.test.mjs
+      - tools/release/build-windows-suite-bundle.mjs
+      - tools/release/build-windows-suite-bundle.test.mjs
+      - packaging/windows/scope-markers/*
+      - package.json
+    must_not_touch: [arena-setup, updater, transaction, Manager payload separation, bootstrap redesign]
+  - id: IL-05
+    goal: pure legacy observation model and LayoutTransitionPlan generation
+    prerequisites: [IL-02, FI-02]
+    may_touch:
+      - include/arena/application/installer/install_layout.hpp
+      - src/application/installer/install_layout.cpp
+      - tests/unit/install_layout_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [filesystem/registry mutation, transaction, SetupEngine apply]
+  - id: IL-06
+    goal: descriptor/locator loading and descriptor-only packaged update invocation; remove normal raw-root reconstruction
+    prerequisites: [IL-02, IL-03, IL-04, FI-02, ED-01]
+    may_touch:
+      - apps/setup/main.cpp
+      - include/arena/application/installer/setup.hpp only for InstalledLayout projection entry
+      - packaging/windows/apply-suite-update.ps1
+      - tools/release/build-suite-update-package.mjs only for invocation adaptation
+      - focused tests
+      - CMakeLists.txt
+    must_not_touch: [initialization/migration mutation, transaction phases, Manager dispatch, bootstrap]
+    completion_limit: descriptor-authoritative normal path; incomplete/legacy requests full integration upgrade
+  - id: IL-07
+    goal: initialize/migrate policy, descriptor, receipts, moves, and locator through #9 and complete end-to-end acceptance
+    prerequisites: [IL-05, IL-06, issue_9_transaction_coordinator]
+    may_touch:
+      - exact #9 coordinator/effect files selected by Sol
+      - src/application/installer/install_layout.cpp
+      - apps/setup/main.cpp
+      - tests/unit/install_layout_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - Windows lifecycle tests
+      - CMakeLists.txt
+    must_not_touch: [new transaction/journal/lease, Manager/provider repos, release/bootstrap architecture]
+
+delegation_stop_conditions:
+  - another semantic root map/registry appears necessary
+  - environment/current defaults proposed as installed authority
+  - policy needs WiX/PowerShell syntax
+  - active policy snapshot would be MSI-owned/overwritten
+  - descriptor cannot use issue #7 exact read/publication
+  - locator must become semantic authority
+  - arbitrary custom path support is required
+  - legacy ownership must be inferred from adjacency
+  - mutation outside #9 is required
+  - SetupPaths cannot derive from descriptor without unrelated lifecycle redesign
+  - #77/#79 tries to add roots/locator
+  - native Windows behavior cannot be tested
+
+completion: >
+  Issue #80 completes only after IL-01 through IL-07 are integrated; one semantic
+  policy owns Windows roots; each installation has one exact versioned policy
+  snapshot, descriptor, and locator; normal lifecycle derives SetupPaths only
+  from them; packaging/updater no longer restate roots; legacy divergent stores
+  migrate under #9; and #77/#79 consume the same authority.
