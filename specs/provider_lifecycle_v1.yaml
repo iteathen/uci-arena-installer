@@ -1,0 +1,507 @@
+meta:
+  spec_id: arena_provider_lifecycle_v1
+  version: 1
+  status: active
+  owner: provider_lifecycle
+  parent_issue: 51
+
+authority_relationship: >
+  This is the specialized active authority for Installer-side provider startup,
+  shutdown, replacement quiescence, replacement completion, and lifecycle
+  result interpretation. Where the older installation contract or startup
+  control v1/v2 vocabulary conflicts with this spec, this spec governs new
+  Installer work. V1/v2 remain compatibility wire adapters only.
+
+purpose: >
+  Let Installer invoke provider-owned lifecycle capability and reason only about
+  generic installation safety: ready, contract-declared safe inactive, or
+  failed. Provider-specific qualification, credentials, timing, bot policy,
+  books, evidence, and remediation remain outside Installer.
+
+hierarchy:
+  lego:
+    brick: ProviderLifecycle
+    owns:
+      - validating Installer-facing provider lifecycle control declarations
+      - resolving a typed lifecycle request from already validated component data
+      - invoking one provider lifecycle command through the declared executable
+      - translating supported wire protocols into one neutral lifecycle result
+      - enforcing operation-specific safety observations and safe-inactive permission
+      - preserving bounded opaque provider reasons for operators and Manager
+    does_not_own:
+      - provider implementation or provider state machines
+      - provider-specific qualification or remediation
+      - credentials or credential contents
+      - install transaction sequencing, commit, rollback, or recovery
+      - service-manager state interpretation
+      - component configuration rendering
+      - Manager orchestration behavior
+    topology_rule: >
+      ProviderLifecycle is one coherent Installer brick. Its contract parser,
+      neutral port, and CLI adapter are SOLID modules inside that brick, not
+      separate lifecycle authorities. Do not create provider-specific lifecycle
+      bricks merely because providers return different opaque reason ids.
+  solid:
+    single_responsibility:
+      contract_parser: validates and normalizes startup-control declarations
+      neutral_port: validates requests, decodes wire results, and enforces generic semantics
+      cli_adapter: executes one declared argument-vector command and returns bounded JSON
+    open_closed: >
+      A new provider uses startup control v3 and the same result schema. A new
+      transport or legacy wire decoder may be added behind the neutral port
+      without changing transaction callers or generic dispositions.
+    liskov: >
+      The non-virtual public invoke operation centrally validates request/result
+      identity, operation observations, allowed dispositions, bounds, and errors.
+      Adapters return raw bounded JSON only and cannot redefine lifecycle safety.
+    interface_segregation: >
+      Transaction/removal callers receive only invoke(request) and the neutral
+      result. They never see provider command syntax, raw JSON fields, legacy
+      requalification flags, or provider-specific reason meaning.
+    dependency_inversion: >
+      Installer lifecycle coordination depends on arena::ports::ProviderLifecycle.
+      The platform-neutral CLI adapter consumes ProcessSupervisor and is composed
+      at the SetupEngine boundary until issue #9 moves composition into the
+      transaction coordinator.
+  cupid:
+    - composable through one fixed request/result port
+    - unix-like private parsing, mapping, validation, and invocation helpers
+    - predictable operation-specific observations and fail-closed behavior
+    - idiomatic C++20 value types and bounded nlohmann JSON parsing
+    - domain language is lifecycle operation, disposition, and observation
+  kiss: >
+    Use the smallest complete parser/adapter implementation satisfying this
+    contract. KISS may not reduce lifecycle proof to process exit success, infer
+    provider-specific meaning, add product branches, or bypass typed evidence.
+
+neutral_public_surface:
+  header: include/arena/ports/provider_lifecycle.hpp
+  common_implementation: src/adapters/provider_lifecycle.cpp
+  adapter_header: include/arena/adapters/provider_lifecycle.hpp
+  adapter_implementation: src/adapters/cli_provider_lifecycle.cpp
+  namespace: arena::ports
+  cxx_shape: |
+    enum class ProviderLifecycleOperation {
+        install,
+        uninstall,
+        pre_replace,
+        post_replace,
+    };
+
+    enum class ProviderLifecycleDisposition {
+        ready,
+        safe_inactive,
+        failed,
+    };
+
+    enum class ProviderInstallationObservation {
+        installed,
+        absent,
+        unknown,
+    };
+
+    enum class ProviderActivityObservation {
+        active,
+        inactive,
+        unknown,
+    };
+
+    enum class ProviderConfigurationObservation {
+        matches,
+        mismatch,
+        not_applicable,
+        unknown,
+    };
+
+    enum class ProviderReplacementObservation {
+        safe,
+        unsafe,
+        not_applicable,
+        unknown,
+    };
+
+    enum class ProviderLifecycleWireProtocol {
+        legacy_v1,
+        legacy_v2,
+        typed_v3,
+    };
+
+    enum class ProviderLegacyResultEnvelope {
+        root,
+        startup,
+    };
+
+    struct ProviderLifecycleReason {
+        std::string id;
+        std::string message;
+    };
+
+    struct ProviderLifecycleObserved {
+        ProviderInstallationObservation installation;
+        ProviderActivityObservation activity;
+        ProviderConfigurationObservation configuration;
+        ProviderReplacementObservation replacement;
+    };
+
+    struct ProviderLifecycleResult {
+        std::string component_id;
+        std::string component_version;
+        ProviderLifecycleOperation operation;
+        ProviderLifecycleDisposition disposition;
+        ProviderLifecycleObserved observed;
+        std::optional<ProviderLifecycleReason> reason;
+    };
+
+    struct ProviderLifecyclePolicy {
+        ProviderLifecycleWireProtocol wire_protocol;
+        ProviderLegacyResultEnvelope legacy_envelope;
+        bool require_configuration_match;
+        bool allow_safe_inactive;
+    };
+
+    struct ProviderLifecycleRequest {
+        std::string component_id;
+        std::string component_version;
+        ProviderLifecycleOperation operation;
+        std::filesystem::path executable;
+        std::filesystem::path working_directory;
+        std::vector<std::string> arguments;
+        ProviderLifecyclePolicy policy;
+        std::chrono::milliseconds timeout;
+    };
+
+    class ProviderLifecycle {
+      public:
+        virtual ~ProviderLifecycle() = default;
+
+        [[nodiscard]] ProviderLifecycleResult
+        invoke(const ProviderLifecycleRequest& request);
+
+      protected:
+        [[nodiscard]] virtual nlohmann::json invoke_raw_validated(
+            const ProviderLifecycleRequest& request,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+  fixed_bounds:
+    component_id_utf8_bytes: 128
+    component_version_utf8_bytes: 64
+    arguments: 32
+    argument_utf8_bytes: 1024
+    raw_result_bytes: 65536
+    reason_id_bytes: 64
+    reason_message_utf8_bytes: 512
+    timeout_minimum: 1ms
+    timeout_maximum: 120s
+    timeout_default: 120s
+
+neutral_enforcement:
+  owner: arena::ports::ProviderLifecycle::invoke
+  responsibilities:
+    - validate component identity/version, paths, arguments, timeout, and policy
+    - capture one steady-clock deadline exactly once
+    - invoke the raw adapter once with the validated request and deadline
+    - select and decode only the declared wire protocol
+    - bind typed-v3 component/version/operation identity to the request
+    - map legacy output into neutral observations without leaking legacy field names
+    - validate operation-specific observation invariants
+    - reject safe_inactive unless the exact operation policy permits it
+    - require a bounded reason for safe_inactive and failed
+    - convert ordinary adapter/parse/contract failures to one failed neutral result
+  fixed_neutral_reason_ids:
+    - invalid_request
+    - adapter_exception
+    - malformed_result
+    - identity_mismatch
+    - operation_mismatch
+    - disposition_not_allowed
+    - observation_mismatch
+    - legacy_contract_not_satisfied
+    - legacy.safe_inactive
+  exception_policy:
+    expected_operational_failure: failed_result
+    std_exception_from_adapter_or_parser: failed_result
+    allocation_or_process_fatal_failure: may_propagate
+  rule: >
+    Callers branch only on disposition and operation. They may present a bounded
+    reason but never interpret its id to choose Installer behavior.
+
+result_contract:
+  schema: arena_provider_lifecycle_result_v1
+  schema_file: specs/schemas/provider-lifecycle-result.schema.json
+  identity:
+    - component_id exactly equals the request component_id
+    - component_version exactly equals the request component_version
+    - operation exactly equals the requested operation
+  dispositions:
+    ready: requested lifecycle safety state is completely proven
+    safe_inactive: >
+      installation/replacement is valid and safe to commit inactive; valid only
+      for install or post_replace and only when the exact startup-control
+      operation explicitly permits it
+    failed: lifecycle safety was not proven; normal transaction failure policy applies
+  observed_fields:
+    installation: [installed, absent, unknown]
+    activity: [active, inactive, unknown]
+    configuration: [matches, mismatch, not_applicable, unknown]
+    replacement: [safe, unsafe, not_applicable, unknown]
+  operation_invariants:
+    install:
+      ready: [installed, active, matches, not_applicable]
+      safe_inactive: [installed, inactive, matches, not_applicable]
+    uninstall:
+      ready: [absent, inactive, not_applicable, not_applicable]
+      safe_inactive: forbidden
+    pre_replace:
+      ready: [installed, inactive, matches, safe]
+      safe_inactive: forbidden
+    post_replace:
+      ready: [installed, active, matches, safe]
+      safe_inactive: [installed, inactive, matches, safe]
+  reason:
+    required_for: [safe_inactive, failed]
+    optional_for: [ready]
+    interpretation: opaque_to_installer
+    secrets: forbidden
+
+startup_control_v3:
+  schema: arena_provider_startup_control_v3
+  schema_file: specs/schemas/provider-startup-control-v3.schema.json
+  result_wire: >
+    Provider stdout is exactly one arena_provider_lifecycle_result_v1 document.
+    No configurable result envelope or provider-specific lifecycle fields exist.
+  required_operations: [install, uninstall]
+  optional_paired_operations: [pre_replace, post_replace]
+  operation_declaration:
+    arguments: bounded fixed argument vector appended by Installer-owned path arguments
+    success_dispositions:
+      install: [ready] or [ready, safe_inactive]
+      uninstall: [ready]
+      pre_replace: [ready]
+      post_replace: [ready] or [ready, safe_inactive]
+  path_arguments:
+    workspace_argument: required
+    configuration_argument: required
+    replacement_arguments: required only when pre_replace/post_replace are declared
+  forbidden_fields:
+    - result.envelope
+    - require_live_on_install
+    - require_live_on_post_replace
+    - allow_deferred_requalification_on_post_replace
+    - requalificationRequired
+    - provider-specific condition or reason selectors
+  rules:
+    - pre_replace and post_replace appear together or not at all
+    - safe_inactive permission is operation-local and never inferred from reason id
+    - result reason is preserved but opaque
+    - no shell command string is accepted
+
+contract_parser:
+  header: include/arena/application/installer/provider_lifecycle_contract.hpp
+  implementation: src/application/installer/provider_lifecycle_contract.cpp
+  normalized_shape: |
+    struct ProviderLifecycleOperationControl {
+        std::vector<std::string> arguments;
+        bool allow_safe_inactive;
+    };
+
+    struct ProviderLifecycleControl {
+        ProviderLifecycleWireProtocol wire_protocol;
+        std::string entrypoint;
+        std::map<ProviderLifecycleOperation, ProviderLifecycleOperationControl> operations;
+        std::string workspace_flag;
+        std::filesystem::path workspace_relative_path;
+        std::string configuration_flag;
+        std::optional<std::string> previous_root_flag;
+        std::optional<std::string> replacement_root_flag;
+        ProviderLegacyResultEnvelope legacy_envelope;
+        bool legacy_require_configuration_match;
+    };
+  responsibilities:
+    - validate v1, v2, or v3 startup-control identity and exact field shape
+    - normalize only the fields needed to build a neutral request
+    - reject unknown major versions and contradictory operation declarations
+    - require manifest entrypoint/capability consistency at the existing caller boundary
+    - keep legacy vocabulary inside this parser/decoder boundary
+  does_not_own:
+    - executable/root resolution
+    - process execution
+    - transaction policy
+    - provider-specific reason interpretation
+
+wire_compatibility:
+  typed_v3:
+    authority: preferred_new_contract
+    decoding: exact provider lifecycle result schema and request identity binding
+  legacy_v1:
+    authority: compatibility_only
+    supported_operations: [install, uninstall]
+    mapping:
+      install_ready: installed true, required configuration match true, active true
+      install_safe_inactive: >
+        installed true, required configuration match true, active false, and the
+        legacy control explicitly did not require live startup
+      uninstall_ready: installed false
+    neutral_reason_for_safe_inactive: legacy.safe_inactive
+  legacy_v2:
+    authority: compatibility_only
+    supported_operations: [install, uninstall, pre_replace, post_replace]
+    mapping:
+      install_and_uninstall: legacy_v1 rules
+      pre_replace_ready: installed true, active false, replacementReady true, required configuration match true
+      post_replace_ready: installed true, active true, required configuration match true
+      post_replace_safe_inactive: >
+        installed true, active false, required configuration match true,
+        require_live_on_post_replace false,
+        allow_deferred_requalification_on_post_replace true, and
+        requalificationRequired true
+    neutral_reason_for_safe_inactive: legacy.safe_inactive
+  containment_rules:
+    - legacy raw fields never enter ProviderLifecycleResult
+    - legacy raw fields never enter new receipts, journals, or Installer results
+    - no new provider-specific legacy mapping may be added without Sol architecture review
+    - v1/v2 compatibility does not make their vocabulary part of the neutral port
+
+cli_adapter:
+  factory_shape: |
+    namespace arena::adapters {
+    [[nodiscard]] std::unique_ptr<arena::ports::ProviderLifecycle>
+    make_cli_provider_lifecycle(
+        arena::application::ProcessSupervisor& process_supervisor);
+    }
+  responsibilities:
+    - invoke exactly the resolved executable/working-directory/argument vector
+    - compute only the remaining bounded duration from the supplied deadline
+    - use ProcessSupervisor::run_json without shell interpretation
+    - return one bounded JSON document to the neutral base
+  does_not_own:
+    - result semantics or disposition validation
+    - manifest parsing
+    - transaction sequencing
+    - retry or provider remediation
+
+receipt_and_journal_projection:
+  new_receipt_startup: >
+    On successful install or post_replace, receipt.startup is the serialized
+    neutral arena_provider_lifecycle_result_v1. A committed receipt never stores
+    a failed lifecycle result.
+  receipt_state_rule: >
+    The existing top-level receipt state remains installation-selection policy
+    during this issue. Actual runtime activity/disposition is authoritative in
+    receipt.startup. Issue #51 does not invent a new top-level receipt state.
+  legacy_receipt_reading: >
+    Existing startup objects with installed/active/configuration fields remain
+    readable through a compatibility projection. New writes use only the typed
+    neutral result.
+  current_journal_projection:
+    key: lifecycle_result
+    states:
+      pre_replace_ready: quiesced
+      post_replace_ready: ready
+      post_replace_safe_inactive: safe_inactive
+    forbidden_new_fields:
+      - resume_deferred
+      - requalification_required
+      - requalificationRequired
+  issue_9_relationship: >
+    Issue #51 provides typed lifecycle evidence only. Issue #9 remains the sole
+    owner of durable effect records, commit decisions, rollback, recovery, and
+    final transaction schemas. Current journal projection is transitional and
+    must not become a competing transaction design.
+
+validation:
+  focused_test_file: tests/unit/provider_lifecycle_tests.cpp
+  integration_test_file: tests/unit/setup_tests.cpp
+  mock_file: tests/mocks/mock_service_cli.cpp
+  required_cases:
+    - exact typed-v3 ready result for every operation
+    - typed-v3 safe inactive for allowed install and post_replace
+    - safe inactive rejected for uninstall and pre_replace
+    - safe inactive rejected when operation policy omits permission
+    - failed requires bounded opaque reason
+    - component, version, or operation mismatch fails closed
+    - every observation mismatch fails closed
+    - malformed, empty, oversized, unknown-schema, or extra-field typed result fails
+    - provider reason is preserved but not interpreted
+    - v1 ready and explicitly permitted inactive mapping
+    - v2 pre/post replacement mapping
+    - legacy safe inactive maps to legacy.safe_inactive with no legacy raw fields
+    - CLI adapter uses exact argv, one deadline, bounded JSON, and no shell
+    - SetupEngine stores typed startup result and generic journal projection
+    - SetupEngine contains no decision branch on provider-specific reason
+    - source search confines legacy requalification terms to the compatibility decoder and legacy fixtures
+    - removal cleanup accepts only uninstall ready with absent/inactive observations
+
+implementation_slices:
+  - id: PL-01
+    goal: add neutral types/port, result serialization/validation/legacy-free typed-v3 decoding, and fake-adapter tests
+    may_touch:
+      - include/arena/ports/provider_lifecycle.hpp
+      - src/adapters/provider_lifecycle.cpp
+      - tests/unit/provider_lifecycle_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - startup-control manifest parsing
+      - ProcessSupervisor or CLI adapter
+      - SetupEngine integration
+      - receipt or journal schemas
+  - id: PL-02
+    goal: implement and schema-bind startup-control v3 plus normalized v1/v2/v3 contract parsing
+    prerequisite: PL-01
+    may_touch:
+      - include/arena/application/installer/provider_lifecycle_contract.hpp
+      - src/application/installer/provider_lifecycle_contract.cpp
+      - specs/schemas/install-component.schema.json
+      - specs/schemas/provider-startup-control-v3.schema.json
+      - tests/unit/provider_lifecycle_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - provider process invocation
+      - transaction sequencing
+      - receipt/journal projection
+  - id: PL-03
+    goal: implement the CLI adapter and typed mock-provider output
+    prerequisite: PL-01
+    may_touch:
+      - include/arena/adapters/provider_lifecycle.hpp
+      - src/adapters/cli_provider_lifecycle.cpp
+      - tests/mocks/mock_service_cli.cpp
+      - tests/unit/provider_lifecycle_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - neutral public contract
+      - manifest parser
+      - SetupEngine transaction flow
+  - id: PL-04
+    goal: integrate normalized lifecycle requests/results into SetupEngine, receipts, removal hook, and current journal projection; contain legacy terms
+    prerequisites: [PL-02, PL-03]
+    may_touch:
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp
+      - src/application/installer/removal_lifecycle.cpp
+      - specs/schemas/install-receipt.schema.json
+      - tests/unit/setup_tests.cpp
+      - tests/mocks/mock_service_cli.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - transaction phase/state-machine architecture
+      - provider repositories or provider-specific remediation
+      - Manager behavior
+      - service control or installation layout
+
+delegation_stop_conditions:
+  - a new neutral operation, disposition, or observation appears necessary
+  - a provider-specific reason must influence Installer behavior
+  - v3 cannot express a provider lifecycle result without provider-specific fields
+  - a new public port or second lifecycle owner appears necessary
+  - transaction commit, rollback, or recovery semantics must change
+  - receipt top-level state meaning must change
+  - provider repository changes appear necessary to complete an Installer-only slice
+  - legacy compatibility would leak legacy raw fields outside its decoder
+
+completion: >
+  Issue #51 completes when PL-01 through PL-04 are integrated, Installer callers
+  reason only about ready/safe_inactive/failed and generic observations, new
+  manifests/results use v3, legacy v1/v2 are contained compatibility adapters,
+  receipts/journal evidence are generic, and provider-specific qualification or
+  reason meaning no longer selects Installer behavior.
