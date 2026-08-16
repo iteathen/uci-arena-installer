@@ -1,0 +1,741 @@
+meta:
+  spec_id: arena_artifact_acquisition_v1
+  version: 1
+  status: active
+  owner: artifact_acquisition
+  parent_issue: 8
+
+authority_relationship: >
+  Specialized active authority for artifact byte acquisition, disposable verified
+  cache activation, and bounded archive expansion. It depends on issue #7
+  FilesystemIdentity/ExactDocumentReader primitives and does not duplicate their
+  physical identity or exact-byte semantics. It does not own TUF/provenance
+  meaning, release planning, install transactions, component semantic validation,
+  layout, removal, provider lifecycle, or application behavior.
+
+purpose: >
+  Ensure every artifact reaches Installer staging through one exact bounded byte
+  path. Remote and local sources converge to a digest-addressed verified cache
+  object; archive expansion consumes the already-admitted cache capability rather
+  than reopening its pathname. Cache data is disposable and never becomes
+  installation authority. Archive extraction accepts only the format actually
+  produced by the suite release system and writes only ordinary files/directories
+  into one private caller-supplied staging root.
+
+references:
+  curl_maxfilesize: https://curl.se/libcurl/c/CURLOPT_MAXFILESIZE_LARGE.html
+  curl_low_speed_limit: https://curl.se/libcurl/c/CURLOPT_LOW_SPEED_LIMIT.html
+  curl_low_speed_time: https://curl.se/libcurl/c/CURLOPT_LOW_SPEED_TIME.html
+  curl_progress_callback: https://curl.se/libcurl/c/CURLOPT_XFERINFOFUNCTION.html
+  curl_max_redirects: https://curl.se/libcurl/c/CURLOPT_MAXREDIRS.html
+  libarchive_read_api: https://github.com/libarchive/libarchive/wiki/Examples
+  libarchive_status_codes: https://github.com/libarchive/libarchive/blob/master/libarchive/archive.h
+
+hierarchy:
+  lego:
+    bricks:
+      - name: ArtifactAcquirer
+        owns:
+          - exact ordered source interpretation for one already-trusted artifact identity
+          - HTTPS transfer policy and bounded cancellation/deadline behavior
+          - catalog-relative local-source traversal through FilesystemIdentity
+          - one digest-addressed disposable cache object
+          - per-digest acquisition exclusion and private cache candidates
+          - exact candidate size/SHA-256 verification before cache activation
+          - exact reuse of a valid cache target
+          - safe disposal of an exactly identified invalid cache target
+          - move-only return of the admitted final cache file capability
+        replacement_boundary: acquisition transport/cache implementation
+        failure_boundary: source, transfer, cache, digest, size, cancellation, or activation uncertainty
+        does_not_own:
+          - TUF/provenance/catalog trust semantics
+          - component dependency/version selection
+          - archive interpretation
+          - installation staging/commit/rollback
+          - provider-specific acquisition behavior
+      - name: ArchiveExpander
+        owns:
+          - reading one admitted artifact capability through libarchive callbacks
+          - exact supported archive format/filter policy
+          - archive entry/path/type/metadata admission
+          - expansion byte/entry/path/depth/ratio budgets
+          - ordinary file/directory creation through a target-platform adapter
+          - cleanup of the private extraction root on expansion failure
+          - exact terminal EOF and input-object stability checks
+        replacement_boundary: archive parser/extraction-target implementation
+        failure_boundary: format, metadata, path, expansion, output, cancellation, or durability failure
+        does_not_own:
+          - source/cache acquisition
+          - component-manifest semantic validation
+          - transaction activation/rollback
+          - knowledge/provider semantics
+          - generic filesystem mutation outside its private extraction root
+    topology_rule: >
+      ArtifactAcquirer and ArchiveExpander are separate LEGOs because source/cache
+      transport and archive interpretation have different inputs, platform
+      adapters, replacement conditions, failure consequences, and non-archive
+      consumers. Platform cache/extraction classes are SOLID adapters inside
+      these bricks, not additional LEGOs. Do not split download, cache locking,
+      tar parsing, or output-file writing into independent public products.
+  solid:
+    artifact_acquirer:
+      single_responsibility: produce one exact admitted cache object for one trusted size/digest identity
+      open_closed: new byte transports may be added behind explicit source kinds without changing cache/consumer contracts
+      liskov: every successful source produces the identical expected byte object
+      interface_segregation: callers provide source list/identity/policy and receive only exact final artifact evidence/capability
+      dependency_inversion: physical source/cache files depend on FilesystemIdentity and ArtifactCachePlatform
+    artifact_cache_platform:
+      single_responsibility: private cache directories, digest lease, candidate writer, exact invalid-target disposal, and same-directory candidate activation
+      open_closed: Windows/Linux native mutation differences remain adapter-private
+      liskov: every adapter preserves a valid target and reports activation uncertainty truthfully
+      interface_segregation: common acquisition code never sees native handles, ACLs, fds, file ids, or lock primitives
+      dependency_inversion: native adapter consumes the #7 FilesystemIdentity port for exact re-observation
+    archive_expander:
+      single_responsibility: validate/read supported archive semantics and stream admitted entries to an extraction target
+      open_closed: a new archive format requires explicit versioned contract review, not `support_format_all`
+      liskov: accepted archives yield identical ordinary-file/directory semantics on a target platform
+      interface_segregation: libarchive never receives an archive pathname and never owns output path mutation
+      dependency_inversion: reads AdmittedRegularFile and writes through ArchiveExtractionPlatform
+    archive_extraction_platform:
+      single_responsibility: target-platform relative-path validity/collision identity plus no-follow private root/file/directory creation and durability
+      open_closed: Windows/Linux path/native differences remain behind one port
+      liskov: common parser sees one collision-safe portable path model and exact create/write/finalize behavior
+      interface_segregation: no generic filesystem delete/copy/install API is exposed
+      dependency_inversion: common archive semantics do not depend on Win32/POSIX calls
+  cupid:
+    - composable exact acquisition output feeds archive expansion or later transaction file-set preparation
+    - unix-like source parsing, transfer, candidate verification, archive header validation, path admission, data streaming, and cleanup helpers
+    - predictable one-deadline, one-digest, one-cache-target, one-private-root behavior
+    - idiomatic C++20 RAII, std::stop_token, std::chrono, libcurl/libarchive callbacks, and #7 capabilities
+    - domain-based artifact source/cache/archive/extraction vocabulary
+  kiss: >
+    Use the least complex complete implementation inside the fixed ports. V1
+    deliberately does not keep resumable partial downloads: each source attempt
+    uses one random private candidate under a digest lease and removes that exact
+    candidate after failure. KISS may not justify a shared `.partial` pathname,
+    unbounded transfer timeout, `support_format_all`, `archive_read_extract`,
+    pathname reopen after validation, broad recursive deletion, a second hash/
+    identity authority, or caller-level source-fallback loops.
+
+fixed_bounds:
+  sources_per_artifact: 16
+  source_utf8_bytes: 4096
+  diagnostic_code_bytes: 64
+  diagnostic_message_utf8_bytes: 1024
+  cache_path_utf8_bytes: 131072
+  cache_leaf_utf8_bytes: 4096
+  cache_lock_timeout_minimum: 1ms
+  cache_lock_timeout_default: 30s
+  cache_lock_timeout_maximum: 120s
+  connect_timeout_default: 15s
+  connect_timeout_maximum: 120s
+  overall_timeout_default: 168h
+  overall_timeout_maximum: 168h
+  low_speed_bytes_per_second: 1024
+  low_speed_window: 120s
+  https_redirects: 5
+  transfer_chunk_bytes: 65536
+  archive_entries: 1048576
+  archive_path_metadata_utf8_bytes: 67108864
+  archive_depth: 1024
+  archive_expansion_ratio: 16384
+  archive_io_chunk_bytes: 65536
+  archive_entry_path_utf8_bytes: 131072
+  archive_leaf_utf8_bytes: 4096
+
+artifact_source_contract:
+  public_semantics:
+    - each source is one UTF-8 string in caller-provided priority order
+    - `https://` prefix means HTTPS source
+    - every other source must be a catalog-relative portable path
+  https:
+    - absolute HTTPS URI only
+    - userinfo is rejected
+    - scheme comparison is ASCII case-insensitive but normalized semantic kind is https
+    - fragment is rejected because it is never sent as artifact identity
+    - query is permitted because immutable/signed transport URLs may require it, but diagnostics never echo it
+    - redirects may use HTTPS only and are capped at five
+  catalog_relative:
+    - forward slash separators only
+    - no leading slash, drive/root name, backslash, empty component, dot/dot-dot, repeated separator, NUL/CR/LF, or control character
+    - each leaf within the neutral leaf bound and whole value within source/path bounds
+    - resolve by exact-admitting the catalog directory then walking one directory leaf at a time through AdmittedDirectory; final file opens through the admitted parent capability
+    - absolute local paths and `file:` URIs are rejected from catalog source data
+  fallback:
+    - ArtifactAcquirer owns ordered source fallback
+    - offline mode skips HTTPS sources and permits exact catalog-relative sources
+    - source-local failures (unavailable, protocol, transfer, size, digest) may advance to the next source while the one overall deadline remains
+    - cache/platform/storage failures do not advance to another source because transport cannot repair cache authority
+    - final all-sources failure reports bounded per-source categories only, never URLs or file contents
+
+public_artifact_acquirer:
+  header: include/arena/application/installer/artifact_acquirer.hpp
+  namespace: arena::application::installer
+  cxx_shape: |
+    struct ArtifactAcquisitionPolicy {
+        std::chrono::milliseconds cache_lock_timeout{std::chrono::seconds{30}};
+        std::chrono::milliseconds connect_timeout{std::chrono::seconds{15}};
+        std::chrono::milliseconds overall_timeout{std::chrono::hours{168}};
+    };
+
+    struct ArtifactAcquisitionRequest {
+        std::vector<std::string> sources;
+        std::string expected_sha256;
+        std::uint64_t expected_size_bytes{};
+        std::filesystem::path catalog_directory;
+        std::filesystem::path cache_root;
+        bool offline{false};
+        std::stop_token stop_token;
+        ArtifactAcquisitionPolicy policy;
+    };
+
+    struct AcquiredArtifact {
+        std::filesystem::path cache_path;
+        std::uint64_t size_bytes{};
+        std::string sha256;
+        std::unique_ptr<arena::ports::AdmittedRegularFile> file;
+
+        AcquiredArtifact(AcquiredArtifact&&) noexcept = default;
+        AcquiredArtifact& operator=(AcquiredArtifact&&) noexcept = default;
+        AcquiredArtifact(const AcquiredArtifact&) = delete;
+        AcquiredArtifact& operator=(const AcquiredArtifact&) = delete;
+    };
+
+    class ArtifactAcquirer final {
+      public:
+        ArtifactAcquirer(
+            arena::ports::FilesystemIdentity& filesystem_identity,
+            arena::ports::ArtifactCachePlatform& cache_platform);
+
+        [[nodiscard]] AcquiredArtifact acquire(
+            const ArtifactAcquisitionRequest& request) const;
+    };
+  rules:
+    - ArtifactAcquirer is stateless except non-owning references to its two fixed dependencies
+    - successful result retains an admitted regular-file capability for the exact final cache target
+    - cache_path is locator/evidence only; consumers needing bytes use the capability or later perform their own new boundary admission
+    - expected_size_bytes must be positive; zero-size catalog artifacts are invalid for acquisition v1
+    - one steady-clock overall deadline is captured once before cache lease/source attempts and never reset between sources
+
+artifact_cache_port:
+  header: include/arena/ports/artifact_cache.hpp
+  namespace: arena::ports
+  cxx_shape: |
+    enum class ArtifactCacheActivationOutcome {
+        activated,
+        target_occupied,
+        activated_durability_unproven,
+        indeterminate,
+    };
+
+    struct ArtifactCacheDiagnostic {
+        std::string code;
+        std::string message;
+    };
+
+    struct ArtifactCacheActivationResult {
+        ArtifactCacheActivationOutcome outcome{};
+        std::optional<ArtifactCacheDiagnostic> diagnostic;
+    };
+
+    class ArtifactCacheCandidate {
+      public:
+        virtual ~ArtifactCacheCandidate() = default;
+        [[nodiscard]] virtual const std::filesystem::path& path() const noexcept = 0;
+        virtual void write(std::span<const std::byte> bytes) = 0;
+        virtual void finish() = 0;
+        [[nodiscard]] virtual std::optional<ArtifactCacheDiagnostic> cleanup() noexcept = 0;
+    };
+
+    class ArtifactCacheLease {
+      public:
+        virtual ~ArtifactCacheLease() = default;
+        [[nodiscard]] virtual const std::filesystem::path& target_path() const noexcept = 0;
+        [[nodiscard]] virtual std::unique_ptr<ArtifactCacheCandidate> create_candidate(
+            std::string_view random_id,
+            std::uint64_t expected_size_bytes) = 0;
+        virtual void discard_exact_target(
+            const FilesystemIdentityToken& expected_object_identity,
+            std::string_view random_quarantine_id) = 0;
+        [[nodiscard]] virtual ArtifactCacheActivationResult activate_candidate(
+            ArtifactCacheCandidate& candidate,
+            const FilesystemIdentityToken& expected_candidate_identity) = 0;
+    };
+
+    class ArtifactCachePlatform {
+      public:
+        virtual ~ArtifactCachePlatform() = default;
+        [[nodiscard]] std::unique_ptr<ArtifactCacheLease> acquire_digest_lease(
+            const std::filesystem::path& cache_root,
+            std::string_view expected_sha256,
+            std::chrono::milliseconds timeout);
+      protected:
+        [[nodiscard]] virtual std::unique_ptr<ArtifactCacheLease>
+        acquire_digest_lease_validated(
+            const std::filesystem::path& cache_root,
+            std::string_view expected_sha256,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+  factory_header: include/arena/platform/artifact_cache.hpp
+  factory_shape: |
+    namespace arena::platform {
+    [[nodiscard]] std::unique_ptr<arena::ports::ArtifactCachePlatform>
+    make_artifact_cache_platform(
+        arena::ports::FilesystemIdentity& filesystem_identity);
+    }
+  common_validation:
+    - cache root absolute/normalized/non-root, bounded, no control characters
+    - digest exactly 64 lowercase hex
+    - timeout within cache lock bounds and one steady-clock deadline
+    - adapter errors are bounded; native error codes may be diagnostic only
+  fixed_layout:
+    objects: <cache_root>/artifacts/objects/sha256/<first-two-hex>/<sha256>
+    locks: <cache_root>/artifacts/locks/sha256/<first-two-hex>/<sha256>.lock
+    candidate: <object-parent>/.<sha256>.candidate-<random-32-lowercase-hex>
+    quarantine: <object-parent>/.<sha256>.corrupt-<random-32-lowercase-hex>
+  cache_root_policy:
+    - create exact missing `artifacts`, `objects`, `locks`, `sha256`, and two-hex directories with scope-private/Installer-managed permissions
+    - reject symlink/reparse/special substitutions at every existing component
+    - Linux rejects group/other writable artifact-cache directories; Windows rejects broad untrusted write/delete-child authority under the same broad-principal safety model used by authoritative-state mutation
+    - cache mutation remains beneath this exact private subtree only
+  digest_lease:
+    - persistent ordinary private lock file at the fixed lock path
+    - exclusive bounded native OS lock held through target inspection, candidate transfer, verification, activation classification, and final target admission
+    - process/handle close releases the OS lock
+    - lock file is never deleted as per-acquisition cleanup
+  candidate:
+    - cryptographically random 128-bit id supplied by common code
+    - create-new ordinary private same-directory file; never truncate/reuse an existing path
+    - writer enforces no write beyond expected_size_bytes
+    - finish flushes file and closes/seals writable state sufficiently for exact re-admission
+    - explicit cleanup removes only the exact candidate created by that object and reports bounded failure
+  corrupt_target_disposal:
+    - common code first exact-admits and proves the target object is not the expected size/digest
+    - discard_exact_target re-admits/rechecks the same opaque object identity under the digest lease
+    - atomically rename exact invalid target to the random quarantine sibling, then exact-delete only that quarantined cache object
+    - identity/binding mismatch or cleanup uncertainty fails acquisition; never delete a newly valid/foreign target
+    - valid cache targets are never discarded
+  activation:
+    - candidate has been exact-admitted/hashed and expected_candidate_identity comes from that exact capability
+    - adapter revalidates candidate object/path under the lease before activation
+    - target must be absent immediately before same-directory atomic activation
+    - after native activation attempt, inspect exact target state before selecting outcome
+    - activated means target is the exact candidate object and required file/parent durability operations succeeded
+    - target_occupied means adapter proves candidate was not activated because another target occupies the path
+    - activated_durability_unproven means exact candidate is target but required durability proof failed/unsupported
+    - indeterminate means exact target classification cannot be proven
+    - no outcome is inferred from native return code alone
+  platform_rules:
+    windows:
+      - wide Win32 APIs and extended paths, reparse-safe opens
+      - private candidate CREATE_NEW; complete-write loops; FlushFileBuffers
+      - digest lock uses an exact private ordinary file plus LockFileEx
+      - activation uses same-directory no-replace rename semantics; exact post-open target classification and strongest supported write-through/flush evidence
+      - corrupt-target quarantine uses exact reparse-safe identity check before rename/delete
+    linux:
+      - openat/O_NOFOLLOW relative to exact private cache directories
+      - candidate O_CREAT|O_EXCL mode 0600, complete writes, fsync
+      - digest lock uses private ordinary file + flock/fcntl equivalent
+      - activation uses renameat2 RENAME_NOREPLACE; if unavailable for this filesystem, fail closed rather than emulate check-then-rename
+      - fsync parent directory after activation/quarantine rename
+
+acquirer_common_flow:
+  - validate request and source list completely
+  - initialize libsodium/crypto hashing through repository convention
+  - capture one overall deadline and fail immediately if stop requested
+  - acquire per-digest cache lease
+  - inspect target through FilesystemIdentity while lease held
+  - if exact target size/digest matches expected, return that admitted capability immediately
+  - if target exists but differs, discard exactly that invalid cache object through the platform lease
+  - for each source in order while deadline remains:
+      - generate random candidate id
+      - create one private candidate
+      - stream source bytes into candidate, computing transfer size/digest and enforcing hard expected-size cap
+      - finish candidate
+      - exact-admit candidate through FilesystemIdentity
+      - descriptor-read/hash exact candidate from that capability and require size/digest and stable object/path binding
+      - call activate_candidate with exact candidate object identity
+      - activated: exact-admit target and require same expected size/digest, then return target capability
+      - target_occupied: exact-admit target; accept only if target exactly matches expected size/digest, otherwise fail cache_collision rather than mutate it again
+      - activated_durability_unproven: fail with truthful cache durability evidence; a later acquisition may reuse the exact target if it is present/valid
+      - indeterminate: fail and preserve evidence; do not try another source
+      - source-local failure: explicitly cleanup exact candidate, retain bounded source category, continue to next source
+  - if no source succeeds, fail all_sources_failed/offline_unavailable with bounded categories
+  - no shared/resumable partial file survives a normal source failure
+
+https_transfer_policy:
+  curl:
+    - libcurl easy API only; no shell/external downloader
+    - CURLOPT_PROTOCOLS_STR = https
+    - CURLOPT_REDIR_PROTOCOLS_STR = https
+    - CURLOPT_FOLLOWLOCATION = 1
+    - CURLOPT_MAXREDIRS = 5
+    - CURLOPT_FAILONERROR = 1
+    - CURLOPT_SSL_VERIFYPEER = 1
+    - CURLOPT_SSL_VERIFYHOST = 2
+    - connect timeout = request policy, max fixed bound
+    - low speed limit = 1024 bytes/sec
+    - low speed time = 120 seconds
+    - overall timeout = remaining one captured overall deadline, never zero/unbounded
+    - CURLOPT_MAXFILESIZE_LARGE = expected_size_bytes as defense in depth where supported
+    - CURLOPT_NOPROGRESS = 0 and XFERINFO callback checks stop token and absolute deadline
+  hard_byte_rule: >
+    The write callback is authoritative for expanded HTTP response bytes written
+    to the candidate. Before every write, checked arithmetic requires total plus
+    chunk <= expected_size_bytes; otherwise abort transfer. Do not rely solely on
+    Content-Length or libcurl's max-file-size behavior.
+  digest_rule:
+    - SHA-256 is over exact bytes delivered to candidate after libcurl's normal HTTP transfer decoding
+    - candidate is independently exact-read/hashed after finish before cache activation
+  errors:
+    - HTTP/network/TLS/redirect/timeout/low-speed/cancellation errors remain source-local unless deadline/cancellation itself is terminal
+    - diagnostics identify source index/category only and never echo query strings, credentials, response bodies, or unbounded libcurl messages
+
+catalog_relative_transfer:
+  - exact-admit catalog_directory once per source attempt or reuse a stable admitted root for consecutive local attempts
+  - walk each path leaf through admitted directory capabilities; final regular file is no-follow and exact
+  - initial size must equal expected_size_bytes before copy
+  - stream `read_at` to candidate in bounded chunks while hashing and checking stop/deadline
+  - after copy reobserve source object and path binding; any mutation/binding change fails source
+  - streamed source hash must equal expected SHA-256
+  - candidate is still independently exact-verified before activation
+
+archive_public_surface:
+  header: include/arena/application/installer/archive_expander.hpp
+  namespace: arena::application::installer
+  cxx_shape: |
+    enum class ArchiveTargetPlatform {
+        windows_x86_64,
+        linux_x86_64,
+    };
+
+    struct ArchiveExpansionRequest {
+        std::filesystem::path destination_root;
+        std::uint64_t expected_expanded_file_bytes{};
+        ArchiveTargetPlatform target_platform{};
+        std::chrono::milliseconds timeout{std::chrono::hours{24}};
+        std::stop_token stop_token;
+    };
+
+    struct ExpandedArchive {
+        std::filesystem::path root;
+        std::uint64_t file_count{};
+        std::uint64_t directory_count{};
+        std::uint64_t total_file_bytes{};
+    };
+
+    class ArchiveExpander final {
+      public:
+        explicit ArchiveExpander(
+            arena::ports::ArchiveExtractionPlatform& extraction_platform);
+
+        [[nodiscard]] ExpandedArchive expand(
+            arena::ports::AdmittedRegularFile& archive_file,
+            const ArchiveExpansionRequest& request) const;
+    };
+  rules:
+    - archive bytes always come from one already-admitted file capability; archive pathname is never passed to libarchive
+    - request destination is caller-owned transaction/private staging choice but must be absent before begin
+    - expected_expanded_file_bytes is positive and exact for suite component archives; TX-07 derives it from the trusted catalog component installed_bytes
+    - archive expansion timeout min 1s/max 168h; one absolute deadline captured once
+
+archive_extraction_port:
+  header: include/arena/ports/archive_extraction.hpp
+  namespace: arena::ports
+  cxx_shape: |
+    using ArchivePathCollisionKey = std::array<std::byte, 32>;
+
+    struct ArchiveTargetPath {
+        std::string portable_relative_path;
+        ArchivePathCollisionKey collision_key;
+        std::size_t depth{};
+    };
+
+    class ArchiveOutputFile {
+      public:
+        virtual ~ArchiveOutputFile() = default;
+        virtual void write(std::span<const std::byte> bytes) = 0;
+        virtual void finish() = 0;
+    };
+
+    class ArchiveExtractionSession {
+      public:
+        virtual ~ArchiveExtractionSession() = default;
+        [[nodiscard]] virtual const std::filesystem::path& root() const noexcept = 0;
+        [[nodiscard]] virtual ArchiveTargetPath validate_path(
+            std::string_view portable_relative_path) const = 0;
+        virtual void ensure_directory(
+            const ArchiveTargetPath& path) = 0;
+        [[nodiscard]] virtual std::unique_ptr<ArchiveOutputFile> create_file(
+            const ArchiveTargetPath& path,
+            std::uint64_t expected_size_bytes,
+            bool executable) = 0;
+        virtual void finish() = 0;
+        [[nodiscard]] virtual std::optional<ArtifactCacheDiagnostic> cleanup() noexcept = 0;
+    };
+
+    class ArchiveExtractionPlatform {
+      public:
+        virtual ~ArchiveExtractionPlatform() = default;
+        [[nodiscard]] std::unique_ptr<ArchiveExtractionSession> begin(
+            const std::filesystem::path& destination_root,
+            ArchiveTargetPlatform target_platform,
+            std::chrono::milliseconds timeout);
+      protected:
+        [[nodiscard]] virtual std::unique_ptr<ArchiveExtractionSession>
+        begin_validated(
+            const std::filesystem::path& destination_root,
+            ArchiveTargetPlatform target_platform,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+  factory_header: include/arena/platform/archive_extraction.hpp
+  factory_shape: |
+    namespace arena::platform {
+    [[nodiscard]] std::unique_ptr<arena::ports::ArchiveExtractionPlatform>
+    make_archive_extraction_platform(
+        arena::ports::FilesystemIdentity& filesystem_identity);
+    }
+  note: >
+    ArchiveExpansionRequest/ArchiveTargetPlatform declarations may be moved to a
+    small neutral header if required to avoid an application-header dependency;
+    Spark may not otherwise change the public semantics or create an additional
+    port. Sol should choose the exact include placement before ARC-01 begins if
+    the C++ include graph requires it.
+
+archive_input_contract:
+  libarchive:
+    - use archive_read_new
+    - enable gzip filter only
+    - enable tar format only
+    - do not call support_filter_all/support_format_all
+    - open with custom callbacks over AdmittedRegularFile::read_at; never archive_read_open_filename
+    - callback holds sequential checked uint64 input offset and a bounded fixed buffer
+    - stop/deadline are checked before every capability read and archive data loop
+  before_after:
+    - capture archive initial observation and require regular_file
+    - initial size positive and equals the exact admitted file's stable size
+    - require expected_expanded_file_bytes <= archive_size * 16384 using checked arithmetic; overflow/excess ratio fails before output creation
+    - after archive reaches exact ARCHIVE_EOF and closes, reobserve same open object and require object/metadata identity, kind, and size unchanged
+    - require archive path binding same_object at completion
+  terminal_status:
+    - `archive_read_next_header` success loop continues only for ARCHIVE_OK
+    - terminal success requires exactly ARCHIVE_EOF
+    - ARCHIVE_WARN, ARCHIVE_RETRY, ARCHIVE_FAILED, ARCHIVE_FATAL, or other result is failure
+    - close/free errors are bounded secondary evidence and never convert a failed parse to success
+
+archive_path_contract:
+  portable_common:
+    - UTF-8 only
+    - forward slash separators only; backslash rejected on every target
+    - nonempty relative path; no root/drive, empty component, dot/dot-dot, repeated slash, NUL/CR/LF/control
+    - whole portable path <= 131072 UTF-8 bytes, each leaf <=4096 bytes, depth <=1024
+    - root `.` directory header may be ignored only when it is exactly an ordinary directory with no forbidden metadata
+    - total UTF-8 pathname bytes across archive headers <=67108864
+  target_adapter:
+    - validate_path additionally enforces target-platform filename/path semantics and returns an opaque collision key
+    - Windows collision key implements exact Windows case-insensitive path equality for valid UTF-8 and rejects reserved device basenames, trailing dot/space, invalid characters, ADS/colon, device/extended namespace forms, and case aliases
+    - Linux collision key hashes exact valid UTF-8 portable path and permits target-valid case-distinct names
+    - common expander maintains one set of collision keys for all explicit/implicit output nodes; incompatible duplicate file/dir/type collisions fail
+  implicit_directories:
+    - a file may require parent directories not explicitly present in tar
+    - common expander validates/ensures each parent path before file creation
+    - an explicit later directory header matching an already-created implicit directory is allowed once, but duplicate explicit archive headers are rejected
+    - output directory_count counts unique created/required directories including destination root; archive entry limit counts headers only
+
+archive_entry_contract:
+  accepted:
+    - ordinary regular file
+    - ordinary directory
+  rejected:
+    - symbolic link
+    - hard link
+    - character/block device
+    - FIFO
+    - socket
+    - sparse file
+    - encrypted entry/archive
+    - whiteout or other special type
+  metadata:
+    - owner uid/gid, uname/gname, timestamps, ACLs, xattrs, file flags, and platform-specific metadata are not restored as authority
+    - setuid, setgid, and sticky permission bits are rejected
+    - ACL/xattr entries are rejected in v1 rather than silently reapplying them
+    - regular file executable intent is true only when any executable mode bit is set; Linux target may preserve only this boolean, Windows ignores executable bits
+    - directory output uses ordinary private/managed directory permissions chosen by target adapter; archive owner/mode does not broaden them
+  entry_size:
+    - regular entry size must be known, nonnegative, representable in uint64, and <= remaining expected_expanded_file_bytes
+    - directory entry size must be zero
+    - actual streamed bytes must equal declared entry size exactly
+    - total regular-file bytes may never exceed expected_expanded_file_bytes and must equal it exactly at successful EOF
+  count:
+    - archive headers <=1048576
+    - file/directory counters checked uint64
+
+archive_data_stream:
+  - use archive_read_data in bounded fixed buffer or equivalent data-block API with exact byte accounting
+  - no whole-entry allocation
+  - output file is created new through ArchiveExtractionSession only after entry/path/type/size metadata passes
+  - write exactly declared bytes; output writer itself enforces no write beyond expected entry size
+  - finish output file flushes required file durability and closes writable state
+  - directory creation/file opening never uses archive_read_extract/archive_write_disk
+  - on any entry/parser/output/cancellation/deadline failure, call explicit session cleanup and return the primary failure with bounded cleanup evidence
+  - cleanup removes only the exact private extraction root/session objects created by this expansion; no arbitrary caller path recursion
+  - session.finish performs required output-root/directory durability and exact final checks before success
+
+archive_platform_rules:
+  windows:
+    - destination root created new under an exact admitted authoritative parent; any occupied destination fails
+    - each path component created/opened with wide no-follow/reparse-safe APIs
+    - regular files create-new; no ADS/device names; no link following; complete writes/FlushFileBuffers
+    - path collision semantics use Windows ordinal case-insensitive comparison/canonical token, not locale-dependent lowercase
+    - directory/file ACL never grants broader authority than destination parent/product staging policy
+  linux:
+    - destination root create-new beneath exact admitted parent, private mode
+    - openat/mkdirat relative to retained exact directory fds with O_NOFOLLOW and create-new regular files
+    - reject nested mount/bind substitution during session operations
+    - regular file mode 0600/0700-style executable preservation as policy permits; directories private/managed, no archive special bits
+    - fsync completed files and required directories/root
+
+catalog_and_component_relationship:
+  catalog_schema:
+    - arena_install_catalog_v1 artifact size_bytes becomes minimum 1 for new/current validation
+    - archive type v1 means gzip-compressed tar only; no format field is added because all suite archive producers already publish `.tar.gz` and v1 intentionally owns one archive format
+    - file_set remains a manifest artifact; each acquired file has positive exact size/SHA-256 from the verified file-set manifest
+  archive_expanded_size:
+    - TX-07 supplies trusted component `installed_bytes` as expected_expanded_file_bytes for archive artifacts
+    - successful archive regular-file byte sum must equal that exact value
+    - later `validate_component_payload` remains semantic authority for manifest inventory/entrypoints/capabilities and must independently validate the extracted component
+  file_set:
+    - file-set manifest itself is acquired through ArtifactAcquirer using the catalog artifact source/digest/size
+    - file-set per-file ordered source fallback is passed to ArtifactAcquirer; caller no longer loops source URLs itself
+    - transaction/file-set preparation later re-admits cache paths at its own boundary; no caller pathname copy is accepted as already verified
+
+implementation_slices:
+  - id: ACQ-01
+    goal: implement common ArtifactAcquirer request/source/cache flow, HTTPS/local streaming, neutral cache port/template validation, and fake cache/source tests
+    prerequisites: [FI-01]
+    may_touch:
+      - include/arena/application/installer/artifact_acquirer.hpp
+      - include/arena/ports/artifact_cache.hpp
+      - include/arena/platform/artifact_cache.hpp
+      - src/application/installer/artifact_acquirer.cpp
+      - src/adapters/artifact_cache.cpp
+      - tests/unit/artifact_acquirer_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - native cache adapters
+      - archive expander
+      - SetupEngine callers
+  - id: ACQ-02
+    goal: implement Windows ArtifactCachePlatform/digest lease/candidate activation and native tests
+    prerequisites: [ACQ-01, FI-02]
+    may_touch:
+      - src/platform/windows/artifact_cache.cpp
+      - tests/unit/artifact_acquirer_tests.cpp
+      - private Windows cache support files if strictly necessary
+      - CMakeLists.txt
+  - id: ACQ-03
+    goal: implement Linux ArtifactCachePlatform/digest lease/candidate activation and native tests
+    prerequisites: [ACQ-01, FI-03]
+    may_touch:
+      - src/platform/linux/artifact_cache.cpp
+      - tests/unit/artifact_acquirer_tests.cpp
+      - private Linux cache support files if strictly necessary
+      - CMakeLists.txt
+  - id: ARC-01
+    goal: implement common ArchiveExpander/libarchive callback semantics and neutral extraction port with fake target tests
+    prerequisites: [FI-01]
+    may_touch:
+      - include/arena/application/installer/archive_expander.hpp
+      - include/arena/ports/archive_extraction.hpp
+      - include/arena/platform/archive_extraction.hpp
+      - src/application/installer/archive_expander.cpp
+      - src/adapters/archive_extraction.cpp
+      - tests/unit/archive_expander_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - native extraction targets
+      - acquisition callers
+  - id: ARC-02
+    goal: implement Windows ArchiveExtractionPlatform and native hostile-path tests
+    prerequisites: [ARC-01, FI-02]
+    may_touch:
+      - src/platform/windows/archive_extraction.cpp
+      - tests/unit/archive_expander_tests.cpp
+      - private Windows extraction support files if strictly necessary
+      - CMakeLists.txt
+  - id: ARC-03
+    goal: implement Linux ArchiveExtractionPlatform and native hostile-path tests
+    prerequisites: [ARC-01, FI-03]
+    may_touch:
+      - src/platform/linux/archive_extraction.cpp
+      - tests/unit/archive_expander_tests.cpp
+      - private Linux extraction support files if strictly necessary
+      - CMakeLists.txt
+  - id: ACQ-TX-07
+    goal: migrate SetupEngine acquisition/staging callers to ArtifactAcquirer/ArchiveExpander and transaction v2 in the joint #8/#9 integration slice
+    prerequisites: [ACQ-02, ACQ-03, ARC-02, ARC-03, TX-06, IL-05, IL-06]
+    ownership: joint child of issues 8 and 9; create only after prerequisite implementation contracts are integrated
+
+validation:
+  acquisition_common:
+    - source grammar, max source count/strings, expected size/digest, policy bounds
+    - offline source filtering and deterministic ordered fallback
+    - one overall deadline across multiple sources
+    - cancellation before/during transfer
+    - HTTPS callback hard byte cap, digest, connect/overall/low-speed/redirect/TLS policy via fake libcurl seam or local test server without external network dependency
+    - local source exact capability copy and mutation/path-rebinding failure
+    - candidate independent exact reread/hash before activation
+    - valid cache hit uses exact target without source work
+    - exact corrupt target disposal and valid target never deleted
+    - source failure candidate cleanup and zero shared `.partial` files
+    - target_occupied exact valid winner acceptance; invalid/foreign collision failure
+    - durability-unproven/indeterminate truth
+  acquisition_native:
+    - per-digest cross-process serialization and release after crash/handle close
+    - private cache directory/lock/candidate/quarantine hostile link/reparse/special substitution
+    - same-directory no-replace activation and post-classification
+    - cleanup only exact transaction-created cache objects
+    - Windows/Linux native evidence
+  archive_common:
+    - tar+gzip valid archive and explicit rejection of other filters/formats
+    - custom capability read callback; source pathname never opened by libarchive
+    - exact ARCHIVE_EOF required; WARN/FAILED/FATAL/truncated/trailing parser errors fail
+    - symlink/hardlink/device/FIFO/socket/sparse/encrypted/ACL/xattr/special-bit rejection
+    - safe path/depth/metadata/entry/ratio/exact-expanded-byte limits
+    - duplicate/case collision/file-directory collision and implicit parent behavior
+    - exact entry declared/actual byte agreement, output streaming, cancellation/deadline
+    - archive capability same-object/metadata/path binding after expansion
+    - failure cleanup preserves primary error
+  archive_native:
+    - hostile destination/ancestor/final path substitution
+    - create-new semantics, no-follow component handling, file flush/directory durability
+    - Windows reserved/case aliases and Linux case-distinct behavior
+    - exact private-root cleanup on injected failures
+    - Windows/Linux native evidence
+  integration:
+    - catalog artifact size zero rejected under current v1 validation
+    - archive expanded bytes equal trusted component installed_bytes
+    - file-set caller delegates ordered source fallback to ArtifactAcquirer
+    - old acquire_artifact/extract_archive/shared partial/caller-source-loop no longer normal authority after joint TX-07
+    - component semantic validator remains unchanged and green
+
+delegation_stop_conditions:
+  - acquisition needs a pathname reopen after an exact capability is available
+  - a source type other than HTTPS/catalog-relative is required by current trusted media
+  - safe v1 implementation would require persistent resume state/shared partial files
+  - valid cache target would have to be overwritten/deleted
+  - cache mutation cannot classify post-activation target truthfully
+  - archive producer requires a non-tar/gzip format under current v1 media
+  - libarchive would need archive_read_extract/archive_write_disk pathname authority
+  - target path collision semantics cannot fit the neutral collision key
+  - an archive special object/metadata must be restored for current package correctness
+  - component semantic validation, transaction, layout, provider, or release-planner ownership must move into #8
+  - another repository must change
+
+completion: >
+  Issue #8 completes only when ACQ-01 through ACQ-03 and ARC-01 through ARC-03
+  plus the joint #8/#9 TX-07 integration are merged; every normal artifact/file-
+  set source reaches staging through ArtifactAcquirer; archive artifacts are read
+  from admitted cache capabilities and expanded only through ArchiveExpander;
+  shared resumable partials, path-based cache trust, broad libarchive format/
+  output authority, and caller-level source fallback are no longer normal paths.
