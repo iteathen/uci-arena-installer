@@ -1,0 +1,481 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/install-transaction-effect-v1.schema.json",
+  "title": "arena_install_transaction_effect_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "transaction_id",
+    "operation_id",
+    "kind",
+    "semantic_role",
+    "progress",
+    "spec",
+    "prepared",
+    "observed",
+    "verification",
+    "compensation",
+    "cleanup"
+  ],
+  "properties": {
+    "schema": {"const": "arena_install_transaction_effect_v1"},
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "operation_id": {"$ref": "#/$defs/identifier"},
+    "kind": {
+      "enum": [
+        "ensure_directory",
+        "publish_state",
+        "activate_managed_tree",
+        "activate_file_set",
+        "relocate_managed_tree",
+        "quarantine_owned_path",
+        "provider_lifecycle",
+        "service_control",
+        "layout_locator"
+      ]
+    },
+    "semantic_role": {"$ref": "#/$defs/identifier"},
+    "progress": {
+      "enum": [
+        "prepared",
+        "activation_started",
+        "activated",
+        "verified",
+        "compensation_started",
+        "compensated",
+        "compensation_failed",
+        "cleanup_started",
+        "cleaned",
+        "cleanup_failed"
+      ]
+    },
+    "spec": {"type": "object"},
+    "prepared": {"oneOf": [{"type": "null"}, {"type": "object"}]},
+    "observed": {"oneOf": [{"type": "null"}, {"type": "object"}]},
+    "verification": {"oneOf": [{"type": "null"}, {"type": "object"}]},
+    "compensation": {"oneOf": [{"type": "null"}, {"type": "object"}]},
+    "cleanup": {"oneOf": [{"type": "null"}, {"type": "object"}]}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "ensure_directory"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/ensure_directory_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ensure_directory_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ensure_directory_observed"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/directory_verification"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/simple_compensation"}]},
+      "cleanup": {"type": "null"}
+    }}},
+    {"if": {"properties": {"kind": {"const": "publish_state"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/publish_state_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/publish_state_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/publication_observed"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_verification"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/state_compensation"}]},
+      "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/private_cleanup"}]}
+    }}},
+    {"if": {"properties": {"kind": {"const": "activate_managed_tree"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/activate_tree_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/activate_tree_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tree_observed"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tree_verification"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/simple_compensation"}]},
+      "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tree_cleanup"}]}
+    }}},
+    {"if": {"properties": {"kind": {"const": "activate_file_set"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/file_set_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_set_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_set_observed"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_set_verification"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_set_compensation"}]},
+      "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_set_cleanup"}]}
+    }}},
+    {"if": {"properties": {"kind": {"const": "relocate_managed_tree"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/relocate_tree_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/relocate_tree_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/relocate_tree_observed"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/relocate_tree_verification"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/simple_compensation"}]},
+      "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/relocate_tree_cleanup"}]}
+    }}},
+    {"if": {"properties": {"kind": {"const": "quarantine_owned_path"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/quarantine_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/quarantine_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/quarantine_observed"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/quarantine_verification"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/simple_compensation"}]},
+      "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/quarantine_cleanup"}]}
+    }}},
+    {"if": {"properties": {"kind": {"const": "provider_lifecycle"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/provider_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/provider_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/provider_result"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/provider_result"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/provider_result"}]},
+      "cleanup": {"type": "null"}
+    }}},
+    {"if": {"properties": {"kind": {"const": "service_control"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/service_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/service_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/service_result"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/service_result"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/service_result"}]},
+      "cleanup": {"type": "null"}
+    }}},
+    {"if": {"properties": {"kind": {"const": "layout_locator"}}}, "then": {"properties": {
+      "spec": {"$ref": "#/$defs/locator_spec"},
+      "prepared": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator_prepared"}]},
+      "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator_result"}]},
+      "verification": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator_observation"}]},
+      "compensation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator_result"}]},
+      "cleanup": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator_cleanup"}]}
+    }}}
+  ],
+  "$defs": {
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 131072, "pattern": "^[^\\u0000\\r\\n]+$"},
+    "relative_path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000\\r\\n]+$"},
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "file_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {"path": {"$ref": "#/$defs/path"}, "size_bytes": {"type": "integer", "minimum": 0}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "tree_snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tree_sha256", "file_count", "directory_count", "total_file_bytes"],
+      "properties": {
+        "tree_sha256": {"$ref": "#/$defs/sha256"},
+        "file_count": {"type": "integer", "minimum": 0},
+        "directory_count": {"type": "integer", "minimum": 1},
+        "total_file_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "state_name": {"enum": ["absent", "candidate", "prior", "foreign", "uninspectable"]},
+    "simple_compensation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state"],
+      "properties": {"state": {"enum": ["restored_prior", "restored_absent", "not_required", "preserved_unexpected_contents", "failed"]}}
+    },
+    "ensure_directory_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "preserve_unexpected_contents_on_rollback"],
+      "properties": {"path": {"$ref": "#/$defs/path"}, "preserve_unexpected_contents_on_rollback": {"type": "boolean"}}
+    },
+    "ensure_directory_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["preexisting"],
+      "properties": {"preexisting": {"type": "boolean"}}
+    },
+    "ensure_directory_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["created"],
+      "properties": {"created": {"type": "boolean"}}
+    },
+    "directory_verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path_binding"],
+      "properties": {"path_binding": {"const": "same_object"}}
+    },
+    "publish_state_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target", "maximum_bytes", "precondition", "timeout_ms"],
+      "properties": {
+        "target": {"$ref": "#/$defs/path"},
+        "maximum_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "precondition": {"enum": ["absent", "exact_sha256"]},
+        "expected_prior_sha256": {"$ref": "#/$defs/sha256"},
+        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000}
+      },
+      "allOf": [
+        {"if": {"properties": {"precondition": {"const": "exact_sha256"}}}, "then": {"required": ["expected_prior_sha256"]}},
+        {"if": {"properties": {"precondition": {"const": "absent"}}}, "then": {"not": {"required": ["expected_prior_sha256"]}}}
+      ]
+    },
+    "publish_state_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate", "prior"],
+      "properties": {"candidate": {"$ref": "#/$defs/file_ref"}, "prior": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_ref"}]}}
+    },
+    "publication_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["outcome"],
+      "properties": {
+        "outcome": {"enum": ["activated", "not_activated", "activated_durability_unproven", "indeterminate"]},
+        "observed_target_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "file_verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["size_bytes", "sha256"],
+      "properties": {"size_bytes": {"type": "integer", "minimum": 0}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "state_compensation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state"],
+      "properties": {"state": {"enum": ["restored_prior", "restored_absent", "failed"]}, "observed_target_sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "private_cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["private_files_removed"],
+      "properties": {"private_files_removed": {"type": "boolean"}}
+    },
+    "activate_tree_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_root", "destination", "destination_policy", "timeout_ms"],
+      "properties": {
+        "input_root": {"$ref": "#/$defs/path"}, "destination": {"$ref": "#/$defs/path"},
+        "destination_policy": {"enum": ["require_absent", "capture_for_compensation"]},
+        "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 604800000}
+      }
+    },
+    "activate_tree_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_snapshot", "stage_path", "stage_snapshot", "prior_snapshot", "backup_path"],
+      "properties": {
+        "input_snapshot": {"$ref": "#/$defs/tree_snapshot"}, "stage_path": {"$ref": "#/$defs/path"},
+        "stage_snapshot": {"$ref": "#/$defs/tree_snapshot"},
+        "prior_snapshot": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tree_snapshot"}]},
+        "backup_path": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/path"}]}
+      }
+    },
+    "tree_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["destination_state", "backup_state"],
+      "properties": {"destination_state": {"$ref": "#/$defs/state_name"}, "backup_state": {"$ref": "#/$defs/state_name"}}
+    },
+    "tree_verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["destination_snapshot"],
+      "properties": {"destination_snapshot": {"$ref": "#/$defs/tree_snapshot"}}
+    },
+    "tree_cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stage_removed", "backup_removed"],
+      "properties": {"stage_removed": {"type": "boolean"}, "backup_removed": {"type": "boolean"}}
+    },
+    "file_set_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entry_count", "timeout_ms"],
+      "properties": {"entry_count": {"type": "integer", "minimum": 1, "maximum": 1048576}, "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 604800000}}
+    },
+    "file_set_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["manifest"],
+      "properties": {"manifest": {"$ref": "#/$defs/file_ref"}}
+    },
+    "file_set_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate_destinations", "prior_backups"],
+      "properties": {"candidate_destinations": {"type": "integer", "minimum": 0}, "prior_backups": {"type": "integer", "minimum": 0}}
+    },
+    "file_set_verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verified_entries"],
+      "properties": {"verified_entries": {"type": "integer", "minimum": 0}}
+    },
+    "file_set_compensation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["restored_entries", "failed_entries"],
+      "properties": {"restored_entries": {"type": "integer", "minimum": 0}, "failed_entries": {"type": "integer", "minimum": 0}}
+    },
+    "file_set_cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["removed_stages", "removed_backups", "failed_entries"],
+      "properties": {"removed_stages": {"type": "integer", "minimum": 0}, "removed_backups": {"type": "integer", "minimum": 0}, "failed_entries": {"type": "integer", "minimum": 0}}
+    },
+    "relocate_tree_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "destination", "ownership", "timeout_ms"],
+      "properties": {
+        "source": {"$ref": "#/$defs/path"}, "destination": {"$ref": "#/$defs/path"},
+        "ownership": {"enum": ["installer_managed", "user_preserved"]},
+        "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 604800000}
+      }
+    },
+    "relocate_tree_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_snapshot", "same_volume", "stage_path", "stage_snapshot"],
+      "properties": {
+        "source_snapshot": {"$ref": "#/$defs/tree_snapshot"}, "same_volume": {"type": "boolean"},
+        "stage_path": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/path"}]},
+        "stage_snapshot": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tree_snapshot"}]}
+      }
+    },
+    "relocate_tree_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_state", "destination_state"],
+      "properties": {"source_state": {"$ref": "#/$defs/state_name"}, "destination_state": {"$ref": "#/$defs/state_name"}}
+    },
+    "relocate_tree_verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["destination_snapshot", "source_preserved"],
+      "properties": {"destination_snapshot": {"$ref": "#/$defs/tree_snapshot"}, "source_preserved": {"type": "boolean"}}
+    },
+    "relocate_tree_cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["old_source_removed", "stage_removed"],
+      "properties": {"old_source_removed": {"type": "boolean"}, "stage_removed": {"type": "boolean"}}
+    },
+    "quarantine_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target", "kind", "timeout_ms"],
+      "properties": {"target": {"$ref": "#/$defs/path"}, "kind": {"enum": ["regular_file", "directory_tree"]}, "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 604800000}}
+    },
+    "quarantine_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["quarantine_path", "file", "tree"],
+      "properties": {
+        "quarantine_path": {"$ref": "#/$defs/path"},
+        "file": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/file_ref"}]},
+        "tree": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tree_snapshot"}]}
+      }
+    },
+    "quarantine_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_state", "quarantine_state"],
+      "properties": {"target_state": {"$ref": "#/$defs/state_name"}, "quarantine_state": {"$ref": "#/$defs/state_name"}}
+    },
+    "quarantine_verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_absent", "quarantine_exact"],
+      "properties": {"target_absent": {"const": true}, "quarantine_exact": {"const": true}}
+    },
+    "quarantine_cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["quarantine_removed"],
+      "properties": {"quarantine_removed": {"type": "boolean"}}
+    },
+    "provider_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["wire_protocol", "legacy_envelope", "require_configuration_match", "allow_safe_inactive"],
+      "properties": {
+        "wire_protocol": {"enum": ["legacy_v1", "legacy_v2", "typed_v3"]},
+        "legacy_envelope": {"enum": ["root", "startup"]},
+        "require_configuration_match": {"type": "boolean"}, "allow_safe_inactive": {"type": "boolean"}
+      }
+    },
+    "provider_request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["component_id", "component_version", "operation", "executable", "working_directory", "arguments", "policy", "timeout_ms"],
+      "properties": {
+        "component_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+        "component_version": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$"},
+        "operation": {"enum": ["install", "uninstall", "pre_replace", "post_replace"]},
+        "executable": {"$ref": "#/$defs/path"}, "working_directory": {"$ref": "#/$defs/path"},
+        "arguments": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 1024, "pattern": "^[^\\u0000\\r\\n]*$"}},
+        "policy": {"$ref": "#/$defs/provider_policy"},
+        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000}
+      }
+    },
+    "provider_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["request", "compensation_request"],
+      "properties": {"request": {"$ref": "#/$defs/provider_request"}, "compensation_request": {"$ref": "#/$defs/provider_request"}}
+    },
+    "provider_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["request_sha256", "compensation_request_sha256"],
+      "properties": {"request_sha256": {"$ref": "#/$defs/sha256"}, "compensation_request_sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "provider_observed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["installation", "activity", "configuration", "replacement"],
+      "properties": {
+        "installation": {"enum": ["installed", "absent", "unknown"]},
+        "activity": {"enum": ["active", "inactive", "unknown"]},
+        "configuration": {"enum": ["matches", "mismatch", "not_applicable", "unknown"]},
+        "replacement": {"enum": ["safe", "unsafe", "not_applicable", "unknown"]}
+      }
+    },
+    "provider_reason": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "message"],
+      "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._:-]+$"}, "message": {"type": "string", "maxLength": 512, "pattern": "^[^\\u0000\\r\\n]*$"}}
+    },
+    "provider_result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["component_id", "component_version", "operation", "disposition", "observed"],
+      "properties": {
+        "component_id": {"type": "string", "minLength": 1, "maxLength": 128}, "component_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "operation": {"enum": ["install", "uninstall", "pre_replace", "post_replace"]},
+        "disposition": {"enum": ["ready", "safe_inactive", "failed"]},
+        "observed": {"$ref": "#/$defs/provider_observed"}, "reason": {"$ref": "#/$defs/provider_reason"}
+      }
+    },
+    "service_request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["platform_name", "action", "timeout_ms"],
+      "properties": {
+        "platform_name": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000\\r\\n]+$"},
+        "action": {"enum": ["start", "stop", "restart", "status"]},
+        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000}
+      }
+    },
+    "service_spec": {"$ref": "#/$defs/service_request"},
+    "service_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prior_state", "compensation_request"],
+      "properties": {"prior_state": {"enum": ["active", "inactive"]}, "compensation_request": {"$ref": "#/$defs/service_request"}}
+    },
+    "service_diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {"code": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_.:-]+$"}, "message": {"type": "string", "maxLength": 512, "pattern": "^[^\\u0000\\r\\n]*$"}}
+    },
+    "service_result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action", "outcome", "state"],
+      "properties": {
+        "action": {"enum": ["start", "stop", "restart", "status"]}, "outcome": {"enum": ["completed", "failed"]},
+        "state": {"enum": ["unknown", "inactive", "activating", "active", "deactivating", "failed"]},
+        "diagnostic": {"$ref": "#/$defs/service_diagnostic"}
+      }
+    },
+    "locator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "scope", "installation_id", "layout_generation", "integration_root", "policy_path", "policy_sha256", "descriptor_path", "descriptor_sha256", "setup_launcher_path"],
+      "properties": {
+        "schema": {"const": "arena_install_layout_locator_v1"}, "scope": {"enum": ["per-user", "per-machine"]},
+        "installation_id": {"$ref": "#/$defs/uuid"}, "layout_generation": {"type": "integer", "minimum": 1},
+        "integration_root": {"$ref": "#/$defs/path"}, "policy_path": {"$ref": "#/$defs/path"}, "policy_sha256": {"$ref": "#/$defs/sha256"},
+        "descriptor_path": {"$ref": "#/$defs/path"}, "descriptor_sha256": {"$ref": "#/$defs/sha256"}, "setup_launcher_path": {"$ref": "#/$defs/path"}
+      }
+    },
+    "locator_spec": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "expected_prior", "replacement", "timeout_ms"],
+      "properties": {
+        "scope": {"enum": ["per-user", "per-machine"]}, "expected_prior": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator"}]},
+        "replacement": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator"}]},
+        "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000}
+      }
+    },
+    "locator_prepared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["observed_prior"],
+      "properties": {"observed_prior": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator"}]}}
+    },
+    "locator_observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["observed"],
+      "properties": {"observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator"}]}}
+    },
+    "locator_result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["outcome", "observed"],
+      "properties": {
+        "outcome": {"enum": ["applied", "not_applied", "indeterminate"]},
+        "observed": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locator"}]}
+      }
+    },
+    "locator_cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["empty_subkey_removed"],
+      "properties": {"empty_subkey_removed": {"type": "boolean"}}
+    }
+  }
+}
