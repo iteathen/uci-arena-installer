@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/provider-startup-control-v3.schema.json",
+  "title": "arena_provider_startup_control_v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "entrypoint",
+    "operations",
+    "workspace_argument",
+    "configuration_argument"
+  ],
+  "properties": {
+    "schema": {"const": "arena_provider_startup_control_v3"},
+    "schema_version": {"const": 3},
+    "entrypoint": {"$ref": "#/$defs/identifier"},
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["install", "uninstall"],
+      "properties": {
+        "install": {"$ref": "#/$defs/install_operation"},
+        "uninstall": {"$ref": "#/$defs/strict_operation"},
+        "pre_replace": {"$ref": "#/$defs/strict_operation"},
+        "post_replace": {"$ref": "#/$defs/post_replace_operation"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["pre_replace"]},
+          "then": {"required": ["post_replace"]}
+        },
+        {
+          "if": {"required": ["post_replace"]},
+          "then": {"required": ["pre_replace"]}
+        }
+      ]
+    },
+    "workspace_argument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flag", "relative_path"],
+      "properties": {
+        "flag": {"$ref": "#/$defs/flag"},
+        "relative_path": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "configuration_argument": {"$ref": "#/$defs/flag"},
+    "replacement_arguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previous_root", "replacement_root"],
+      "properties": {
+        "previous_root": {"$ref": "#/$defs/flag"},
+        "replacement_root": {"$ref": "#/$defs/flag"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operations": {
+            "anyOf": [
+              {"required": ["pre_replace"]},
+              {"required": ["post_replace"]}
+            ]
+          }
+        }
+      },
+      "then": {"required": ["replacement_arguments"]},
+      "else": {"not": {"required": ["replacement_arguments"]}}
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "flag": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^--[A-Za-z0-9][A-Za-z0-9-]*$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?:\\.|(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[^\\u0000\\r\\n]+)$"
+    },
+    "argument": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000\\r\\n]+$"
+    },
+    "arguments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/argument"}
+    },
+    "ready_only": {
+      "type": "array",
+      "prefixItems": [{"const": "ready"}],
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "ready_or_safe_inactive": {
+      "oneOf": [
+        {"$ref": "#/$defs/ready_only"},
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "ready"},
+            {"const": "safe_inactive"}
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "strict_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arguments", "success_dispositions"],
+      "properties": {
+        "arguments": {"$ref": "#/$defs/arguments"},
+        "success_dispositions": {"$ref": "#/$defs/ready_only"}
+      }
+    },
+    "install_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arguments", "success_dispositions"],
+      "properties": {
+        "arguments": {"$ref": "#/$defs/arguments"},
+        "success_dispositions": {
+          "$ref": "#/$defs/ready_or_safe_inactive"
+        }
+      }
+    },
+    "post_replace_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arguments", "success_dispositions"],
+      "properties": {
+        "arguments": {"$ref": "#/$defs/arguments"},
+        "success_dispositions": {
+          "$ref": "#/$defs/ready_or_safe_inactive"
+        }
+      }
+    }
+  }
+}

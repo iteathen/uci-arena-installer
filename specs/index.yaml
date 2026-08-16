@@ -30,9 +30,31 @@ specs:
     applies_to:
       - include/arena/ports/service_control.hpp
       - include/arena/platform/service_control.hpp
+      - src/adapters/service_control.cpp
       - src/platform/windows/service_control.cpp
       - src/platform/linux/service_control.cpp
       - src/application/installer/setup.cpp
       - tests/unit/service_control_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+  - spec_id: arena_provider_lifecycle_v1
+    path: specs/provider_lifecycle_v1.yaml
+    owner: provider_lifecycle
+    applies_to:
+      - include/arena/ports/provider_lifecycle.hpp
+      - include/arena/adapters/provider_lifecycle.hpp
+      - include/arena/application/installer/provider_lifecycle_contract.hpp
+      - src/adapters/provider_lifecycle.cpp
+      - src/adapters/cli_provider_lifecycle.cpp
+      - src/application/installer/provider_lifecycle_contract.cpp
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp
+      - src/application/installer/removal_lifecycle.cpp
+      - specs/schemas/provider-lifecycle-result.schema.json
+      - specs/schemas/provider-startup-control-v3.schema.json
+      - specs/schemas/install-component.schema.json
+      - specs/schemas/install-receipt.schema.json
+      - tests/mocks/mock_service_cli.cpp
+      - tests/unit/provider_lifecycle_tests.cpp
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
