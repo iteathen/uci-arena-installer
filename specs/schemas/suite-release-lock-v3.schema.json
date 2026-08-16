@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/suite-release-lock-v3.schema.json",
+  "title": "arena_suite_release_lock_v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "suite_version",
+    "release_ready",
+    "validation_mode",
+    "composition",
+    "trust_policy",
+    "components"
+  ],
+  "properties": {
+    "schema": {"const": "arena_suite_release_lock_v3"},
+    "suite_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "release_ready": {"type": "boolean"},
+    "validation_mode": {"enum": ["official", "diagnostic_review"]},
+    "composition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_name", "sha256"],
+      "properties": {
+        "manifest_name": {
+          "type": "string",
+          "pattern": "^complete-arena-[0-9]+\\.[0-9]+\\.[0-9]+\\.json$"
+        },
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "trust_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256"],
+      "properties": {
+        "name": {"$ref": "#/$defs/asset_name"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/component"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"release_ready": {"const": true}},
+        "required": ["release_ready"]
+      },
+      "then": {
+        "properties": {"validation_mode": {"const": "official"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"validation_mode": {"const": "diagnostic_review"}},
+        "required": ["validation_mode"]
+      },
+      "then": {
+        "properties": {"release_ready": {"const": false}}
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "asset_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/asset_name"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "type": {"enum": ["archive", "file_set"]},
+        "file_count": {"type": "integer", "minimum": 1},
+        "installed_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "name", "sha256"],
+      "properties": {
+        "format": {
+          "enum": [
+            "provider_result_v1",
+            "managed_result_v1",
+            "component_evidence_v1"
+          ]
+        },
+        "name": {"$ref": "#/$defs/asset_name"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer_id", "bundle_name", "bundle_sha256"],
+      "properties": {
+        "producer_id": {"$ref": "#/$defs/identifier"},
+        "bundle_name": {"$ref": "#/$defs/asset_name"},
+        "bundle_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "component_version",
+        "target_triple",
+        "ownership",
+        "source_repository",
+        "source_commit",
+        "artifact",
+        "component_manifest_sha256",
+        "dependencies",
+        "evidence",
+        "provenance"
+      ],
+      "properties": {
+        "component_id": {"$ref": "#/$defs/identifier"},
+        "component_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "target_triple": {"enum": ["windows-x86_64", "linux-x86_64"]},
+        "ownership": {"enum": ["provider", "installer_managed"]},
+        "source_repository": {"$ref": "#/$defs/repository"},
+        "source_commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "artifact": {"$ref": "#/$defs/artifact"},
+        "component_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/identifier"}
+        },
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "artifact": {
+                "properties": {"type": {"const": "file_set"}},
+                "required": ["type"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "artifact": {"required": ["file_count", "installed_bytes"]}
+            }
+          }
+        }
+      ]
+    }
+  }
+}
