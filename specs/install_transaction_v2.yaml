@@ -1,0 +1,1055 @@
+meta:
+  spec_id: arena_install_transaction_v2
+  version: 2
+  status: active
+  owner: install_transaction
+  parent_issue: 9
+
+authority_relationship: >
+  Specialized active authority for Installer mutation exclusion, durable
+  transaction journaling, typed effect orchestration, compensation, commit,
+  crash recovery, and post-commit cleanup. It supersedes
+  arena_install_transaction_v1 as the target architecture. V1 journals remain
+  bounded historical/legacy evidence and are never interpreted as equivalent
+  recovery state. Issue #7 owns physical identity, exact immutable document
+  admission, and durable file publication. Issue #6 owns ServiceControl. Issue
+  #51 owns ProviderLifecycle. Issue #80 owns semantic InstallLayout planning and
+  locator records. Issue #10 owns removal-domain plans and irreversible purge.
+
+purpose: >
+  Make install, upgrade, repair, layout transition, and compensatable uninstall
+  truthful across process failure and power loss. Before the durable
+  commit_decided checkpoint, every authoritative mutation has exact prepared
+  rollback evidence. After commit_decided, recovery never rolls the installation
+  backward; it completes cleanup and final reporting. The original failure,
+  rollback failures, and cleanup failures remain distinct.
+
+references:
+  windows_move_file: https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-movefileexw
+  windows_replace_file: https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-replacefilew
+  windows_copy_file_ex: https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-copyfileexw
+  windows_lock_file_ex: https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-lockfileex
+  windows_create_file_sharing: https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-createfilew
+  posix_rename: https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html
+  posix_open: https://pubs.opengroup.org/onlinepubs/9799919799/functions/open.html
+  posix_directory_durability_rationale: https://pubs.opengroup.org/onlinepubs/9799919799/xrat/V4_xbd_chap01.html
+
+hierarchy:
+  lego:
+    brick: InstallTransactionCoordinator
+    owns:
+      - one mutation lease per concrete installation scope/root
+      - one active durable transaction journal and exact history sealing
+      - ordered typed-effect preparation, activation, verification, compensation, and cleanup
+      - the durable commit_decided point of no return
+      - deterministic crash recovery
+      - separation of original, rollback, recovery, and cleanup failures
+    replacement_boundary: transaction protocol/schema major plus platform mutation adapters
+    failure_boundary: mutation exclusion, journal durability, effect uncertainty, rollback, recovery, or cleanup
+    does_not_own:
+      - filesystem identity or durable single-file publication mechanics
+      - service-manager semantics
+      - provider lifecycle semantics or provider-specific reason interpretation
+      - semantic installation layout or layout transition planning
+      - release provenance or artifact acquisition
+      - removal/purge policy
+      - Manager/provider application behavior
+    topology_rule: >
+      Lease, journal, typed effect handlers, coordinator, and recovery are
+      internal SOLID modules of one transaction LEGO because they share one
+      mutation lifecycle and commit/rollback failure boundary. Do not split them
+      into independent transaction services, registries, or competing journals.
+  solid:
+    mutation_lease:
+      single_responsibility: exclude concurrent Installer mutation for one resolved transaction root/scope
+      open_closed: platform locking changes behind one lease port
+      liskov: every platform lease is process-crash releasing and held until transaction terminal/blocked exit
+      interface_segregation: exposes RAII ownership only, not filesystem mutation
+      dependency_inversion: coordinator depends on neutral lease provider
+    journal_store:
+      single_responsibility: exact durable active journal revision and terminal-history publication
+      open_closed: journal schema changes by explicit major/version
+      liskov: every checkpoint is either durably exact or transaction execution stops
+      interface_segregation: semantic coordinator supplies exact journal bytes and previous digest
+      dependency_inversion: depends on issue #7 ExactDocumentReader and DurableStatePublisher
+    effect_model:
+      single_responsibility: nine fixed effect kinds describe the existing mutation families
+      open_closed: adding a materially new mutation family requires explicit contract review rather than a generic callback
+      liskov: every effect supports deterministic prepare/activation truth/verification and pre-commit compensation semantics
+      interface_segregation: effect-specific data stays in its typed spec/evidence
+      dependency_inversion: coordinator invokes effect handlers through fixed dependencies
+    coordinator:
+      single_responsibility: ordered state-machine orchestration and commit decision
+      open_closed: semantic operations compose the fixed effect vocabulary
+      liskov: install/upgrade/repair/layout/uninstall all obey identical phase and checkpoint truth
+      interface_segregation: coordinator never interprets service/provider diagnostics or application data
+      dependency_inversion: consumes issue #6/#7/#51/#80 ports and platform transaction adapters
+    recovery:
+      single_responsibility: select rollback before commit_decided or cleanup after it from exact active journal
+      open_closed: effect recovery is by fixed effect kind
+      liskov: repeated recovery converges or remains explicitly blocked; it never invents success
+      interface_segregation: no planner/version-selection/provider semantics
+      dependency_inversion: exact journal/effect evidence drives recovery
+  cupid:
+    - composable ordered effect plans with explicit fixed dependencies
+    - unix-like lease, journal, prepare, activate, verify, compensate, cleanup helpers
+    - predictable checkpoint-before-effect and reverse compensation behavior
+    - idiomatic C++20 RAII, std::variant, std::chrono, nlohmann JSON, and native platform adapters
+    - domain-based transaction, effect, activation, compensation, commit, and recovery vocabulary
+  kiss: >
+    Use the least complex complete implementation inside the fixed transaction
+    model. KISS cannot justify ad-hoc JSON actions, nested mini-transactions,
+    timestamp transaction ids, mutation before all rollback inputs are prepared,
+    receipt/path-wide string replacement, provider diagnostic branching,
+    unconditional overwrite/delete, raw-root reconstruction, or rollback after
+    commit_decided.
+
+architectural_research_conclusions:
+  windows_cross_volume:
+    - Windows MoveFileEx cannot move a directory to another drive
+    - MOVEFILE_COPY_ALLOWED for files simulates copy plus delete and therefore is not an atomic rollback-safe directory mechanism
+    - ReplaceFile requires replaced/replacement/backup files on one volume
+  posix_cross_volume:
+    - rename/renameat may fail EXDEV across filesystems
+    - same-filesystem rename is the atomic directory-entry primitive
+  durability:
+    - a successful rename does not by itself prove durable directory state on POSIX
+    - transaction path activation must establish the platform-required file/directory durability evidence before an effect is verified
+  design_result: >
+    User-preserved provider workspaces are automatically relocatable only by an
+    exact same-volume rename. Cross-volume preserved-data migration is refused
+    before mutation because reconstructing arbitrary user filesystem metadata is
+    outside Installer ownership. Installer-managed immutable trees may be copied
+    to private destination-volume staging during prepare, verified, atomically
+    activated there, and leave the original source untouched until
+    commit_decided.
+
+fixed_bounds:
+  transaction_id_hex_bytes: 32
+  operation_id_utf8_bytes: 128
+  semantic_role_utf8_bytes: 128
+  journal_bytes: 16777216
+  effect_record_bytes: 1048576
+  effects_per_transaction: 8192
+  rollback_failures: 256
+  cleanup_failures: 256
+  diagnostic_code_bytes: 64
+  diagnostic_message_utf8_bytes: 1024
+  lease_timeout_minimum: 1ms
+  lease_timeout_maximum: 120s
+  lease_timeout_default: 30s
+  path_effect_timeout_minimum: 1s
+  path_effect_timeout_maximum: 168h
+  path_effect_timeout_default: 24h
+  tree_depth: 1024
+  immediate_children_per_directory: 1048576
+  state_publication_bytes: 67108864
+  file_set_entries: 1048576
+
+public_ports:
+  header: include/arena/ports/install_transaction.hpp
+  namespace: arena::ports
+  cxx_shape: |
+    class InstallMutationLease {
+      public:
+        virtual ~InstallMutationLease() = default;
+    };
+
+    class InstallMutationLeaseProvider {
+      public:
+        virtual ~InstallMutationLeaseProvider() = default;
+        [[nodiscard]] std::unique_ptr<InstallMutationLease> acquire(
+            const std::filesystem::path& transactions_root,
+            arena::ports::InstallScope scope,
+            std::chrono::milliseconds timeout);
+      protected:
+        [[nodiscard]] virtual std::unique_ptr<InstallMutationLease>
+        acquire_validated(
+            const std::filesystem::path& transactions_root,
+            arena::ports::InstallScope scope,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+
+    enum class LocatorMutationOutcome {
+        applied,
+        not_applied,
+        indeterminate,
+    };
+
+    struct LocatorMutationDiagnostic {
+        std::string code;
+        std::string message;
+    };
+
+    struct LocatorMutationRequest {
+        arena::ports::InstallScope scope{};
+        std::optional<arena::ports::InstallLayoutLocatorRecord> expected_prior;
+        std::optional<arena::ports::InstallLayoutLocatorRecord> replacement;
+        std::chrono::milliseconds timeout{std::chrono::seconds{30}};
+    };
+
+    struct LocatorMutationResult {
+        LocatorMutationOutcome outcome{};
+        std::optional<arena::ports::InstallLayoutLocatorRecord> observed;
+        std::optional<LocatorMutationDiagnostic> diagnostic;
+    };
+
+    class InstallLayoutLocatorMutation {
+      public:
+        virtual ~InstallLayoutLocatorMutation() = default;
+        [[nodiscard]] LocatorMutationResult mutate(
+            const LocatorMutationRequest& request);
+      protected:
+        [[nodiscard]] virtual LocatorMutationResult mutate_validated(
+            const LocatorMutationRequest& request,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+  factory_header: include/arena/platform/install_transaction.hpp
+  factory_shape: |
+    namespace arena::platform {
+    [[nodiscard]] std::unique_ptr<arena::ports::InstallMutationLeaseProvider>
+    make_install_mutation_lease_provider(
+        arena::ports::FilesystemIdentity& filesystem_identity);
+
+    // Windows only. Common composition passes nullptr on platforms with no
+    // InstallLayout registry locator effect.
+    [[nodiscard]] std::unique_ptr<arena::ports::InstallLayoutLocatorMutation>
+    make_install_layout_locator_mutation();
+    }
+  lease_common_enforcement:
+    - transactions_root is absolute, normalized, bounded, and not a filesystem root
+    - timeout within fixed lease bounds
+    - capture one steady-clock deadline once
+    - adapters return one RAII lease or a bounded failure; no partial lease object
+  lease_platform_rules:
+    windows:
+      - exact persistent leaf `.arena-install-mutation.lock` beneath transactions_root
+      - authoritative parent path is admitted through FilesystemIdentity before lock open
+      - open with CreateFileW no-follow/reparse inspection and no FILE_SHARE_DELETE while held
+      - use LockFileEx exclusive lock over a fixed byte range and the one deadline
+      - lock file is a private ordinary file and is never deleted as transaction cleanup
+      - closing/termination releases the OS lock
+    linux:
+      - exact persistent leaf `.arena-install-mutation.lock` beneath transactions_root
+      - authoritative parent admitted through FilesystemIdentity
+      - open relative to protected parent with O_NOFOLLOW and require regular private file
+      - use flock or an equivalent open-file-description exclusive lock with bounded acquisition
+      - lock file is never unlinked by transaction cleanup
+      - descriptor close/process termination releases the lock
+  locator_mutation_common_enforcement:
+    - expected_prior and replacement are individually exact valid locator records when present
+    - replacement may be absent only for transactional uninstall/removal of locator authority
+    - at least one of expected_prior/replacement differs; no no-op mutation
+    - timeout bounded and one deadline captured once
+    - ordinary adapter exception becomes indeterminate, never not_applied
+    - applied means exact requested replacement state is observed, including exact absence for delete
+    - not_applied means exact expected prior is still observed
+    - any partial, mixed, foreign, inaccessible, or unclassifiable record is indeterminate
+  locator_windows_write_protocol:
+    - use the same exact HKCU/HKLM 64-bit-view subkey/value contract as arena_install_layout_v1
+    - mutation lease must already be held by coordinator; adapter does not create a second scope lease
+    - first exact-read current registry record and require expected_prior or exact absence
+    - invalidate `LayoutLocatorSchema` before changing any other value
+    - write/delete remaining typed values
+    - write the final exact schema value last when replacement is present
+    - flush the registry key when supported, close, reopen, and exact-read the resulting record
+    - a crash/partial write leaves an invalid/partial record that normal readers fail closed on
+    - compensation uses the same protocol with expected current replacement and prior as replacement
+    - diagnostic codes are bounded only; callers branch solely on LocatorMutationOutcome
+
+public_application_surface:
+  header: include/arena/application/installer/install_transaction.hpp
+  namespace: arena::application::installer
+  cxx_shape: |
+    enum class InstallTransactionOperation {
+        install,
+        upgrade,
+        repair,
+        uninstall,
+        layout_initialize,
+        layout_migrate,
+    };
+
+    enum class InstallTransactionPhase {
+        planned,
+        prepared,
+        activating,
+        verifying,
+        commit_decided,
+        cleaning,
+        committed,
+        rolling_back,
+        rolled_back,
+        rollback_failed,
+    };
+
+    enum class TransactionEffectKind {
+        ensure_directory,
+        publish_state,
+        activate_managed_tree,
+        activate_file_set,
+        relocate_managed_tree,
+        quarantine_owned_path,
+        provider_lifecycle,
+        service_control,
+        layout_locator,
+    };
+
+    enum class ManagedTreeOwnership {
+        installer_managed,
+        user_preserved,
+    };
+
+    enum class ExistingDestinationPolicy {
+        require_absent,
+        capture_for_compensation,
+    };
+
+    struct EnsureDirectoryEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::filesystem::path path;
+        bool preserve_unexpected_contents_on_rollback{true};
+    };
+
+    struct PublishStateEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::filesystem::path target;
+        std::vector<std::byte> candidate_bytes;
+        arena::ports::PublicationPrecondition precondition;
+        std::optional<std::string> expected_prior_sha256;
+        std::uint64_t maximum_bytes;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct ActivateManagedTreeEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::filesystem::path input_root;
+        std::filesystem::path destination;
+        ExistingDestinationPolicy destination_policy;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct FileSetActivationEntry {
+        std::filesystem::path source;
+        std::filesystem::path destination;
+        std::uint64_t size_bytes;
+        std::string sha256;
+        ExistingDestinationPolicy destination_policy;
+    };
+
+    struct ActivateFileSetEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::vector<FileSetActivationEntry> entries;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct RelocateManagedTreeEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::filesystem::path source;
+        std::filesystem::path destination;
+        ManagedTreeOwnership ownership;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct QuarantineOwnedPathEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        std::filesystem::path target;
+        arena::ports::FilesystemObjectKind kind;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct ProviderLifecycleEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        arena::ports::ProviderLifecycleRequest request;
+        arena::ports::ProviderLifecycleRequest compensation_request;
+    };
+
+    struct ServiceControlEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        arena::ports::ServiceRequest request;
+    };
+
+    struct LayoutLocatorEffectSpec {
+        std::string operation_id;
+        std::string semantic_role;
+        arena::ports::LocatorMutationRequest request;
+    };
+
+    using TransactionEffectSpec = std::variant<
+        EnsureDirectoryEffectSpec,
+        PublishStateEffectSpec,
+        ActivateManagedTreeEffectSpec,
+        ActivateFileSetEffectSpec,
+        RelocateManagedTreeEffectSpec,
+        QuarantineOwnedPathEffectSpec,
+        ProviderLifecycleEffectSpec,
+        ServiceControlEffectSpec,
+        LayoutLocatorEffectSpec>;
+
+    struct InstallTransactionPlan {
+        InstallTransactionOperation operation;
+        arena::ports::InstallScope scope;
+        std::string installation_id;
+        std::optional<std::uint64_t> layout_generation;
+        std::filesystem::path transactions_root;
+        std::vector<TransactionEffectSpec> effects;
+    };
+
+    struct InstallTransactionResult {
+        std::string transaction_id;
+        InstallTransactionPhase phase;
+        bool committed;
+        std::vector<std::string> cleanup_failures;
+    };
+
+    class InstallTransactionCoordinator final {
+      public:
+        InstallTransactionCoordinator(
+            arena::ports::FilesystemIdentity& filesystem_identity,
+            arena::ports::DurableStatePublisher& state_publisher,
+            arena::ports::InstallMutationLeaseProvider& mutation_lease,
+            arena::ports::ProviderLifecycle& provider_lifecycle,
+            arena::ports::ServiceControl& service_control,
+            arena::ports::InstallLayoutLocatorMutation* locator_mutation);
+
+        [[nodiscard]] InstallTransactionResult execute(
+            const InstallTransactionPlan& plan);
+
+        [[nodiscard]] std::optional<InstallTransactionResult> recover(
+            const std::filesystem::path& transactions_root,
+            arena::ports::InstallScope scope);
+    };
+  public_surface_rules:
+    - execute/recover are the only public transaction orchestration entrypoints
+    - no caller receives an effect-handler registry, callback hook, journal mutation API, or platform handle
+    - the plan effect vector is ordered and the coordinator executes it in that exact order
+    - compensation is exact reverse effect order
+    - semantic_role is bounded evidence only and never selects behavior
+    - operation_id is unique and fixed before transaction start
+    - adding a new effect kind requires Sol-owned public contract review
+
+plan_validation:
+  transaction:
+    - operation, scope, installation id, optional generation, and transactions root are validated before lease acquisition
+    - installation_id is canonical lowercase UUID for descriptor-authoritative operations; legacy initialization may use its already-generated target ID
+    - effect count 1 through fixed maximum
+    - operation ids unique, 1-128 bytes, pattern '^[A-Za-z0-9._:-]+$'
+    - semantic roles 1-128 bytes, same bounded identifier pattern
+    - paths absolute/normalized and pairwise collision-checked where effects overlap authority
+    - no effect may target the active journal, history, work root, or mutation lock paths
+  ordering:
+    - coordinator does not reorder, parallelize, or infer dependencies
+    - caller must place quiescence before protected filesystem/config mutation
+    - caller must place receipts/state needed by provider verification before the corresponding lifecycle effect
+    - caller must place layout policy before descriptor and descriptor before layout locator authority
+    - service/provider finalization required for commit appears before commit_decided
+  compensation:
+    - every mutating effect kind has fixed compensation semantics
+    - provider lifecycle requires an explicit compensation request
+    - service compensation is derived during prepare from an exact neutral status result
+    - a plan that cannot prepare rollback evidence for every effect never enters activating
+
+provider_lifecycle_recovery_requirement:
+  contract_rule: >
+    Every ProviderLifecycle operation used transactionally is convergent and
+    safe to repeat with the same exact request, and its explicit compensation
+    request is safe to invoke when the original operation may have completed or
+    may not have run. This is a generic provider contract requirement, not a
+    provider-specific reason interpretation.
+  recovery_behavior:
+    - before invocation the journal durably records activation_started
+    - a failed disposition is transaction failure because lifecycle safety was not proven
+    - rollback invokes the explicit compensation request even when crash timing makes original completion uncertain
+    - rollback succeeds only on exact ready or contract-permitted safe_inactive where that compensation request permits it
+    - reason ids/messages are evidence only and never branch transaction behavior
+  dependency_note: >
+    arena_provider_lifecycle_v1 must be amended with this generic transactional
+    convergence rule before the lifecycle transaction integration slice is Spark-ready.
+
+managed_tree_snapshot:
+  owner: private common transaction module
+  public_exposure: journal evidence only, not a new general filesystem service
+  result:
+    - lowercase tree_sha256
+    - uint64 file_count
+    - uint64 directory_count
+    - uint64 total_file_bytes
+  algorithm:
+    - root and every child are admitted no-follow through FilesystemIdentity
+    - only ordinary directories and regular files are accepted
+    - symlink/reparse/junction, nested mount/bind boundary, device, FIFO, socket, or other special object fails
+    - enumerate one directory at a time, reject more than fixed immediate-child limit, sort exact child names deterministically, admit every sorted child, then re-enumerate and require the same exact name set before accepting the directory
+    - depth is bounded by the fixed limit and path budgets
+    - file content SHA-256 is streamed from the admitted file capability with checked 64-bit offsets; no arbitrary per-file or total-byte business cap is imposed
+    - total counters use checked uint64 arithmetic
+    - Linux file record includes executable permission bits; Windows file record has no executable-bit field
+    - each stream record is domain-separated and binds relative path, kind, size/content digest and required executable bit
+    - tree_sha256 is SHA-256 of the deterministic ordered record stream
+    - repeat snapshot equality is required whenever an effect claims an unchanged tree
+  resource_rule: >
+    Total legitimate tree size/file count is not capped by a small static product
+    limit. Memory is bounded per directory, counters are checked, paths/depth are
+    bounded, and each path effect has an explicit long-duration deadline. This
+    preserves domain expansion without permitting unbounded in-memory materialization.
+
+transaction_storage:
+  active_journal: <transactions_root>/active-transaction.json
+  history_directory: <transactions_root>/history
+  work_directory: <transactions_root>/work/<transaction_id>
+  mutation_lock: <transactions_root>/.arena-install-mutation.lock
+  journal_schema: arena_install_transaction_v2
+  journal_schema_file: specs/schemas/install-transaction-v2.schema.json
+  legacy_v1:
+    - historical terminal v1 journals may remain untouched
+    - a legacy v1 journal with state running/failed or otherwise nonterminal is not auto-recovered because it lacks v2 exact effect checkpoints
+    - presence of a nonterminal legacy journal blocks new mutation with `legacy_transaction_repair_required`
+    - normal repair may later reconstruct desired state through current exact receipts/components; it does not pretend to replay v1
+  directory_establishment: >
+    Creation of exact empty transactions/history/work infrastructure before the
+    scope lease is bookkeeping, not installed authority. It is permitted only
+    beneath an already validated data/transactions root, rejects links/reparse,
+    and leaves at most empty Installer-owned directories on pre-journal failure.
+
+journal_identity_and_revision:
+  transaction_id:
+    - cryptographically random 128-bit token encoded as exactly 32 lowercase hex characters
+    - never timestamp/PID/counter-derived
+  revision:
+    - uint64 starts at 1 for planned journal
+    - every durable checkpoint increments exactly one
+    - overflow blocks mutation
+  publication:
+    - first ever active journal uses PublicationPrecondition::absent
+    - replacing an existing terminal active journal uses exact prior active-journal SHA-256
+    - every later checkpoint uses exact prior journal SHA-256
+    - only PublicationOutcome::activated is a durable checkpoint
+  uncertain_publication_resolution:
+    - on activated_durability_unproven or indeterminate, immediately exact-read active journal without further external mutation
+    - if exact candidate revision is present, make at most one same-bytes stabilization publication with exact candidate digest precondition
+    - if exact prior revision is present, make at most one retry of the intended candidate publication with exact prior digest
+    - any foreign bytes, repeated durability uncertainty, or inability to exact-read stops execution as journal_recovery_required
+    - no effect starts until its before-effect journal checkpoint is durably activated
+  terminal_history:
+    - before replacing a terminal active journal for a new transaction, ensure an exact immutable history copy exists at history/<transaction_id>.json with the terminal journal digest
+    - publish history with absent precondition; existing exact same digest is accepted, different bytes block
+    - failure to preserve prior terminal history blocks the next transaction but does not change the already terminal prior transaction
+
+journal_shape:
+  required_root_fields:
+    - schema
+    - schema_version
+    - transaction_id
+    - revision
+    - operation
+    - scope
+    - installation_id
+    - phase
+    - effects
+    - primary_failure
+    - rollback_failures
+    - cleanup_failures
+  optional_root_fields:
+    - layout_generation
+    - commit_evidence
+    - recovery_blocked
+  effect_summary_fields:
+    - operation_id
+    - kind
+    - semantic_role
+    - progress
+    - record_path
+    - record_sha256
+  effect_progress:
+    - planned
+    - prepared
+    - activation_started
+    - activated
+    - verified
+    - compensation_started
+    - compensated
+    - compensation_failed
+    - cleanup_started
+    - cleaned
+    - cleanup_failed
+  effect_record:
+    schema: arena_install_transaction_effect_v1
+    path: <work_directory>/effects/<zero-padded-index>-<safe-operation-id>.json
+    maximum_bytes: 1048576
+    rule: >
+      Effect record is exact durable internal recovery evidence. The journal
+      binds its current digest. Large candidate bytes or file-set mappings live
+      in separately exact prepared files/manifests under the transaction work
+      root and are referenced by path/digest/count from the effect record.
+  failures:
+    primary_failure:
+      - null until first transaction/effect failure
+      - bounded code/message plus operation id when applicable
+      - never overwritten by compensation/cleanup failure
+    rollback_failures:
+      - bounded ordered array of compensation failures
+    cleanup_failures:
+      - bounded ordered array and compatible with committed=true
+
+phase_state_machine:
+  forward:
+    - planned -> prepared
+    - prepared -> activating
+    - activating -> verifying
+    - verifying -> commit_decided
+    - commit_decided -> cleaning
+    - cleaning -> committed
+  rollback:
+    - planned -> rolling_back
+    - prepared -> rolling_back
+    - activating -> rolling_back
+    - verifying -> rolling_back
+    - rolling_back -> rolled_back | rollback_failed
+  forbidden:
+    - rollback from commit_decided/cleaning/committed
+    - committed before commit_decided
+    - effect activation before transaction prepared
+    - commit_decided while any required effect is not verified
+    - cleanup of prior authoritative bytes before commit_decided
+  post_commit_recovery_failure: >
+    If recovery after commit_decided cannot re-verify a required final
+    authoritative effect, phase remains cleaning with recovery_blocked=true and
+    bounded evidence. It never rolls back and never publishes committed until
+    final authority can be proven. Ordinary post-commit cleanup failure may
+    still publish committed with cleanup_failures because commit authority is
+    already proven.
+
+prepare_barrier:
+  rules:
+    - acquire mutation lease before reading/recovering active transaction state
+    - recover any nonterminal v2 transaction before starting another
+    - validate entire new plan before creating planned journal
+    - create exact private transaction work root
+    - materialize and verify every candidate/rollback input for every effect
+    - publish each prepared effect record and bind its digest in journal
+    - no authoritative target, provider/service state, receipt, locator, or current managed path changes during prepare
+    - only after every effect is prepared and its evidence durable may transaction phase become prepared
+    - prepare failure rolls back only private transaction work and publishes rolled_back; no authoritative compensation should be required
+
+fixed_effects:
+  ensure_directory:
+    purpose: create one exact Installer-owned/provider workspace directory required by later effects
+    prepare:
+      - exact parent validated; path is absent or exact ordinary directory
+      - record whether directory pre-existed
+    activate:
+      - pre-existing exact directory is idempotent success
+      - absent path is created with scope-appropriate private/managed permissions and exact path re-admitted
+    verify:
+      - exact ordinary directory at path, no link/reparse, stable binding
+    compensate:
+      - pre-existing directory unchanged
+      - newly created directory removed only if exact same directory is empty
+      - unexpected contents are preserved; inability to restore prior absence becomes rollback failure rather than deleting unknown/user data
+    cleanup: none
+
+  publish_state:
+    purpose: publish exact bounded state bytes such as receipt/configuration/policy/descriptor/saved locator
+    prepare:
+      - candidate bytes copied byte-for-byte into exact transaction work file and hashed
+      - target precondition is absent or exact prior SHA-256
+      - when prior exists, exact prior bytes are captured into work root for compensation and digest-verified
+      - candidate/prior each within fixed DurableStatePublisher/global limits
+    activate:
+      - call DurableStatePublisher exactly once per durable attempt under the specified precondition
+      - only activated is effect success; uncertainty is resolved/stopped under the fixed publisher rules
+    verify:
+      - exact-read target bytes and require candidate digest
+    compensate:
+      - prior existed: republish exact prior bytes with candidate digest precondition
+      - prior absent: remove only exact candidate file using transaction exact-path deletion; any foreign/substituted target is rollback failure
+    cleanup:
+      - remove private captured candidate/prior work files after terminal decision
+
+  activate_managed_tree:
+    purpose: activate one Installer-managed tree at a target root
+    prepare:
+      - snapshot input_root exactly
+      - create random private destination-volume sibling stage
+      - copy input tree into stage without links/special objects, preserve required executable bits, flush files/directories as platform requires
+      - snapshot stage and require exact equality with input
+      - destination policy require_absent rejects occupancy
+      - capture_for_compensation exact-snapshots any existing ordinary destination tree and reserves deterministic sibling backup path
+      - no authoritative destination mutation during prepare
+    activate:
+      - if capturing existing destination, exact rename destination -> backup on same volume
+      - rename prepared stage -> destination on same volume
+      - flush/verify affected parent directories as required
+    verify:
+      - destination exact snapshot equals candidate
+      - backup exact snapshot equals prior when one existed
+    compensate:
+      - remove/quarantine only exact candidate destination
+      - restore exact prior backup when present
+      - prior absent ends with destination absent
+    cleanup:
+      - after commit delete exact prior backup and any leftover private candidate stage
+    cross_volume: >
+      input_root may be on another volume because it is Installer-managed and
+      copied during prepare; authoritative destination activation itself is an
+      exact same-volume stage rename.
+
+  activate_file_set:
+    purpose: activate a bounded mapping set of exact Installer-managed files, including knowledge activation
+    prepare:
+      - 1..fixed maximum mappings, unique destinations, exact non-link regular sources
+      - source size/digest exact
+      - for each entry create private destination-volume sibling stage and exact-copy/flush/verify source
+      - destination require_absent or capture existing exact prior file by reserved sibling backup path
+      - persist deterministic mapping manifest in work root and bind exact digest/count
+    activate:
+      - for every entry in manifest order, rename existing destination to backup when captured then rename exact stage to destination
+      - failure may leave a partial file set; journal activation_started plus exact manifest is sufficient for deterministic inspection/recovery
+    verify:
+      - every destination exact candidate size/digest; every captured backup exact prior digest
+    compensate:
+      - reverse manifest order; remove exact candidate destination and restore exact prior backup or absence
+    cleanup:
+      - after commit delete exact prior backups and leftover stages
+
+  relocate_managed_tree:
+    purpose: move one already authoritative managed tree to a policy-derived target
+    prepare:
+      - source exact ordinary tree snapshot and destination exact absence
+      - determine source/destination volume identities without pathname guess
+      - user_preserved requires same volume; cross-volume user-preserved relocation fails before mutation with unsupported_cross_volume_preserved_tree
+      - installer_managed same-volume uses rename path
+      - installer_managed cross-volume copies/verifies exact destination-volume private stage while preserving authoritative source
+    activate:
+      - same-volume: exact source rename -> destination
+      - installer-managed cross-volume: prepared stage rename -> destination while source remains authoritative rollback copy
+    verify:
+      - destination exact snapshot equals source prepared snapshot
+      - cross-volume installer-managed source remains exact until commit_decided
+    compensate:
+      - same-volume: destination rename -> source
+      - cross-volume: delete only exact destination candidate; source remains untouched
+    cleanup:
+      - same-volume none
+      - cross-volume installer-managed: after commit delete exact old source; cleanup failure does not invalidate commit
+
+  quarantine_owned_path:
+    purpose: compensatable removal of one exact Installer-owned file/tree for uninstall or replacement cleanup
+    prepare:
+      - target exact file digest or tree snapshot captured
+      - random private same-volume quarantine sibling path reserved and absent
+    activate:
+      - exact same-volume rename target -> quarantine
+    verify:
+      - original absent and quarantine exact prior identity
+    compensate:
+      - exact quarantine rename -> original; occupied/foreign original is rollback failure
+    cleanup:
+      - after commit exact-delete quarantine only
+    rule: >
+      User-preserved/external/unknown-policy-controlled data is never represented
+      by this effect unless the removal-domain plan explicitly classifies it as
+      Installer-owned reversible removal under issue #10.
+
+  provider_lifecycle:
+    purpose: one generic ProviderLifecycle operation plus exact convergent compensation request
+    prepare:
+      - validate request and compensation request under arena_provider_lifecycle_v1
+      - exact operation/component/version and bounded paths/arguments recorded
+      - no provider process invoked
+    activate:
+      - durably activation_started then invoke request exactly once in normal execution
+      - ready or contract-permitted safe_inactive is activated success
+      - failed disposition records evidence and triggers rollback
+    verify:
+      - accepted typed result is verification evidence; no provider reason interpretation
+    compensate:
+      - invoke explicit compensation request even if crash makes original completion uncertain
+      - require accepted compensation terminal disposition
+    cleanup: none
+
+  service_control:
+    purpose: reach one requested neutral service state with rollback to exact prior neutral state
+    prepare:
+      - perform ServiceAction::status and require completed trustworthy active or inactive prior state
+      - transitional/failed/unknown prior state that cannot be safely resolved blocks prepare
+      - derive compensation: prior active -> start; prior inactive -> stop
+    activate:
+      - invoke exact requested ServiceControl operation
+      - completed required; failed triggers rollback
+    verify:
+      - perform status and require state required by requested start/stop/restart semantics
+    compensate:
+      - invoke derived idempotent compensation and verify prior active/inactive state
+    cleanup: none
+
+  layout_locator:
+    purpose: conditionally set/delete exact #80 registry locator under transaction lease
+    prepare:
+      - locator mutation adapter exact-reads and requires expected prior/absence
+      - record prior and requested replacement
+    activate:
+      - invoke conditional mutation protocol
+      - applied is success; not_applied or indeterminate triggers rollback/recovery
+    verify:
+      - exact read-only InstallLayoutLocator result equals replacement or exact absence
+    compensate:
+      - conditional reverse mutation from replacement to prior
+      - partial/foreign/indeterminate state is rollback failure, never guessed
+    cleanup:
+      - delete empty locator subkey after committed uninstall only when replacement was absence and exact empty-state revalidation succeeds
+
+exact_path_deletion_internal_rule:
+  purpose: compensation/cleanup only, never arbitrary purge
+  rules:
+    - accepts only a path and exact prepared file digest or tree snapshot created by this transaction
+    - re-admit no-follow and require exact identity/snapshot immediately before deletion
+    - recursively delete only a transaction-created/Installer-owned tree whose entire current snapshot equals prepared snapshot
+    - foreign, changed, linked, mounted, special, or newly populated path is preserved and reported as rollback/cleanup failure
+    - no generic `remove_all` of an unverified pathname is permitted
+    - irreversible user purge remains issue #10 PurgeExecution, not this helper
+
+normal_execution:
+  sequence:
+    - validate plan completely
+    - establish exact empty transaction infrastructure as needed
+    - acquire one scope mutation lease
+    - load exact active journal; recover/block prior nonterminal state before new transaction
+    - seal previous terminal active journal into exact history if needed
+    - generate cryptographic transaction id and publish planned revision
+    - prepare every effect and persist exact recovery evidence
+    - publish phase prepared
+    - publish phase activating
+    - for each effect in order publish activation_started, execute, observe, verify immediate result, publish verified progress
+    - publish phase verifying
+    - re-verify every filesystem/state/locator/service effect that has a non-mutating observation contract; retain accepted provider lifecycle result as its verification evidence
+    - require every effect verified and no unresolved failure
+    - compute commit_evidence digest from ordered exact verified effect-record digests
+    - durably publish phase commit_decided
+    - publish phase cleaning
+    - perform post-commit cleanup for each effect; collect bounded cleanup failures without compensation
+    - durably publish committed with cleanup failures
+    - seal exact terminal history before the next transaction may replace active journal
+  rule: >
+    No later effect begins if the current effect's before-effect checkpoint or
+    verification evidence is not durably journaled.
+
+commit_decided_contract:
+  prerequisites:
+    - mutation lease held
+    - all planned effects prepared, activated, and verified
+    - state-publication targets exact candidate bytes
+    - managed path/file-set destinations exact candidates and required prior backups/sources still recoverable
+    - lifecycle effects have accepted neutral terminal results
+    - service effects have exact required final state
+    - layout locator effects exact replacement/absence
+    - no unresolved journal/effect durability uncertainty
+    - ordered effect-record digest list and plan identity are complete
+  durable_action:
+    - increment journal revision and publish exact commit_decided bytes through DurableStatePublisher
+    - only PublicationOutcome::activated establishes point of no return
+  consequences:
+    - compensation is permanently forbidden after this checkpoint
+    - cross-volume Installer-managed old sources and prior backups may now be deleted during cleanup
+    - cleanup failure is reported but cannot transform the committed installation back to pre-commit authority
+
+rollback_and_recovery:
+  before_commit:
+    - phase planned/prepared/activating/verifying selects rollback
+    - durably publish rolling_back before first compensation
+    - compensate in strict reverse effect order for every effect with progress activation_started, activated, or verified
+    - activation_started is treated as possibly mutated; compensation must inspect/converge rather than assume no effect
+    - publish compensation_started before compensation
+    - publish compensated/compensation_failed with exact evidence
+    - continue attempting remaining reverse compensations after one failure, preserving all rollback failures
+    - exact transaction work cleanup occurs only after compensation attempts and does not erase needed evidence on rollback_failed
+    - zero rollback failures -> rolled_back
+    - any rollback failure -> rollback_failed and new mutation remains blocked until operator/recovery resolves exact state
+  after_commit:
+    - phase commit_decided/cleaning selects forward recovery only
+    - reverify required final authoritative effects
+    - inability to prove final authority leaves phase cleaning with recovery_blocked true; no rollback and no committed claim
+    - when final authority is proven, resume effect cleanup idempotently
+    - cleanup failures are retained; committed may still be published when failures are cleanup-only
+  repeatability:
+    - recover may be called repeatedly under the same mutation lease
+    - completed compensation/cleanup is revalidated and skipped when exact evidence still matches
+    - repeated calls cannot replay a provider/service/layout mutation after its exact desired recovery state is already verified
+  active_journal_absence:
+    - recover returns nullopt only when no active v2 journal and no blocking legacy nonterminal journal exists
+
+transactional_provider_convergence_amendment:
+  target_spec: specs/provider_lifecycle_v1.yaml
+  required_text: >
+    Transactional install/uninstall/pre_replace/post_replace operations and their
+    paired compensation operations must be convergent/idempotent for the same
+    exact request. A provider implementation must tolerate a compensation call
+    when crash timing makes it unknown whether the paired forward call reached
+    its terminal state. Provider-specific reason semantics remain opaque.
+  ownership: ProviderLifecycle contract, not transaction caller
+
+layout_il07_translation:
+  source: LayoutTransitionPlan from arena_install_layout_execution_v1
+  rules:
+    - ensure required target integration/data/install/workspace/receipt/transaction directories before dependent publications
+    - exact target policy bytes are publish_state before descriptor publication
+    - each LayoutMove component_root becomes relocate_managed_tree ownership installer_managed
+    - each LayoutMove provider_workspace becomes relocate_managed_tree ownership user_preserved
+    - each LayoutReceiptRewrite becomes publish_state using prior receipt digest
+    - target descriptor bytes become publish_state using absent/exact prior descriptor precondition
+    - next locator becomes layout_locator with exact prior locator precondition
+    - effect order places policy and receipt/path mutation before descriptor/locator final authority exactly as #80 specifies
+    - after commit_decided, reload InstalledLayoutAuthority before returning normal lifecycle authority
+    - cleanup_candidates are post-commit exact-empty cleanup only and never pre-commit effects
+  rule: >
+    IL-07 may now be delegated only after the core transaction port/journal/effect
+    contracts implemented by the prerequisite transaction slices are integrated.
+
+uninstall_relationship:
+  - issue #10 RemovalLifecycle produces exact reviewed uninstall operations
+  - transactional uninstall translates Installer-owned file/tree removal to quarantine_owned_path and receipt/locator removal to exact state/locator effects
+  - provider uninstall uses ProviderLifecycle effect with convergent compensation where defined
+  - commit_decided occurs before quarantined prior bytes are irreversibly deleted
+  - purge is never encoded as an InstallTransactionPlan
+
+validation:
+  journal:
+    - cryptographic transaction ids and monotonic revision
+    - exact journal publication preconditions and uncertainty stabilization
+    - history seal before next active replacement
+    - hostile/oversized/duplicate-key/foreign journal rejection
+    - legacy nonterminal v1 blocks rather than guessed recovery
+  lease:
+    - two-process contention per scope
+    - independent unrelated scopes
+    - deadline, process death/handle close release, hostile lock link/reparse/special object
+    - lock leaf never deleted during cleanup
+  prepare_barrier:
+    - failure at every effect prepare interval causes no authoritative mutation
+    - all candidate/prior/compensation evidence exists before activating
+  effects:
+    - failure injection before and after every authoritative primitive
+    - activation_started crash ambiguity resolved/compensated exactly
+    - same-volume and cross-volume Installer-managed tree behavior
+    - cross-volume user-preserved tree rejected before mutation
+    - partial file-set activation rollback
+    - state publication prior/absence compensation
+    - unexpected new directory contents preserved and reported, never recursively erased
+    - provider forward failure/uncertain crash with convergent compensation
+    - service prior active/inactive compensation
+    - locator partial record/indeterminate recovery
+  commit:
+    - no commit before every effect verified
+    - crash immediately before/after commit_decided
+    - no compensation after durable commit_decided
+    - post-commit cleanup failure still committed with evidence
+    - post-commit final-authority mismatch remains cleaning/recovery_blocked, not false committed/rollback
+  integration:
+    - clean install, upgrade, repair, exact-current refresh, layout initialize/migrate, and transactional uninstall
+    - issue #15 Personal provider-lock rollback scenario
+    - source search proves old arena_install_transaction_v1/write_json_atomic rollback engine is no longer normal apply authority after final integration slice
+    - no provider-specific reason branch or duplicate root/service/filesystem transaction owner
+
+implementation_slices:
+  - id: TX-01
+    goal: add transaction domain types, plan validation, journal/effect-record schemas, exact journal serialization/store over fake DurableStatePublisher, and state-machine tests
+    prerequisites: [DP-01, ED-01]
+    may_touch:
+      - include/arena/application/installer/install_transaction.hpp
+      - src/application/installer/install_transaction.cpp
+      - specs/schemas/install-transaction-v2.schema.json only for a proven schema defect
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - id: TX-02
+    goal: implement neutral mutation-lease and locator-mutation ports plus Windows/Linux lease adapters and Windows locator mutation adapter
+    prerequisites: [FI-02, FI-03, IL-03]
+    may_touch:
+      - include/arena/ports/install_transaction.hpp
+      - include/arena/platform/install_transaction.hpp
+      - src/adapters/install_transaction.cpp
+      - src/platform/windows/install_transaction.cpp
+      - src/platform/linux/install_transaction.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - id: TX-03
+    goal: implement managed-tree snapshotter and filesystem effect handlers with exhaustive failure injection
+    prerequisites: [FI-02, FI-03, TX-01]
+    may_touch:
+      - src/application/installer/install_transaction.cpp
+      - private transaction filesystem helper files under src/application/installer or src/platform when strictly necessary
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - id: TX-04
+    goal: implement publish_state/file-set/locator effect preparation and compensation using #7/#80 ports
+    prerequisites: [DP-02, DP-03, TX-01, TX-02, TX-03]
+    may_touch:
+      - src/application/installer/install_transaction.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - id: TX-05
+    goal: integrate ServiceControl and ProviderLifecycle effect handlers with generic convergent recovery
+    prerequisites: [service_control_complete, provider_lifecycle_complete, TX-01]
+    may_touch:
+      - src/application/installer/install_transaction.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - id: TX-06
+    goal: implement coordinator normal execution, commit decision, rollback, crash recovery, history sealing, and fake-effect fault matrix
+    prerequisites: [TX-02, TX-03, TX-04, TX-05]
+    may_touch:
+      - src/application/installer/install_transaction.cpp
+      - tests/unit/install_transaction_tests.cpp
+      - CMakeLists.txt
+  - id: TX-07
+    goal: migrate SetupEngine install/upgrade/repair apply flow to the one coordinator and remove competing v1 journal/rollback mini-transactions
+    prerequisites: [TX-06, IL-05, IL-06, artifact_acquisition_contract_when_staging_is_touched]
+    may_touch:
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp only for fixed coordinator composition
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - removal purge implementation
+      - release planner/bootstrap/Manager/provider repositories
+  - id: TX-08
+    goal: integrate LayoutTransitionPlan initialization/migration through coordinator and complete IL-07
+    prerequisites: [TX-07, IL-05, IL-06]
+    may_touch:
+      - src/application/installer/setup.cpp
+      - apps/setup/main.cpp
+      - include/arena/application/installer/setup.hpp only for fixed transition invocation/result plumbing
+      - tests/unit/install_layout_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - layout policy/schema semantics
+      - packaging root authority
+      - another transaction system
+
+spark_stop_conditions:
+  - a tenth effect kind or generic effect callback appears necessary
+  - a caller-visible platform handle/native error is required
+  - ProviderLifecycle cannot provide convergent/idempotent transactional compensation
+  - user-preserved cross-volume migration is required automatically
+  - a state write cannot use DurableStatePublisher or exact-path compensation
+  - commit requires provider-specific reason interpretation
+  - recovery would need to guess whether an effect happened without prepared evidence/convergent compensation
+  - rollback would require deleting unknown/user data
+  - layout/service/filesystem/provider ownership would move into transaction
+  - another repository must change from an Installer implementation packet
+
+completion: >
+  Issue #9 completes only when TX-01 through TX-08 are integrated, normal
+  install/upgrade/repair/layout transitions use one active v2 journal and one
+  scope lease, all required effects are prepared before activation, crash
+  recovery deterministically rolls back before commit_decided or completes
+  forward after it, legacy v1 apply rollback is no longer normal authority, and
+  the #15 provider-lock regression proves exact prior state restoration or an
+  explicit rollback_failed result.

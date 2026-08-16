@@ -1,0 +1,148 @@
+meta:
+  spec_id: arena_install_transaction_effect_constraints_v1
+  version: 1
+  status: active
+  owner: install_transaction
+  parent_issue: 9
+  specializes: arena_install_transaction_v2
+
+authority_relationship: >
+  This specification freezes effect-level invariants that are stricter than the
+  reusable neutral port types used inside InstallTransactionCoordinator. It is
+  an internal SOLID contract of the existing transaction LEGO and does not add a
+  new effect kind, service authority, filesystem authority, or provider state
+  machine.
+
+hierarchy:
+  lego:
+    brick: InstallTransactionCoordinator
+  solid:
+    single_responsibility: effect plan validation and persisted semantic mappings
+    open_closed: a new semantic effect requires explicit transaction-contract review
+    liskov: every accepted effect can be prepared, verified, and compensated under the same state machine
+    interface_segregation: neutral port operations may be broader than the subset transaction effects accept
+    dependency_inversion: transaction validation narrows ServiceControl/ProviderLifecycle/FilesystemIdentity inputs without changing those owners
+  cupid:
+    - predictable exact accepted subsets and pairings
+    - domain-based transaction effect semantics
+  kiss: >
+    Use direct enum/pair validation. Do not add a policy registry, callback,
+    dynamic effect rules, or alternate port.
+
+service_control_effect:
+  forward_allowed_actions:
+    - start
+    - stop
+    - restart
+  forward_forbidden_actions:
+    - status
+  reason: >
+    Transaction service effects represent an intended mutating final state.
+    `status` is observation-only and is used internally during prepare and
+    verification; it is never itself a planned external mutation effect.
+  prepare:
+    - call neutral ServiceControl status
+    - require completed state active or inactive
+    - prior active derives compensation start
+    - prior inactive derives compensation stop
+  requested_terminal_state:
+    start: active
+    restart: active
+    stop: inactive
+  serialization: >
+    Effect `spec` stores only the forward ServiceRequest. Prepared evidence stores
+    the derived compensation request and prior state. Recovery never asks callers
+    to reconstruct compensation.
+
+provider_lifecycle_effect:
+  exact_operation_pairs:
+    install: uninstall
+    uninstall: install
+    pre_replace: post_replace
+    post_replace: pre_replace
+  identity_rules:
+    - forward and compensation component_id are identical
+    - forward and compensation component_version are the versions appropriate to the exact filesystem/configuration authority present at the moment each request is intended to run; the transaction effect must prepare both explicitly and persist their exact request digests
+    - no provider reason id selects a compensation operation
+  pair_rules:
+    - install/uninstall compensation restores prior absent/installed lifecycle authority respectively
+    - pre_replace/post_replace are paired replacement-state transitions
+    - any different operation pair fails plan validation before mutation
+    - the convergence requirements in arena_provider_lifecycle_transactional_v1 apply to both requests
+
+quarantine_path_kind_mapping:
+  public_cpp:
+    enum_owner: arena::ports::FilesystemObjectKind
+    regular_file: regular_file
+    directory: directory
+  persisted_effect_record:
+    regular_file: regular_file
+    directory: directory_tree
+  rule: >
+    `directory_tree` is the transaction recovery record's semantic name for a
+    recursively snapshotted ordinary directory. It does not add a new filesystem
+    object kind. Conversion is exact and bidirectional; any other string/enum is
+    rejected.
+
+publish_state_effect:
+  rules:
+    - candidate_bytes is nonempty and no larger than maximum_bytes
+    - maximum_bytes obeys DurableStatePublisher bounds
+    - absent precondition carries no expected prior digest
+    - exact_sha256 carries exactly one lowercase prior digest
+    - operation target may not be the transaction active journal, history file, mutation lock, or another effect's private work file
+    - candidate bytes are copied to immutable transaction work evidence during prepare; later caller mutation cannot affect activation
+
+activate_file_set_effect:
+  rules:
+    - entries are 1..1048576
+    - destination paths are unique under target-platform path semantics
+    - source/destination exact path pairs are not equal
+    - destination_policy is per-entry and fixed before prepare
+    - plan order is activation/recovery order; coordinator never sorts entries
+    - prepared index/chunks use arena_install_transaction_recovery_formats_v1 exactly
+
+relocate_managed_tree_effect:
+  rules:
+    - source and destination differ and do not overlap
+    - user_preserved cross-volume is rejected during prepare before any external mutation
+    - installer_managed cross-volume leaves source authoritative until commit_decided
+    - no copy-delete shortcut may be represented as a successful same-volume move
+
+layout_locator_effect:
+  rules:
+    - replacement absent is valid only for uninstall
+    - replacement present for install/upgrade/repair/layout_initialize/layout_migrate
+    - expected_prior absent is valid for initial locator establishment
+    - both expected_prior and replacement absent is invalid
+    - replacement generation must match transaction layout_generation when that field is present
+    - replacement installation_id must match transaction installation_id
+
+ensure_directory_effect:
+  rules:
+    - plan may use this effect only for an Installer-owned layout directory or exact provider workspace required by later prepared effects
+    - rollback never recursively deletes unexpected contents
+    - creation of an arbitrary user-selected/external directory is not transaction infrastructure
+
+quarantine_owned_path_effect:
+  rules:
+    - directory kind is ordinary directory only; links/reparse/special objects fail prepare
+    - a user_preserved path is not quarantined by install/upgrade/repair/layout effects
+    - transactional uninstall may quarantine only paths explicitly classified removable by the #10 RemovalLifecycle plan
+
+validation:
+  - planned service status action rejected before prepare
+  - start/stop/restart derive exact compensation and terminal state
+  - every accepted/rejected provider operation pair
+  - provider component identity mismatch rejected
+  - directory enum serializes to directory_tree and round-trips
+  - publish_state candidate immutability after caller-buffer change
+  - file-set path duplicate/collision/order tests
+  - cross-volume preserved relocation rejected before staging/activation
+  - locator operation/generation/installation-id constraints
+  - unexpected directory contents are never recursively removed during rollback
+
+stop_conditions:
+  - neutral ServiceControl or ProviderLifecycle must be broadened/changed to express these transaction subsets
+  - effect pairing would require provider-specific reason interpretation
+  - another semantic object kind/effect kind appears necessary

@@ -1,0 +1,116 @@
+meta:
+  spec_id: arena_provider_lifecycle_transactional_v1
+  version: 1
+  status: active
+  owner: provider_lifecycle
+  parent_issue: 51
+  required_by_issue: 9
+  specializes: arena_provider_lifecycle_v1
+
+authority_relationship: >
+  This specification adds the generic transactional convergence requirement
+  needed for truthful crash recovery. It remains inside the existing
+  ProviderLifecycle LEGO and does not transfer provider implementation,
+  qualification, remediation, or transaction ownership to Installer.
+
+hierarchy:
+  lego:
+    brick: ProviderLifecycle
+    rule: no new lifecycle brick or transaction owner is created
+  solid:
+    single_responsibility: define repeat/compensation safety of the existing neutral lifecycle operation
+    open_closed: every provider satisfying startup-control v3 obeys the same convergence law
+    liskov: the same exact request has the same target lifecycle meaning after zero, one, or repeated invocations
+    interface_segregation: no transaction journal or provider-specific state is added to the port
+    dependency_inversion: InstallTransactionCoordinator relies on this neutral behavior, never provider internals
+  cupid:
+    - composable with the existing request/result port
+    - predictable repeated forward/compensation semantics
+    - domain-based lifecycle operations only
+  kiss: >
+    Do not add an idempotency service, provider registry, provider-specific
+    reason switch, or second wire protocol merely for recovery. The existing
+    state-oriented lifecycle operations must converge safely.
+
+transactional_convergence:
+  applies_when: ProviderLifecycleRequest is used as an install transaction effect
+  exact_request_identity:
+    - component_id
+    - component_version
+    - operation
+    - executable
+    - working_directory
+    - ordered arguments
+    - policy
+  forward_rule: >
+    Repeating the same exact request after an ambiguous process/crash boundary
+    must converge to the same operation-specific neutral terminal state or a
+    failed result. It must not duplicate irreversible external effects or require
+    Installer to know whether an earlier invocation reached the provider.
+  compensation_rule: >
+    A transaction supplies one exact paired compensation request. The provider
+    must tolerate that compensation when the forward operation definitely ran,
+    partially ran, or may not have started. Repeating the same compensation
+    request must likewise converge without duplicate irreversible effects.
+  failure_rule: >
+    If a provider cannot satisfy this generic convergence law for an operation,
+    that operation is not eligible for transactional Installer use. The provider
+    contract/workflow must be corrected in its owning repository; Installer may
+    not add provider-name recovery branches.
+
+operation_expectations:
+  install:
+    target: installed with the declared ready or safe_inactive state
+    normal_compensation: uninstall
+    repeated_install: converges to the same installed/configured state
+    uninstall_when_install_uncertain: converges to absent/inactive
+  uninstall:
+    target: absent/inactive
+    repeated_uninstall: converges to absent/inactive
+    compensation: >
+      An uninstall effect is transactionally permitted only when the caller has
+      an exact install/post-replace compensation request capable of restoring
+      the prior provider state after filesystem/config authority is restored.
+  pre_replace:
+    target: installed/inactive/configuration-matching/replacement-safe
+    normal_compensation: post_replace for the prior active root
+    repeated_pre_replace: converges to the same quiesced replacement-safe state
+  post_replace:
+    target: replacement-safe and ready or explicitly safe_inactive
+    normal_compensation: pre_replace for the replacement root; reverse transaction order later restores prior root and its earlier pre_replace compensation restarts it
+    repeated_post_replace: converges to the same terminal replacement state
+
+transaction_interaction:
+  - InstallTransactionCoordinator durably records activation_started before invoking a provider request
+  - a failed disposition triggers transaction rollback because safety was not proven
+  - if crash timing leaves forward completion unknown, rollback invokes the exact compensation request rather than interpreting reason ids or provider files
+  - accepted ready/safe_inactive results remain ordinary ProviderLifecycleResult evidence
+  - reason id/message are never used to choose recovery behavior
+  - no provider transaction id, journal path, or Installer state file is added to the neutral request
+
+legacy_wire_rule: >
+  Legacy v1/v2 adapters are transactionally eligible only when the provider
+  implementation behind that exact legacy contract already satisfies these same
+  convergence rules. Compatibility syntax is not an exemption from recovery
+  correctness.
+
+validation:
+  - fake provider proves repeated install/uninstall are state-convergent
+  - fake replacement provider proves repeated pre_replace/post_replace converge
+  - compensation succeeds when forward definitely ran
+  - compensation succeeds when forward did not run
+  - compensation succeeds after a simulated ambiguous partial/connection failure
+  - repeated compensation is safe
+  - provider reason changes do not alter transaction behavior
+  - a deliberately non-convergent provider fixture is rejected as transaction-ineligible
+
+implementation_relationship:
+  - PL-01 through PL-04 keep the existing public request/result surface
+  - PL-04 integration tests gain convergence fixtures before TX-05 may begin
+  - no public field/schema change is required unless implementation proves this state-oriented contract cannot be met; that condition is blocked_architecture
+
+stop_conditions:
+  - a provider-specific recovery branch appears necessary
+  - a provider needs Installer journal state or transaction internals
+  - the same exact request cannot safely converge
+  - compensation cannot be safely issued when forward completion is ambiguous
