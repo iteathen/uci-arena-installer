@@ -1,0 +1,137 @@
+meta:
+  spec_id: arena_provider_lifecycle_serialization_v1
+  version: 1
+  status: active
+  owner: provider_lifecycle
+  parent_issue: 51
+  required_by_issue: 9
+  specializes: arena_provider_lifecycle_v1
+
+authority_relationship: >
+  This specification freezes one pure public serialization function for the
+  already-owned ProviderLifecycleResult. It remains inside the ProviderLifecycle
+  LEGO and adds no provider behavior, persistence owner, transaction semantics,
+  or provider-specific interpretation. Transaction-derived receipts and other
+  Installer evidence may reuse this exact neutral representation rather than
+  duplicating enum/string/schema logic.
+
+hierarchy:
+  lego:
+    brick: ProviderLifecycle
+    rule: serialization is an internal/public utility of the existing neutral lifecycle contract, not a new LEGO
+  solid:
+    single_responsibility: map one validated neutral result value to its exact versioned JSON document
+    open_closed: a future incompatible result schema adds a new explicit serializer/version
+    liskov: every equivalent ProviderLifecycleResult serializes to the same semantic JSON object
+    interface_segregation: no request, provider adapter, transaction, file, or receipt API enters the serializer
+    dependency_inversion: consumers depend on neutral lifecycle values rather than legacy/provider wire fields
+  cupid:
+    - composable pure result-to-document conversion
+    - predictable exact enum strings and fields
+    - idiomatic nlohmann JSON value construction
+    - domain-based lifecycle vocabulary
+  kiss: >
+    Use one direct switch per fixed enum. Do not add reflection, a generic enum
+    serializer, a provider-specific formatter, a schema registry, or persistence.
+
+public_surface:
+  header: include/arena/ports/provider_lifecycle.hpp
+  implementation: src/adapters/provider_lifecycle.cpp
+  declaration: |
+    [[nodiscard]] nlohmann::json
+    provider_lifecycle_result_to_json(
+        const ProviderLifecycleResult& result);
+  rules:
+    - function has no side effects and performs no I/O
+    - it validates the same identity, disposition, observation, and bounded reason invariants required for a neutral result before returning JSON
+    - an invalid manually-constructed result throws a bounded contract error; it is never silently normalized into another result
+    - ordinary valid results returned by ProviderLifecycle::invoke serialize without provider interaction
+
+exact_document:
+  root_fields_in_order_of_construction:
+    - schema
+    - schema_version
+    - component_id
+    - component_version
+    - operation
+    - disposition
+    - observed
+    - reason when present
+  constants:
+    schema: arena_provider_lifecycle_result_v1
+    schema_version: 1
+  operation_strings:
+    install: install
+    uninstall: uninstall
+    pre_replace: pre_replace
+    post_replace: post_replace
+  disposition_strings:
+    ready: ready
+    safe_inactive: safe_inactive
+    failed: failed
+  observed:
+    fields:
+      - installation
+      - activity
+      - configuration
+      - replacement
+    installation:
+      installed: installed
+      absent: absent
+      unknown: unknown
+    activity:
+      active: active
+      inactive: inactive
+      unknown: unknown
+    configuration:
+      matches: matches
+      mismatch: mismatch
+      not_applicable: not_applicable
+      unknown: unknown
+    replacement:
+      safe: safe
+      unsafe: unsafe
+      not_applicable: not_applicable
+      unknown: unknown
+  reason:
+    absent: omit the `reason` member entirely
+    present:
+      object_fields:
+        - id
+        - message
+      bounds: inherit arena_provider_lifecycle_v1 exact reason bounds
+  unknown_fields: none
+  compatibility: >
+    Legacy v1/v2 provider stdout is first mapped to ProviderLifecycleResult by
+    the existing compatibility decoder. This serializer never emits legacy field
+    names or envelopes.
+
+serialization_bytes_when_persisted:
+  rule: >
+    This function returns a JSON value, not bytes. A persistence owner using the
+    transaction recovery/document convention serializes the returned value with
+    default nlohmann object semantics, `dump(2)`, and one LF. Provider wire stdout
+    remains governed independently by the provider lifecycle schema.
+
+validation:
+  - exact JSON for all four operations and every valid ready observation set
+  - exact install/post_replace safe_inactive result with opaque reason
+  - failed result with bounded reason
+  - ready with omitted and optional present reason
+  - every operation/disposition/observation mismatch rejected
+  - safe_inactive forbidden operations rejected
+  - missing required reason for safe_inactive/failed rejected
+  - oversized/invalid reason rejected
+  - legacy-compatible neutral result serializes only neutral v1 names
+  - deterministic deep equality across repeated calls
+  - no provider invocation or filesystem/process operation
+
+implementation_relationship:
+  - PL-01 (#90) owns implementation of this pure function alongside the neutral port because no implementation has started yet
+  - PL-04 uses it for new receipt/journal evidence instead of duplicating result JSON construction
+  - transaction publish_derived_state consumes it indirectly from exact provider effect evidence
+
+stop_conditions:
+  - a provider-specific field appears necessary
+  - serializer needs provider request/context or I/O
+  - the existing neutral value cannot represent its declared schema
