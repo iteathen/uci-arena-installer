@@ -28,6 +28,9 @@
         "install",
         "upgrade",
         "repair",
+        "reinstall",
+        "downgrade",
+        "replacement",
         "uninstall",
         "layout_initialize",
         "layout_migrate"
