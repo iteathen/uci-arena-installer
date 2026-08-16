@@ -152,3 +152,16 @@ specs:
       - tests/unit/setup_tests.cpp
       - CMakeLists.txt
       - package.json
+  - spec_id: arena_install_layout_execution_v1
+    path: specs/install_layout_execution_v1.yaml
+    owner: install_layout
+    applies_to:
+      - include/arena/application/installer/install_layout.hpp
+      - src/application/installer/install_layout.cpp
+      - apps/setup/main.cpp
+      - include/arena/application/installer/setup.hpp
+      - packaging/windows/apply-suite-update.ps1
+      - tools/release/build-suite-update-package.mjs
+      - tests/unit/install_layout_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
