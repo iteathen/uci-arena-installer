@@ -1,0 +1,586 @@
+meta:
+  spec_id: arena_release_provenance_v1
+  version: 1
+  status: active
+  owner: release_provenance
+  parent_issue: 76
+
+authority_relationship: >
+  Specialized active authority for component candidate provenance, trusted
+  producer policy, local/offline component signing, candidate verification, and
+  suite release lock v3. It supersedes GitHub-specific universal assumptions in
+  the signed_provenance section of installation_contract_v1 for new release
+  work. Legacy provider/managed result v1 and release lock v2 remain bounded
+  compatibility formats, not the target architecture.
+
+purpose: >
+  Separate immutable component identity and signing trust from build
+  coordination, GitHub Actions, GitHub Releases, and asset transport. A verified
+  component candidate has the same Installer-facing identity whether its
+  attestation was issued by the existing GitHub keyless workflow or by an
+  explicitly trusted local self-managed key. Local keyed mode is fully usable
+  without GitHub, gh, Actions, OIDC, Fulcio, Rekor, or network access. It proves
+  signer authenticity and exact bytes but truthfully does not claim a public
+  transparency-log timestamp.
+
+references:
+  in_toto_statement: https://in-toto.io/Statement/v1
+  dsse_specification: https://github.com/secure-systems-lab/dsse/blob/master/protocol.md
+  sigstore_bundle: https://docs.sigstore.dev/about/bundle/
+  cosign_attest_blob: https://github.com/sigstore/cosign/blob/main/doc/cosign_attest-blob.md
+  cosign_verify_blob_attestation: https://github.com/sigstore/cosign/blob/main/doc/cosign_verify-blob-attestation.md
+  pinned_cosign: 3.0.6
+
+hierarchy:
+  lego:
+    bricks:
+      - name: ComponentProvenance
+        owns:
+          - neutral component release evidence and in-toto statement semantics
+          - exact artifact/manifest/source/component/dependency identity comparison
+          - one normalized verified provenance result for release consumers
+          - independent signed-payload comparison after cryptographic verification
+        replacement_boundary: evidence/statement schema major
+        failure_boundary: identity, evidence, statement, digest, or normalization failure
+        does_not_own:
+          - signer trust roots or producer authorization
+          - Cosign execution
+          - artifact transport
+          - suite composition planning
+          - component build behavior
+      - name: ProvenanceTrustPolicy
+        owns:
+          - explicit producer ids, kinds, key epochs, scopes, and verification constraints
+          - exact trusted public-key identity for local producers
+          - exact GitHub workflow/certificate constraints for keyless producers
+          - policy versioning and key rotation
+        replacement_boundary: trust policy document/version
+        failure_boundary: missing, ambiguous, stale, mismatched, or unauthorized producer trust
+        does_not_own:
+          - private keys
+          - artifact/evidence bytes
+          - suite release lock contents
+          - transport credentials
+      - name: ProvenanceVerifier
+        owns:
+          - producer-adapter selection from one explicit policy producer id
+          - GitHub keyless verification adapter
+          - local keyed verification adapter
+          - common exact asset/evidence/bundle admission before interpretation
+          - one normalized verified component provenance result
+        replacement_boundary: producer adapter
+        failure_boundary: crypto, certificate/key, bundle, signed-payload, or adapter failure
+        does_not_own:
+          - local private-key handling or signing
+          - suite planning
+          - GitHub release transport
+          - component build internals
+      - name: LocalProvenanceSigner
+        owns:
+          - validating a local neutral evidence document against exact artifact bytes and trust policy scope
+          - constructing one deterministic in-toto statement
+          - invoking pinned Cosign with an external self-managed key and no transparency-log services
+          - immediately verifying the produced bundle through ProvenanceVerifier
+          - transactional output of the exact evidence/bundle candidate pair
+        replacement_boundary: local signer implementation/tool
+        failure_boundary: key reference, signing, immediate verification, or output publication failure
+        does_not_own:
+          - private-key generation, storage, backup, or rotation decision
+          - component build
+          - suite composition/release planning
+          - GitHub or other transport
+      - name: SuiteReleaseLockV3
+        owns:
+          - exact component candidate identities selected for one suite
+          - exact trust-policy digest and producer id per component
+          - exact artifact/evidence/bundle names and digests
+          - composition/dependency/manifest/source bindings
+          - official versus diagnostic-review eligibility
+        replacement_boundary: lock schema major
+        failure_boundary: lock/composition/policy/candidate mismatch
+        does_not_own:
+          - artifact location, GitHub release tags, mirror repositories, or local paths
+          - producer private keys
+          - next-suite derivation or operator workflow
+      - name: CandidateAssetTransport
+        owns:
+          - materializing requested exact named bytes into an explicit candidate directory
+        replacement_boundary: transport adapter
+        failure_boundary: unavailable, substituted, extra, linked, or digest-mismatched transport bytes
+        does_not_own:
+          - trust, producer authorization, evidence interpretation, or lock semantics
+    topology_rule: >
+      Trust policy, evidence meaning, cryptographic verification, local signing,
+      lock selection, and byte transport are separate LEGO bricks because they
+      have independent owners, secrets, replacement conditions, and failures.
+      They must not collapse into one GitHub workflow or release script. Each
+      brick remains coherent; do not split it into registries or provider-name
+      services without a proven ownership/lifecycle boundary.
+  solid:
+    component_provenance:
+      single_responsibility: validate and normalize one component statement
+      open_closed: a new evidence format adds a bounded normalizer, not caller branches
+      liskov: every verified result exposes identical component/source/artifact/manifest/dependency semantics
+      interface_segregation: release consumers see normalized evidence, not bundle/certificate/key fields
+      dependency_inversion: producer adapters return to the common normalizer
+    trust_policy:
+      single_responsibility: authorize one producer for exact component/repository scopes
+      open_closed: key rotation adds a new producer id/epoch and policy version
+      liskov: every producer id is explicit, unique, scoped, and independently verifiable
+      interface_segregation: no private key or transport credential appears in policy
+      dependency_inversion: verifiers depend on validated policy values
+    verifier:
+      single_responsibility: cryptographically verify one exact candidate using one selected producer adapter
+      open_closed: add a producer kind behind the common adapter contract
+      liskov: adapters enforce their complete trust model and return one normalized result
+      interface_segregation: keyless certificate rules and local-key rules never leak into common callers
+      dependency_inversion: release assembly depends on verifyComponentCandidate, not Cosign command construction
+    local_signer:
+      single_responsibility: sign and immediately verify one already-built exact candidate
+      open_closed: a future external-key adapter may replace key-file invocation without changing statement semantics
+      liskov: every local signer output verifies under the selected public-key producer policy
+      interface_segregation: signer receives an opaque key reference and never exposes/copies key contents
+      dependency_inversion: signer invokes the common verifier after Cosign
+    lock_v3:
+      single_responsibility: bind selected candidate identity and policy, never transport
+      open_closed: a new producer adapter does not add producer-specific fields to component rows
+      liskov: every row validates through the same trust-policy/normalized-provenance comparison
+      interface_segregation: transport coordinates are invocation data, absent from lock
+      dependency_inversion: release tools consume lock v3 plus explicit policy and candidate directories
+  cupid:
+    - composable evidence, policy, verifier, signer, lock, and transport modules
+    - unix-like exact validators and producer adapters with explicit input/output
+    - predictable scope, key epoch, signature, statement, and digest behavior
+    - idiomatic Node ESM, argument-array subprocesses, exact regular-file checks, and bounded JSON
+    - domain-based producer, evidence, statement, candidate, and trust-policy names
+  kiss: >
+    Use the least complex complete implementation inside the fixed modules.
+    KISS may not make GitHub an implicit authority, embed transport paths in the
+    lock, accept unsigned local evidence, weaken keyless transparency/SCT gates,
+    trust a self-asserted producer id, implement private-key management, or add
+    provider-specific verification branches.
+
+common_bounds:
+  json_bytes: 16777216
+  bundle_bytes: 16777216
+  artifact_bytes: 1099511627776
+  components_per_lock: 256
+  producers_per_policy: 64
+  scopes_per_producer: 64
+  materials_per_evidence: 1024
+  evidence_assets_per_evidence: 64
+  diagnostic_utf8_bytes: 2048
+  subprocess_timeout: 180s
+
+component_release_evidence:
+  schema: arena_component_release_evidence_v1
+  schema_file: specs/schemas/component-release-evidence.schema.json
+  statement_schema_file: specs/schemas/component-provenance-statement.schema.json
+  predicate_type: https://uci-arena.example/attestations/component-release-evidence/v1
+  statement_type: https://in-toto.io/Statement/v1
+  signed_semantics:
+    - component id/version/target and provider-versus-installer-managed ownership
+    - source repository, exact Git commit, source-tree digest, and clean-tree assertion
+    - artifact name/type/size/SHA-256 and file-set metrics where applicable
+    - component manifest digest
+    - declared component dependencies
+    - builder/invocation identity and toolchain identity digest
+    - exact external materials
+    - passed-test assertion and exact SBOM/license/test/build evidence assets
+  evidence_asset_rules:
+    - licenses and test_receipt evidence are both mandatory
+    - names are safe transport-independent leaf names
+    - exact evidence assets may live inside the component artifact or alongside build review inputs; their digest is signed
+    - generic Installer trust does not interpret provider-specific build logs
+  statement_rules:
+    - exactly one subject
+    - subject name and SHA-256 exactly equal predicate artifact name/digest
+    - predicate exactly equals the separately digest-pinned evidence JSON
+    - no extra top-level fields
+    - common validator independently compares every lock-bound field
+  normalized_verified_result: |
+    {
+      schema: "arena_verified_component_provenance_v1",
+      component_id,
+      component_version,
+      target_triple,
+      ownership,
+      source_repository,
+      source_commit,
+      artifact: { name, sha256, size_bytes, type, file_count?, installed_bytes? },
+      component_manifest_sha256,
+      dependencies,
+      producer: {
+        producer_id,
+        kind,
+        key_epoch,
+        audit_level: "transparency_logged" | "self_managed_key"
+      },
+      evidence: { format, name, sha256 },
+      bundle: { name, sha256 }
+    }
+  producer_identity_rule: >
+    The producer block is created only after cryptographic verification against
+    ProvenanceTrustPolicy. Producer identity is never accepted from the signed
+    evidence document itself.
+
+provenance_trust_policy:
+  schema: arena_provenance_trust_policy_v1
+  schema_file: specs/schemas/provenance-trust-policy.schema.json
+  policy_rules:
+    - policy id/version and producer ids are unique and explicit
+    - every producer has one kind, key epoch, evidence format, and exact scopes
+    - a scope binds source repository, ownership, and explicit component ids
+    - wildcard repositories/components/ownership are forbidden in v1
+    - overlapping producers are allowed only because a release lock selects one explicit producer id
+    - changing a public key, GitHub workflow identity, scope, or trust behavior requires a new producer id or key epoch and policy version
+    - old producer policies remain historical evidence but are never implicit fallback
+    - the release lock pins exact policy filename and SHA-256
+  github_keyless:
+    kind: sigstore_keyless_github
+    trust:
+      - exact repository/workflow path/workflow name
+      - exact OIDC issuer
+      - exact workflow trigger
+      - official ref refs/heads/main
+      - exact source commit and signed workflow identity/run/attempt from the legacy evidence
+      - Fulcio chain, SCT, Rekor inclusion, claim checking, artifact subject, predicate type, and independent DSSE payload comparison
+    official_rule: release-ready candidates require official_ref and trigger
+    diagnostic_rule: >
+      A release-ready-false diagnostic lock may derive one exact branch ref from
+      the separately digest-pinned legacy result only when producer policy
+      allow_diagnostic_refs is true. Every other keyless gate remains mandatory.
+    forbidden_flags:
+      - --insecure-ignore-tlog
+      - --insecure-ignore-sct
+      - --check-claims=false
+  local_keyed:
+    kind: sigstore_keyed_local
+    trust:
+      - exact policy-scoped component/source/ownership
+      - exact local public-key file digest
+      - exact parsed SPKI SHA-256
+      - exact key epoch
+      - Cosign public-key verification of the DSSE bundle
+      - independent DSSE statement/predicate/subject comparison
+    transparency_log: none
+    audit_level: self_managed_key
+    verification_flags:
+      - --key <exact trusted public key>
+      - --insecure-ignore-tlog
+      - --type https://uci-arena.example/attestations/component-release-evidence/v1
+    truth_rule: >
+      Local keyed mode provides authenticity and integrity under the configured
+      operator key. Because no Rekor/TSA evidence exists, it does not claim a
+      public transparency-log inclusion or trusted signing time.
+    public_key_rules:
+      - relative path resolves beneath the explicit trust-policy directory
+      - exact regular file, no symlink/reparse, no escape
+      - exact file SHA-256 matches policy
+      - parse as a Cosign-supported PEM public key
+      - exported SubjectPublicKeyInfo DER SHA-256 matches policy spki_sha256
+      - key file may be copied into self-contained release inputs because it is public verification material
+
+candidate_asset_admission:
+  common_module: tools/release/candidate-assets.mjs
+  directory_contract:
+    - caller supplies one explicit absolute candidate directory per component
+    - directory contains exactly the row artifact, evidence, and bundle leaf names
+    - all three are nonempty regular files and not links/reparse points
+    - size and SHA-256 are verified before JSON or bundle interpretation
+    - unexpected extra files/directories fail closed
+    - artifact may be large and is hashed by streaming; JSON/bundle are read under bounds
+  transport_rule: >
+    Local directories are the normal verification input. GitHub Release,
+    private mirror, removable media, or another future transport may materialize
+    the same exact three files, but transport never selects a producer, changes
+    lock meaning, or grants trust.
+  github_mirror_rule: >
+    Existing mirror-provider-assets remains an optional transport adapter. Lock
+    v3 contains no provider_asset_mirror repository/tag and does not require gh
+    or GitHub for local verification.
+
+producer_adapters:
+  common_entrypoint:
+    module: tools/release/component-provenance.mjs
+    shape: |
+      verifyComponentCandidate({
+        row,
+        component,
+        candidateDirectory,
+        trustPolicy,
+        trustPolicyDirectory,
+        cosignPath,
+        validationMode
+      }) -> arena_verified_component_provenance_v1
+  common_responsibilities:
+    - exact admit artifact/evidence/bundle through candidate-assets
+    - select exactly one producer id from validated trust policy
+    - verify producer scope, key epoch, and evidence format
+    - invoke only the selected adapter
+    - validate/normalize result and compare every lock/composition field
+    - reject undeclared dependency, manifest, source, ownership, target, or artifact mismatch
+  github_provider_adapter:
+    existing_module: tools/release/provider-provenance.mjs
+    evidence_format: provider_result_v1
+    preserve:
+      - full existing provider result schema/field validation
+      - exact workflow identity/run/attempt parsing
+      - exact keyless Cosign and independent DSSE predicate equality
+    normalization:
+      - ownership provider
+      - artifact/source/manifest from verified result
+      - dependencies remain lock/composition authority because legacy v1 did not sign them
+      - normalized result marks dependencies_verified_by as release_lock
+  github_managed_adapter:
+    existing_module: tools/release/managed-provenance.mjs
+    evidence_format: managed_result_v1
+    preserve:
+      - full existing managed result validation, upstream material/license/SBOM/test rules
+      - exact workflow identity/run/attempt parsing
+      - exact keyless Cosign and independent DSSE predicate equality
+    normalization:
+      - ownership installer_managed
+      - artifact/source/manifest from verified result
+      - dependencies remain lock/composition authority
+      - normalized result marks dependencies_verified_by as release_lock
+  local_keyed_adapter:
+    module: tools/release/local-provenance.mjs
+    evidence_format: component_evidence_v1
+    rules:
+      - validate exact evidence schema before Cosign
+      - validate exact trusted public key file and SPKI fingerprint
+      - run pinned Cosign verify-blob-attestation against the artifact with key and ignore-tlog only
+      - execute with no GitHub token, OIDC variables, gh, network, Fulcio, Rekor, or signing config
+      - parse bundle independently; require v0.3 DSSE media type, in-toto payload type, exactly one signature, canonical base64, one subject, and exact predicate equality
+      - reject certificate/keyless verification material and transparency-log entries for transparency_log none
+      - normalize dependencies as signed_evidence
+    forbidden:
+      - certificate identity fallback
+      - trust-on-first-use key
+      - public key from bundle as authority
+      - unsigned evidence
+      - network retry or keyless fallback
+
+local_provenance_signer:
+  module: tools/release/sign-local-component-provenance.mjs
+  cli_inputs:
+    - --artifact <absolute exact artifact path>
+    - --evidence <absolute exact arena_component_release_evidence_v1 path>
+    - --trust-policy <absolute exact policy path>
+    - --producer-id <local producer id>
+    - --signing-key <absolute external Cosign private-key path>
+    - --output-directory <new/replaceable bounded output directory>
+  output_directory:
+    exact_files:
+      - original evidence leaf copied byte-for-byte
+      - '<artifact_name>.sigstore.json'
+    artifact_rule: >
+      Artifact is not copied by the signer. Candidate transport later places the
+      original exact artifact beside the signer outputs.
+  private_key_rules:
+    - signer does not generate, rotate, back up, copy, print, hash, parse, or persist private-key contents
+    - reference must be one absolute regular non-link file outside repository, candidate, trust-policy, and output roots
+    - Cosign reads the key directly
+    - password may be supplied through COSIGN_PASSWORD or an interactive Cosign prompt; signer never logs it
+    - noninteractive invocation without usable key/password fails boundedly rather than hanging indefinitely
+    - key management remains operator-owned
+  statement_generation:
+    - validate evidence, exact artifact digest/size/name, policy producer scope, and public key
+    - generate deterministic JSON for the exact neutral in-toto statement
+    - stage statement and bundle in a private random output transaction directory
+  cosign_invocation:
+    executable: pinned_resolveCosignExecutable
+    command: >
+      cosign attest-blob --statement <staged_statement> --key <external_key>
+      --bundle <staged_bundle> --tlog-upload=false
+      --use-signing-config=false --yes <artifact>
+    rules:
+      - argument vector only; no shell
+      - clear/ignore GitHub OIDC variables for local mode
+      - no signing config, Fulcio, Rekor, TSA, or network service
+      - bounded timeout and bounded redacted output
+  immediate_verification:
+    - invoke local_keyed_adapter with the selected trusted public key
+    - compare returned normalized provenance to artifact/evidence/policy
+    - fail and remove staging on any mismatch
+  publication:
+    - atomically publish complete evidence/bundle output directory only after immediate verification
+    - never replace the artifact or private key
+    - output result records digests, producer id, key epoch, and audit level self_managed_key
+  network_independence_test: >
+    Signing and verification succeed with GitHub unavailable, no gh/token/OIDC,
+    an invalid proxy or blocked outbound network, and an empty Sigstore cache.
+
+suite_release_lock_v3:
+  schema: arena_suite_release_lock_v3
+  schema_file: specs/schemas/suite-release-lock-v3.schema.json
+  target_module: tools/release/release-lock.mjs
+  root_rules:
+    - exact suite/composition identity
+    - release_ready true implies validation_mode official
+    - diagnostic_review implies release_ready false
+    - exact trust-policy filename and digest
+    - one unified components array; no provider-versus-managed top-level split
+  component_row:
+    - component/version/target/ownership/source repository/source commit
+    - artifact name/SHA-256/size/type/file metrics
+    - component manifest digest
+    - exact dependencies
+    - evidence format/name/SHA-256
+    - provenance producer id/bundle name/SHA-256
+  uniqueness:
+    - component ids unique
+    - component identity exactly covers composition for required target set
+    - artifact/evidence/bundle names globally unique across the lock
+    - every row names one existing producer whose evidence format/scope matches
+  transport_absence:
+    forbidden_fields:
+      - provider_asset_mirror
+      - release_tag
+      - repository transport location
+      - local directory
+      - URL
+      - gh token or workflow dispatch data
+  official_rules:
+    - trust policy and every row exact/digest-valid
+    - GitHub producers use official ref/trigger and complete keyless gates
+    - local producers use exact key epoch/public key and signed neutral evidence
+    - no diagnostic ref or unsigned development producer is release-ready
+  diagnostic_rules:
+    - release_ready false
+    - only GitHub producer with allow_diagnostic_refs may use exact non-main workflow ref
+    - local keyed evidence remains fully signed and may also appear, but diagnostic mode never promotes release readiness
+  legacy_v2:
+    - existing v2 validation remains for historical/review input compatibility
+    - no new release-ready lock may be generated as v2 after v3 integration
+    - v2 GitHub mirror/workflow fields remain legacy-only and never enter v3 rows
+    - current checked-in draft lock may remain until issue 78 replaces its planning/input role
+
+validation_and_security:
+  required_cases:
+    - trust-policy duplicate producer/scope/field/unknown-kind rejection
+    - producer scope/ownership/component mismatch
+    - public-key file substitution, symlink, escape, digest mismatch, SPKI mismatch, malformed key
+    - GitHub certificate/workflow/ref/trigger/commit/run/attempt mismatch
+    - GitHub bundle missing/forged tlog, SCT, claims, subject, or predicate
+    - local bundle wrong key, wrong statement, certificate fallback, tlog entry, malformed DSSE, multiple signatures, wrong payload type
+    - artifact/evidence/bundle substitution, extra file, link, size/digest mismatch
+    - neutral evidence subject/predicate/source/artifact/manifest/dependency mismatch
+    - local signer wrong key, wrong scope, dirty source assertion false, artifact mismatch, partial output, immediate verification failure
+    - local sign/verify with network and GitHub unavailable
+    - lock v3 uniqueness, policy digest, composition, scope, evidence-format, and official/diagnostic gates
+    - v2 compatibility does not leak GitHub-specific fields into v3
+    - existing GitHub candidates normalize to the same core component/source/artifact/manifest identity as equivalent local neutral evidence
+  fail_closed:
+    - no unsigned local fallback
+    - no trust-on-first-use
+    - no producer id from evidence
+    - no implicit policy or public key path
+    - no GitHub release/mirror identity as trust
+    - no local ignore-SCT/check-claims switch because local adapter is key-based, not certificate-based
+    - no keyless ignore-tlog/SCT/claims switches
+    - no private key in command output, result, lock, policy, candidate directory, logs, or tests
+
+implementation_slices:
+  - id: RP-01
+    goal: add neutral evidence/statement/trust-policy schemas, validators, normalized result, and exact candidate-directory admission
+    may_touch:
+      - specs/schemas/component-release-evidence.schema.json
+      - specs/schemas/component-provenance-statement.schema.json
+      - specs/schemas/provenance-trust-policy.schema.json
+      - tools/release/component-provenance.mjs
+      - tools/release/provenance-trust-policy.mjs
+      - tools/release/candidate-assets.mjs
+      - corresponding '*.test.mjs'
+      - package.json
+    must_not_touch:
+      - Cosign producer adapters
+      - release lock
+      - clean-build/integration tools
+  - id: RP-02
+    goal: refactor existing provider and managed GitHub keyless verification into policy-selected adapters returning normalized provenance
+    prerequisite: RP-01
+    may_touch:
+      - tools/release/provider-provenance.mjs
+      - tools/release/managed-provenance.mjs
+      - tools/release/component-provenance.mjs
+      - corresponding tests
+      - package.json
+    must_not_touch:
+      - local signer/verifier
+      - release lock or suite planning
+      - provider repositories/workflows
+  - id: RP-03
+    goal: implement local keyed verifier adapter and exact trusted-public-key validation
+    prerequisite: RP-01
+    may_touch:
+      - tools/release/local-provenance.mjs
+      - tools/release/provenance-trust-policy.mjs
+      - tools/release/component-provenance.mjs
+      - corresponding tests and static test keys explicitly marked non-production
+      - package.json
+    must_not_touch:
+      - local signing
+      - release lock/clean-build
+      - production private keys
+  - id: RP-04
+    goal: implement local/offline signer with immediate local-key verification and transactional evidence/bundle output
+    prerequisite: RP-03
+    may_touch:
+      - tools/release/sign-local-component-provenance.mjs
+      - corresponding tests/fixtures
+      - package.json
+    must_not_touch:
+      - trust-policy semantics
+      - private-key generation/storage
+      - suite planning/package building
+  - id: RL-01
+    goal: implement release lock v3 schema/validator plus bounded v2 compatibility
+    prerequisite: RP-01
+    may_touch:
+      - specs/schemas/suite-release-lock-v3.schema.json
+      - tools/release/release-lock.mjs
+      - tools/release/release-lock.test.mjs
+      - package.json
+    must_not_touch:
+      - producer crypto adapters
+      - clean-build/planning/bootstrap
+  - id: RI-01
+    goal: integrate v3 trust policy and common verifier into release assembly/review/mirroring while making explicit local candidate directories sufficient
+    prerequisites: [RP-02, RP-03, RP-04, RL-01]
+    may_touch:
+      - tools/release/clean-build.mjs
+      - tools/release/diagnostic-review-inputs.mjs
+      - tools/release/mirror-provider-assets.mjs
+      - tools/release/local-release-preflight.mjs only for provenance-mode recognition
+      - release/README.md
+      - specs/installation_contract_v1.yaml signed_provenance/interfaces sections
+      - corresponding tests
+      - package.json
+    must_not_touch:
+      - release-input/next-composition planner: issue 78
+      - provider workflows/repositories
+      - fresh-install bootstrap: issue 79
+      - runtime TUF exact-file mechanics: issue 7
+      - installer transaction/runtime code
+
+delegation_stop_conditions:
+  - a producer-specific field appears necessary in lock v3 component rows
+  - a transport location appears necessary as trust authority
+  - local mode would require unsigned evidence, trust-on-first-use, or a key from the bundle
+  - GitHub keyless compatibility would require weakening tlog/SCT/claim/predicate gates
+  - private-key generation/storage/rotation must be implemented
+  - provider repository/workflow changes are required for an Installer-only slice
+  - suite composition planning or package building must be designed
+  - current Cosign 3.0.6 cannot sign/verify keyed DSSE offline as specified
+  - local and GitHub adapters cannot normalize the frozen core identity without changing its public semantics
+
+completion: >
+  Issue #76 completes only after RP-01 through RP-04, RL-01, and RI-01 are
+  integrated; release-ready component candidates can be signed and verified
+  with no GitHub/network dependency under an explicit local public-key policy;
+  existing GitHub keyless candidates preserve all current gates; lock v3 contains
+  no transport authority; and release consumers receive one normalized exact
+  component provenance result. Suite release planning/package automation remains
+  issue #78.
