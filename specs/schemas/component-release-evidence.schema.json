@@ -27,7 +27,7 @@
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9._-]+$"
     },
-    "target_triple": {"enum": ["windows-x86_64", "linux-x86_64"]},
+    "target_triple": {"enum": ["windows-x86_64", "linux-x86_64", "any"]},
     "ownership": {"enum": ["provider", "installer_managed"]},
     "source": {
       "type": "object",
