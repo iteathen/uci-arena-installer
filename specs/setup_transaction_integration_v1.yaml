@@ -1,0 +1,453 @@
+meta:
+  spec_id: arena_setup_transaction_integration_v1
+  version: 1
+  status: active
+  owner: setup_transaction_integration
+  parent_issues: [8, 9, 80]
+  integration_slice: TX-07
+  specializes:
+    - arena_install_transaction_v2
+    - arena_install_transaction_effect_constraints_v1
+    - arena_install_transaction_recovery_formats_v1
+    - arena_install_transaction_derived_state_v1
+    - arena_artifact_acquisition_v1
+    - arena_install_layout_execution_v1
+
+authority_relationship: >
+  This specification freezes only the SetupEngine integration boundary between
+  already-owned Installer LEGOs. ArtifactAcquirer/ArchiveExpander own exact
+  acquisition and archive staging, InstallLayout owns installed semantic roots
+  and installed identity, ProviderLifecycle and ServiceControl own their neutral
+  operations, and InstallTransactionCoordinator alone owns authoritative
+  mutation/rollback/recovery. SetupEngine translates already-trusted catalog,
+  component, invocation, staged-byte, and InstalledLayoutAuthority facts into
+  those fixed interfaces. It creates no second transaction, layout, filesystem,
+  provider, service, provenance, release-planning, or removal authority.
+
+hierarchy:
+  lego:
+    owner: SetupEngine integration adapter
+    consumes:
+      - InstalledLayoutAuthority
+      - SetupPaths as a root/invocation projection only
+      - ArtifactAcquirer
+      - ArchiveExpander
+      - InstallTransactionCoordinator
+      - existing component/catalog/provider integration contracts
+    does_not_own:
+      - layout identity or root selection
+      - physical filesystem identity
+      - durable authoritative publication
+      - download/cache semantics
+      - archive interpretation
+      - transaction phases/effect execution/recovery
+      - provider lifecycle meaning
+      - service state meaning
+      - release provenance or upgrade/downgrade authorization
+      - layout initialize/migrate execution
+      - uninstall/purge policy
+  solid:
+    single_responsibility: translate one reviewed component setup plan into exact acquired/staged inputs and one fixed transaction-v2 plan
+    open_closed: new component data changes catalog/manifests, not transaction orchestration or product branches
+    liskov: every installed-layout authority is consumed through the same exact binding rules
+    interface_segregation: SetupPaths remains roots/flags; InstalledLayoutAuthority remains a separate exact input
+    dependency_inversion: integration invokes fixed public owners and never reaches native/provider internals
+  cupid:
+    - one explicit installed authority input
+    - one normalized transaction operation
+    - deterministic effect construction with stable operation ids
+    - private staging with explicit parent authority
+    - exact provider/service requests produced from validated generic contracts
+  kiss: >
+    Use direct translation helpers and the fixed ten transaction effects. Do not
+    add a workflow engine, effect registry, callback effect, plugin graph,
+    alternate transaction, generic staging service, layout metadata copy inside
+    SetupPaths, or provider/product-specific switch.
+
+installed_authority_input:
+  public_type: arena::application::installer::InstalledLayoutAuthority
+  rules:
+    - TX-07 plan/apply require one already-loaded InstalledLayoutAuthority.
+    - Clean layout creation and legacy layout migration are IL-07, not TX-07.
+    - SetupPaths remains exactly the projection defined by arena_install_layout_v1 plus invocation-only flags.
+    - installation scope, installation_id, layout_generation, locator, descriptor digest, and descriptor authority are never copied into SetupPaths.
+    - Before planning and again immediately before acquisition/apply, SetupEngine requires the semantic roots in SetupPaths to equal setup_paths_from_layout(installed_authority.layout) while preserving only the existing invocation flags bundle_owner, restart_manager_service, and manager_service_access.
+    - A root mismatch, scope mismatch, descriptor/locator inconsistency, changed installation_id, or changed layout_generation fails before acquisition or transaction execution.
+    - Normal installed paths never fall back to raw CLI/default roots after InstalledLayoutAuthority is present.
+  plan_evidence:
+    schema: arena_install_plan_v1
+    additive_fields:
+      transaction_operation: exact component-operation string
+      installed_authority:
+        scope: per-user | per-machine
+        installation_id: exact InstalledLayoutAuthority installation id
+        layout_generation: exact positive generation
+        descriptor_sha256: exact descriptor digest from InstalledLayoutAuthority
+    rule: >
+      These fields are plan/audit binding only. They do not become a second
+      layout owner. Apply reuses the supplied InstalledLayoutAuthority and rejects
+      a plan whose binding or projected roots no longer match it.
+
+transaction_operation_extension:
+  authoritative_enum: arena::application::installer::InstallTransactionOperation
+  exact_values_in_order:
+    - install
+    - upgrade
+    - repair
+    - reinstall
+    - downgrade
+    - replacement
+    - uninstall
+    - layout_initialize
+    - layout_migrate
+  rationale:
+    - arena_installation_contract_v1 already treats reinstall, downgrade, and replacement as distinct lifecycle modes.
+    - Persisting them as repair or upgrade would make the transaction journal audit meaning false.
+    - purge remains outside reversible transaction operation vocabulary once irreversible deletion begins.
+  schema_compatibility:
+    journal_schema_name: arena_install_transaction_v2
+    journal_schema_version: 2
+    rule: >
+      Add reinstall, downgrade, and replacement to the existing v2 operation
+      enum before TX-01 implementation. No production transaction-v2 writer has
+      shipped, so this is a pre-implementation vocabulary completion rather than
+      reinterpretation of persisted v2 bytes.
+  setup_component_operations:
+    allowed:
+      - install
+      - upgrade
+      - repair
+      - reinstall
+      - downgrade
+      - replacement
+    forbidden:
+      - uninstall
+      - layout_initialize
+      - layout_migrate
+    rules:
+      - SetupEngine never substitutes repair for reinstall or upgrade for replacement/downgrade.
+      - Operation is an explicit normalized planner/invocation fact, not inferred by lexically comparing opaque component version strings.
+      - Upgrade/downgrade authorization and release direction remain in their existing release/planning owner; TX-07 only preserves the already-approved normalized operation.
+      - Reinstall means deliberate restaging of the same trusted component version/artifact identity, not repair of corrupt/partial state.
+      - Replacement means deliberate same-version replacement or other explicitly replacement-classified release input; it is not silently inferred from a provider reason.
+      - Current CLI surfaces may continue to expose only their already-supported commands; TX-07 must not invent downgrade/replacement product policy merely to exercise the enum. Focused SetupEngine tests may call the typed API directly for all six component operations.
+
+setup_public_delta:
+  header: include/arena/application/installer/setup.hpp
+  rules:
+    - SetupPaths fields do not change.
+    - plan receives InstalledLayoutAuthority and InstallTransactionOperation explicitly.
+    - repair/upgrade boolean mode parameters are removed from the plan boundary; one enum is the operation authority.
+    - apply receives InstalledLayoutAuthority and the three fixed integration dependencies explicitly; repair boolean is removed.
+    - apply obtains transaction_operation from the reviewed plan and rejects disagreement with its installed-authority binding.
+  target_shape: |
+    [[nodiscard]] static nlohmann::json
+    plan(const nlohmann::json& catalog,
+         const SetupPaths& paths,
+         const InstalledLayoutAuthority& installed_authority,
+         InstallTransactionOperation operation,
+         const std::string& preset,
+         const std::vector<std::string>& selected_components,
+         bool offline,
+         bool download_missing_knowledge,
+         bool download_missing_books = false,
+         bool download_missing_tablebases = false);
+
+    [[nodiscard]] static nlohmann::json
+    apply(const nlohmann::json& catalog,
+          const nlohmann::json& plan,
+          const SetupPaths& paths,
+          const InstalledLayoutAuthority& installed_authority,
+          ArtifactAcquirer& artifact_acquirer,
+          ArchiveExpander& archive_expander,
+          InstallTransactionCoordinator& transaction_coordinator,
+          bool confirmed);
+  composition_rule: >
+    apps/setup/main.cpp or the owning package/bootstrap composition constructs the
+    existing platform adapters and fixed dependency objects. No public
+    SetupServices/registry/container type is added merely to bundle three refs.
+
+explicit_staging_parent_extension:
+  problem: >
+    Transaction prepare may require a private same-volume candidate before the
+    public destination parent exists. Inferring a nearest existing ancestor or
+    hidden layout formula inside the transaction would make issue #9 a second
+    semantic path owner.
+  common_rules:
+    - A staging parent is caller-supplied authority, not a path discovered by InstallTransactionCoordinator.
+    - It is an absolute normalized bounded ordinary directory capability admitted no-follow before any stage creation.
+    - It must already exist; transaction prepare may create random private children beneath it but may not climb above it.
+    - It must be on the exact destination volume for any operation that requires a same-volume activation rename.
+    - The chosen private stage is collision-resistant, transaction-owned, absent/create-new, and remains strictly beneath the admitted staging parent.
+    - The staging parent itself is never an authoritative destination and is never recursively cleaned.
+    - Identity/binding/volume mismatch fails prepare before authoritative mutation.
+    - SetupEngine chooses staging parents only from the exact InstalledLayoutAuthority semantic roots that own the destination; IL-07 may choose an exact resolved anchor/root from its layout transition authority.
+    - No handler may call a nearest-existing-ancestor helper to choose stage authority.
+  public_transaction_delta:
+    activate_managed_tree:
+      field: std::filesystem::path staging_parent
+      required: true
+      position: after destination
+      rule: exact admitted parent on destination volume
+    activate_file_set:
+      field_location: each FileSetActivationEntry
+      field: std::filesystem::path staging_parent
+      required: true
+      position: after destination
+      rationale: one file set may target more than one semantic root/volume
+    relocate_managed_tree:
+      field: std::optional<std::filesystem::path> destination_staging_parent
+      required_when: ownership == installer_managed
+      forbidden_when: ownership == user_preserved
+      rules:
+        - same-volume installer_managed relocation validates the supplied parent but does not need to materialize a copy stage
+        - cross-volume installer_managed relocation uses it for the exact destination-volume prepared copy
+        - cross-volume user_preserved still fails before mutation and never gains copy/delete authority
+  persisted_recovery_delta:
+    activate_managed_tree_spec:
+      add_required_field: staging_parent
+    relocate_managed_tree_spec:
+      add_conditional_field: destination_staging_parent
+    file_set_chunk_entry:
+      add_required_field: staging_parent
+    rules:
+      - prepared/recovery evidence binds the caller-supplied parent as well as the actual random stage path
+      - recovery never reconstructs the parent from stage_path or destination ancestry
+      - these exact additions are implemented by TX-01/TX-03/TX-04; Spark may not choose alternative persisted names or shapes
+
+setup_staging_choice:
+  rules:
+    - Component immutable-tree activation uses installed_authority.layout.resolved.roots.install as staging_parent.
+    - Knowledge-root file activation uses installed_authority.layout.resolved.roots.knowledge as that entry's staging_parent.
+    - Data-root generated/configuration file activation uses installed_authority.layout.resolved.roots.data as that entry's staging_parent.
+    - Workspace-root generated/provider-workspace file activation uses installed_authority.layout.resolved.roots.workspace as that entry's staging_parent.
+    - Cache is disposable acquisition/expansion input authority only; it is not an activation destination authority.
+    - If a destination does not belong to one exact allowed semantic root, SetupEngine fails instead of choosing an ancestor heuristically.
+    - If the selected semantic root does not yet exist, TX-07 is not permitted to create a hidden pre-transaction authority; layout initialization/migration or an explicit earlier architecture-owned prerequisite must establish it.
+
+acquisition_and_private_input_staging:
+  artifact_rules:
+    - Every catalog artifact/source is acquired only through ArtifactAcquirer after its trusted exact size/digest/source list has been established.
+    - SetupEngine does not keep curl/download/cache-fallback logic.
+    - Archive artifacts are expanded only through ArchiveExpander using the returned admitted artifact capability.
+    - ArchiveExpander destination is one collision-resistant absent private SetupEngine input root under the installed cache semantic root; that root is input evidence, never installed authority.
+    - ArchiveExpander expected_expanded_file_bytes comes from the trusted component installed_bytes contract as already frozen by arena_artifact_acquisition_v1.
+    - File-set manifest and member bytes are individually acquired through ArtifactAcquirer with their exact trusted identities; existing component-manifest synthesis remains bounded private input construction only.
+    - Private input construction may write only beneath the exact random cache input root and is removed by exact owned cleanup after the transaction reaches a terminal direction.
+    - Transaction effects exact-admit/hash their input again during prepare; SetupEngine staging is not transaction verification.
+  forbidden:
+    - direct libcurl in SetupEngine
+    - direct libarchive extraction in SetupEngine
+    - shared predictable .partial or .staging authority
+    - treating cache/input staging as installed or rollback authority
+    - reopening an archive pathname for ArchiveExpander
+
+transaction_plan_construction:
+  root:
+    operation: exact reviewed transaction_operation from SetupEngine plan
+    scope: installed_authority.layout.resolved.scope
+    installation_id: installed_authority.layout.installation_id
+    layout_generation: installed_authority.layout.layout_generation
+    transactions_root: installed_authority.layout.resolved.roots.transactions
+  effect_count_limit: inherit arena_install_transaction_v2
+  operation_ids:
+    rule: deterministic from plan order and semantic role, unique within plan, bounded by transaction identifier rules
+    recommended_shape: tx07.<zero-padded-index>.<semantic-role>
+    note: random transaction id remains coordinator-owned; operation ids are not transaction ids
+  fixed_effects_only:
+    - ensure_directory
+    - publish_state
+    - publish_derived_state
+    - activate_managed_tree
+    - activate_file_set
+    - relocate_managed_tree
+    - quarantine_owned_path
+    - provider_lifecycle
+    - service_control
+    - layout_locator
+  forbidden_effects:
+    - generic callback
+    - refresh-consumers callback
+    - script effect
+    - provider-specific effect
+    - arbitrary file writer
+    - nested transaction
+
+component_translation:
+  keep:
+    effects: none
+  new_or_restaged_component:
+    ordered_rules:
+      - acquire and validate all exact artifact/private input data before coordinator execution
+      - add any required ensure_directory effects only for authoritative directories whose semantics already belong to the installed layout/component contract
+      - activate the immutable component tree with activate_managed_tree using explicit install-root staging_parent
+      - express bounded generated/knowledge file activations as activate_file_set with one explicit semantic staging_parent per entry
+      - express exact generated JSON/config documents and non-provider receipts through publish_state
+      - provider startup evidence uses provider_lifecycle plus publish_derived_state, never a post-publication receipt rewrite
+  replacement_with_provider_control:
+    ordered_rules:
+      - exact prior receipt/provider control is frozen before coordinator execution
+      - provider pre_replace effect occurs before replacement of the controlled component tree when the validated provider contract requires replacement quiescence
+      - its compensation request is the exact prior post_replace convergence request
+      - component/config/file effects follow
+      - provider post_replace effect occurs after replacement inputs are authoritative and before final receipt publication
+      - provider receipt uses one publish_derived_state sourced from that exact earlier verified post_replace effect
+      - no Installer branch interprets provider reason ids
+  install_with_provider_control:
+    ordered_rules:
+      - component/config/file effects first
+      - provider install effect after its executable/configuration inputs are present
+      - provider receipt publish_derived_state immediately after that provider effect unless intervening fixed dependencies are required by the component contract
+      - derived source operation is exactly install as required by arena_install_transaction_derived_state_v1
+  provider_receipts:
+    no_lifecycle_effect: literal publish_state with startup absent or preserved only as permitted by receipt compatibility rules
+    lifecycle_install_or_post_replace: publish_derived_state with frozen base receipt startup absent
+    legacy_startup_object_new_write: forbidden
+  dependent_provider_quiescence:
+    rule: >
+      Existing validated providers whose startup controller depends on a replaced
+      component are represented by explicit pre_replace/uninstall and matching
+      post_replace/install ProviderLifecycle effects in deterministic dependency
+      order. Their final receipt startup evidence is an explicit derived receipt
+      publication. The old SetupEngine startup_quiescence side journal and
+      consumer-refresh rollback loop are removed; no generic refresh effect is
+      introduced.
+  service_restart:
+    rule: >
+      Existing restart_manager_service intent becomes one final service_control
+      restart effect after component/provider/receipt effects that must be visible
+      to Manager. The fixed ServiceControl result must verify completed/active.
+      SetupEngine never calls native service control directly.
+  locator_rule: >
+    Normal TX-07 component operations do not mutate the installed-layout locator.
+    Layout locator mutation is IL-07/removal ownership. A need for TX-07 to alter
+    locator authority is blocked_architecture.
+
+prepare_barrier:
+  before_execute:
+    - plan/authority match revalidated
+    - all ArtifactAcquirer requests complete with exact admitted capabilities/evidence
+    - all archive/file-set private inputs complete and component payload/manifest semantics validated
+    - exact prior receipts/configuration/documents/provider requests needed for rollback are available to construct the fixed plan
+    - no authoritative installation target, receipt, provider lifecycle, service, or locator has mutated
+  coordinator_rule: >
+    InstallTransactionCoordinator still performs its own all-effects transaction
+    prepare barrier. TX-07 pre-staging supplies external immutable inputs; it does
+    not weaken transaction prepare or effect verification.
+
+result_and_cleanup:
+  success:
+    - return one bounded SetupEngine result derived from InstallTransactionResult plus component receipt/evidence projections already owned by existing contracts
+    - never report committed unless coordinator result is committed
+  precommit_failure:
+    - transaction result remains source of rollback truth
+    - private cache/input staging cleanup is separate non-authoritative cleanup evidence
+  postcommit_cleanup_failure:
+    - never rewrite committed as rolled_back
+  acquisition_or_input_staging_failure:
+    - no transaction execute call
+    - no authoritative mutation
+  rule: SetupEngine never writes a competing transaction journal or claims rollback itself
+
+tx07_allowed_implementation_files:
+  - include/arena/application/installer/setup.hpp
+  - src/application/installer/setup.cpp
+  - apps/setup/main.cpp
+  - tests/unit/setup_tests.cpp
+  - CMakeLists.txt
+  - transaction schemas/header only through the prerequisite TX packet that owns those frozen public deltas, not TX-07 itself
+
+tx07_forbidden:
+  - changing any public transaction phase/effect kind
+  - adding a transaction/effect/provider/service/layout registry
+  - changing InstallLayout root or descriptor semantics
+  - copying layout identity into SetupPaths
+  - direct filesystem identity replacement or pathname-only rollback decisions
+  - direct curl/libarchive/service/provider execution after their owners are integrated
+  - provider-specific reason or product-name behavior
+  - TUF/provenance/release planning changes
+  - layout initialize/migrate execution
+  - removal/purge changes
+  - another repository
+  - parent issue closure
+  - defining next_step
+
+tx07_prerequisites:
+  required_integrated:
+    - ArtifactAcquirer common + native cache slices
+    - ArchiveExpander common + native extraction slices
+    - FilesystemIdentity and ExactDocumentReader
+    - DurableStatePublisher native implementations
+    - InstallLayout installed-authority loader/projection required by IL-06
+    - ProviderLifecycle including transactional convergence and neutral result serialization
+    - ServiceControl
+    - TX-01 through TX-06 with the exact operation/staging-parent delta from this spec incorporated by their owning slices
+  rule: >
+    Missing implementation prerequisites are blocked_dependency. They are never
+    permission for TX-07 to reimplement the missing owner locally.
+
+il07_boundary:
+  owner: InstallLayout integration using InstallTransactionCoordinator
+  responsibilities:
+    - translate LayoutTransitionPlan initialize/migrate into the same fixed transaction effects
+    - provide exact caller-owned staging parents from resolved layout anchors/roots for tree/file movement
+    - publish policy/descriptor/receipt rewrites through fixed publish_state/derived transaction effects as applicable
+    - mutate locator only through layout_locator effect
+    - use operation layout_initialize or layout_migrate exactly
+    - invoke one InstallTransactionCoordinator
+    - reload InstalledLayoutAuthority only after committed transaction result
+  exclusions:
+    - normal component acquisition/staging
+    - second transaction or layout engine
+    - nearest-existing-ancestor staging inference
+    - user-preserved cross-volume copy/delete
+    - provider-specific migration meaning
+  delegation_rule: >
+    IL-07 may be delegated only after this spec and TX-01..TX-06 public/effect
+    interfaces are integrated. Its Spark packet must name exact LayoutTransition
+    fields/effect mapping and may not redesign transaction or layout contracts.
+
+validation:
+  architecture_falsifiers:
+    - SetupPaths gains scope/installation_id/layout_generation/descriptor digest
+    - plan/apply can run an installed mutation without InstalledLayoutAuthority
+    - repair/upgrade booleans remain the transaction operation authority
+    - reinstall/downgrade/replacement are persisted under another name
+    - transaction handler discovers staging parent by climbing destination ancestors
+    - one file-set effect assumes every destination shares one volume
+    - cross-volume user-preserved move gets a staging parent/copy-delete path
+    - SetupEngine retains a transaction journal/rollback loop
+    - SetupEngine calls curl/libarchive/native service/provider controls directly after prerequisites integrate
+    - provider result reason selects Installer behavior
+    - TX-07 mutates layout locator
+  focused_tests:
+    - every component transaction operation serializes exact journal operation string
+    - authority/root/descriptor/generation mismatch blocks before acquisition
+    - stale plan after layout generation change blocks before acquisition
+    - staging parent missing/wrong-volume/substituted blocks transaction prepare
+    - managed-tree destination parent absent still prepares using explicit semantic staging parent
+    - file-set entries across two semantic roots preserve distinct staging parents
+    - installer-managed cross-volume relocation uses explicit destination staging parent; user-preserved rejects
+    - no direct download/archive/service/provider legacy path is reachable from migrated apply
+    - install provider receipt derives exact neutral install result
+    - replacement provider receipt derives exact neutral post_replace result
+    - dependent provider quiescence/restart is represented only by fixed provider effects and derived receipts
+    - service restart is one fixed service_control effect
+    - failure before coordinator execute mutates no authoritative target
+    - coordinator rollback/rollback_failed/commit truth is returned without SetupEngine reinterpretation
+
+stop_conditions:
+  - a component behavior cannot be represented by the fixed ten effects
+  - a required semantic destination has no exact InstalledLayoutAuthority root/owner
+  - a new public transaction phase/effect kind appears necessary
+  - a provider/service result requires product-specific interpretation
+  - truthful upgrade/downgrade/replacement classification would require TX-07 to absorb release-planning policy
+  - a layout initialization/migration mutation is required for the requested normal component operation
+  - a staging parent cannot be supplied without inventing path authority
+  - another repository must change for this slice
+
+completion_relationship: >
+  This architecture is complete when the transaction operation vocabulary and
+  staging-parent delta are integrated by their owning TX slices, TX-07 can be
+  implemented solely as SetupEngine translation/composition, and IL-07 can then
+  consume the same exact transaction interfaces without creating another owner.
