@@ -1,0 +1,716 @@
+meta:
+  spec_id: arena_exact_filesystem_state_v1
+  version: 1
+  status: active
+  owner: exact_filesystem_state
+  parent_issue: 7
+
+authority_relationship: >
+  Specialized active authority for physical filesystem identity, exact immutable
+  document admission, bounded JSON parsing, durable authoritative-state
+  publication, and exact-byte TUF trust consumption. It complements the
+  installation contract and issue #9 transaction architecture; it does not own
+  receipt, journal, layout, removal, acquisition, or provider semantics.
+
+purpose: >
+  Installer must verify, interpret, publish, and later reuse the exact physical
+  bytes and filesystem objects it admitted. Pathnames are locators, not identity.
+  Pre-activation failure preserves prior authority. Post-activation uncertainty
+  is reported truthfully instead of being disguised as ordinary failure.
+
+references:
+  tuf_specification: https://theupdateframework.github.io/specification/latest/
+  tuf_reference_json_serializer: https://github.com/theupdateframework/python-tuf/blob/develop/tuf/api/serialization/json.py
+  olpc_canonical_json_reference: https://github.com/secure-systems-lab/securesystemslib/blob/main/securesystemslib/formats.py
+  windows_create_file: https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-createfilew
+  windows_file_information: https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex
+  windows_move_file: https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-movefileexw
+  posix_open: https://pubs.opengroup.org/onlinepubs/9799919799/functions/open.html
+  posix_rename: https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html
+
+hierarchy:
+  lego:
+    bricks:
+      - name: FilesystemIdentity
+        owns:
+          - no-follow physical admission of regular files and directories
+          - stable open-object identity and metadata observations
+          - descriptor-bound reading
+          - re-observation of the open object and original path binding
+          - exact child admission relative to an admitted directory
+        replacement_boundary: platform adapter family
+        failure_boundary: admission, identity, binding, or descriptor I/O failure
+        does_not_own:
+          - JSON or TUF semantics
+          - document-role byte limits
+          - durable publication
+          - download, extraction, transaction, layout, or deletion policy
+      - name: ExactDocumentReader
+        owns:
+          - bounded one-pass read from an admitted file capability
+          - SHA-256 over the exact returned byte buffer
+          - before/after object and path-binding verification
+          - bounded duplicate-rejecting JSON interpretation of the same bytes
+        replacement_boundary: document/JSON reader implementation
+        failure_boundary: byte admission, stability, digest, or parse failure
+        does_not_own:
+          - native filesystem identity
+          - TUF role or signature policy
+          - durable publication
+      - name: DurableStatePublisher
+        owns:
+          - authoritative-state publication request/result semantics
+          - explicit prior-state precondition
+          - per-target writer serialization
+          - random private same-directory staging
+          - candidate flush, exact reread, atomic activation, post-verification, and durability evidence
+          - truthful outcome and bounded cleanup evidence
+        replacement_boundary: platform publication adapter family
+        failure_boundary: lock, stage, activation, durability, verification, or cleanup failure
+        does_not_own:
+          - semantic meaning of published state
+          - transaction commit or rollback
+          - receipt, journal, layout, trust, or preservation schemas
+          - arbitrary generated-file writing
+      - name: TufJsonTrust
+        owns:
+          - Installer TUF JSON POUF
+          - OLPC canonical serialization of each signed object
+          - exact root/timestamp/snapshot/targets/catalog consumption
+          - exact rollback-state admission/publication
+          - exact retained-development-trust admission
+        replacement_boundary: TUF trust consumer
+        failure_boundary: canonicalization, signature, role, rollback, expiry, or byte mismatch
+        does_not_own:
+          - remote signing or release-provenance producer policy
+          - repository generation
+          - artifact acquisition or install transaction policy
+    topology_rule: >
+      These are separate LEGO bricks because physical identity, immutable
+      interpretation, durable mutation, and TUF trust have different owners,
+      consumers, replacement conditions, and failure consequences. They share
+      narrow ports and must not collapse into one unbounded filesystem utility.
+      Each brick remains coherent and must not be split further without a proven
+      ownership, lifecycle, replacement, or failure boundary.
+  solid:
+    filesystem_identity:
+      single_responsibility: exact read-only physical object capabilities
+      open_closed: add a platform adapter without changing consumers
+      liskov: identical identity, binding, child-open, and read semantics
+      interface_segregation: no native handles or mutation methods cross the port
+      dependency_inversion: ExactDocumentReader and publication adapters consume the neutral port
+    exact_document:
+      single_responsibility: one stable bounded byte document and optional bounded JSON value
+      open_closed: role-specific limits are data
+      liskov: every accepted document hashes and parses one byte buffer
+      interface_segregation: byte admission and JSON interpretation remain separate operations
+      dependency_inversion: consumes admitted neutral capabilities
+    durable_publisher:
+      single_responsibility: compare, stage, activate, verify, and report one state-file publication
+      open_closed: add a platform adapter behind the same outcomes
+      liskov: identical preconditions and truthful activation evidence
+      interface_segregation: semantic owners provide bytes/precondition and receive evidence only
+      dependency_inversion: platform adapters are composed with FilesystemIdentity; they do not duplicate it
+    tuf_trust:
+      single_responsibility: verify the existing Installer TUF JSON chain over exact documents
+      open_closed: a different POUF requires an explicit versioned contract
+      liskov: canonical bytes match the declared reference format
+      interface_segregation: trust sees exact documents/publication, not native path helpers
+      dependency_inversion: depends on ExactDocumentReader and DurableStatePublisher
+  cupid:
+    - composable through admitted capabilities and fixed request/result values
+    - unix-like helpers each admit, read, parse, canonicalize, stage, activate, or verify one thing
+    - predictable identity, bounds, preconditions, outcomes, and diagnostics
+    - idiomatic C++20 RAII and native APIs behind adapters
+    - domain-based identity/document/publication/TUF names
+  kiss: >
+    Use the least complex complete implementation inside the fixed bricks. KISS
+    may not reopen a path, replace physical identity with lexical checks, use
+    predictable staging, delete prior authority before replacement, hide
+    post-activation uncertainty, or substitute generic JSON dumping for TUF
+    canonicalization.
+
+shared_bounds:
+  path_utf8_bytes: 131072
+  leaf_utf8_bytes: 4096
+  diagnostic_code_bytes: 64
+  diagnostic_message_utf8_bytes: 512
+  sha256_hex_bytes: 64
+  identity_token_bytes: 32
+  exact_document_global_max_bytes: 67108864
+  publication_global_max_bytes: 67108864
+  operation_timeout_minimum: 1ms
+  operation_timeout_maximum: 120s
+
+filesystem_identity:
+  public_header: include/arena/ports/filesystem_identity.hpp
+  common_implementation: src/adapters/filesystem_identity.cpp
+  platform_factory_header: include/arena/platform/filesystem_identity.hpp
+  platform_implementations:
+    windows: src/platform/windows/filesystem_identity.cpp
+    linux: src/platform/linux/filesystem_identity.cpp
+  namespace: arena::ports
+  cxx_shape: |
+    enum class FilesystemObjectKind { regular_file, directory };
+    enum class PathBindingState { same_object, missing, different_object, uninspectable };
+    enum class FilesystemIdentityErrorCode {
+        invalid_path, missing, wrong_kind, link_or_reparse, special_object,
+        access_denied, identity_unavailable, identity_changed, io_failure,
+    };
+
+    using FilesystemIdentityToken = std::array<std::byte, 32>;
+
+    struct FilesystemObservation {
+        FilesystemObjectKind kind;
+        std::uint64_t size_bytes;
+        FilesystemIdentityToken object_identity;
+        FilesystemIdentityToken metadata_identity;
+    };
+
+    class FilesystemIdentityException final : public std::runtime_error {
+      public:
+        FilesystemIdentityException(FilesystemIdentityErrorCode, std::string);
+        [[nodiscard]] FilesystemIdentityErrorCode code() const noexcept;
+    };
+
+    class AdmittedRegularFile {
+      public:
+        virtual ~AdmittedRegularFile() = default;
+        [[nodiscard]] virtual const std::filesystem::path& absolute_path() const noexcept = 0;
+        [[nodiscard]] virtual const FilesystemObservation& initial_observation() const noexcept = 0;
+        [[nodiscard]] virtual std::size_t read_at(
+            std::uint64_t offset, std::span<std::byte> destination) = 0;
+        [[nodiscard]] virtual FilesystemObservation observe_open_object() const = 0;
+        [[nodiscard]] virtual PathBindingState observe_path_binding() const = 0;
+    };
+
+    class AdmittedDirectory {
+      public:
+        virtual ~AdmittedDirectory() = default;
+        [[nodiscard]] const std::filesystem::path& absolute_path() const noexcept;
+        [[nodiscard]] const FilesystemObservation& initial_observation() const noexcept;
+        [[nodiscard]] std::unique_ptr<AdmittedRegularFile>
+        open_regular_file(std::string_view leaf) const;
+        [[nodiscard]] std::unique_ptr<AdmittedDirectory>
+        open_directory(std::string_view leaf) const;
+        [[nodiscard]] virtual FilesystemObservation observe_open_object() const = 0;
+        [[nodiscard]] virtual PathBindingState observe_path_binding() const = 0;
+      protected:
+        AdmittedDirectory(std::filesystem::path, FilesystemObservation);
+        [[nodiscard]] virtual std::unique_ptr<AdmittedRegularFile>
+        open_regular_file_validated(std::string_view leaf) const = 0;
+        [[nodiscard]] virtual std::unique_ptr<AdmittedDirectory>
+        open_directory_validated(std::string_view leaf) const = 0;
+    };
+
+    class FilesystemIdentity {
+      public:
+        virtual ~FilesystemIdentity() = default;
+        [[nodiscard]] std::unique_ptr<AdmittedRegularFile>
+        admit_regular_file(const std::filesystem::path& absolute_path);
+        [[nodiscard]] std::unique_ptr<AdmittedDirectory>
+        admit_directory(const std::filesystem::path& absolute_path);
+      protected:
+        [[nodiscard]] virtual std::unique_ptr<AdmittedRegularFile>
+        admit_regular_file_validated(const std::filesystem::path&) = 0;
+        [[nodiscard]] virtual std::unique_ptr<AdmittedDirectory>
+        admit_directory_validated(const std::filesystem::path&) = 0;
+    };
+  platform_factory_shape: |
+    namespace arena::platform {
+    [[nodiscard]] std::unique_ptr<arena::ports::FilesystemIdentity>
+    make_filesystem_identity();
+    }
+  common_enforcement:
+    - require absolute lexically normalized paths
+    - reject embedded NUL, CR, LF, and neutral path-budget overflow
+    - require child names to be one nonempty leaf, not dot/dot-dot or separator-containing
+    - preserve typed bounded adapter errors
+    - reject adapter admission whose initial kind differs from the requested kind
+    - validate child-open results through AdmittedDirectory public template methods
+  observation_contract:
+    object_identity: >
+      Opaque domain-separated SHA-256 of stable native object identity. Comparable
+      only for equality within one platform/filesystem lifetime. Native
+      device/inode and volume/file-id values never cross the port.
+    metadata_identity: >
+      Opaque domain-separated SHA-256 of object identity plus stable type, size,
+      and change observations. Access-time fields are excluded so reading does not
+      invalidate an otherwise stable document. Metadata identity never replaces
+      content hashing.
+    directory_size: 0
+    rule: >
+      Failure to obtain stable native object identity is admission failure; no
+      pathname, timestamp-only, or content-derived fallback is allowed.
+  admitted_capability_contract:
+    - read_at is descriptor/handle-bound, 64-bit-offset-safe, and never reopens the path
+    - observe_open_object uses the same open descriptor/handle
+    - observe_path_binding re-resolves every recorded component no-follow and compares object identities
+    - inspection errors return uninspectable, never same_object
+    - directories are admitted component-by-component
+    - legitimate mount boundaries are allowed; later ancestor or mount identity change is binding failure
+    - child admission is relative to the admitted directory capability and accepts one leaf only
+    - all handles/descriptors and ancestor observations are RAII-owned
+  windows_rules:
+    - use extended-length absolute paths
+    - open each existing component with CreateFileW and FILE_FLAG_OPEN_REPARSE_POINT
+    - use FILE_FLAG_BACKUP_SEMANTICS for directories
+    - inspect FileAttributeTagInfo and reject every reparse point
+    - use FileIdInfo, FileBasicInfo, and FileStandardInfo; exclude LastAccessTime from metadata identity
+    - reject devices, pipes, wrong-kind objects, and unavailable stable identity
+    - path-binding re-observation compares every recorded volume/file id
+  linux_rules:
+    - open root and later components with openat and O_NOFOLLOW
+    - use O_DIRECTORY for directories; require regular files for file capability
+    - use fstat; object identity derives from st_dev and st_ino
+    - metadata identity includes type, size, mode, link count, mtime, and ctime, not atime
+    - path-binding re-traverses with openat and compares every device/inode pair
+    - do not use stat on the final pathname as identity authority
+
+exact_document_reader:
+  public_header: include/arena/application/installer/exact_document.hpp
+  implementation: src/application/installer/exact_document.cpp
+  namespace: arena::application::installer
+  cxx_shape: |
+    struct ExactDocumentLimits {
+        std::uint64_t maximum_bytes;
+        bool require_nonempty{true};
+    };
+
+    struct ExactDocument {
+        std::vector<std::byte> bytes;
+        std::string sha256;
+        arena::ports::FilesystemObservation initial_observation;
+        arena::ports::FilesystemObservation final_observation;
+    };
+
+    struct BoundedJsonLimits {
+        std::size_t maximum_depth;
+        std::size_t maximum_values;
+        std::size_t maximum_object_members;
+        std::size_t maximum_array_items;
+        std::size_t maximum_key_utf8_bytes;
+        std::size_t maximum_string_utf8_bytes;
+        bool allow_floating_point{false};
+    };
+
+    class ExactDocumentReader final {
+      public:
+        [[nodiscard]] ExactDocument read_child(
+            const arena::ports::AdmittedDirectory& directory,
+            std::string_view leaf,
+            const ExactDocumentLimits& limits) const;
+    };
+
+    [[nodiscard]] nlohmann::json parse_bounded_json(
+        const ExactDocument& document, const BoundedJsonLimits& limits);
+  dependency_rule: >
+    ExactDocumentReader consumes an already-admitted directory capability. It
+    neither stores nor constructs a FilesystemIdentity service; the caller owns
+    capability admission and lifetime.
+  read_contract:
+    - maximum_bytes is nonzero and no greater than the global maximum
+    - require parent path binding before child open
+    - read fixed-size chunks using read_at and request at most maximum_bytes plus one byte
+    - hash the exact accumulated bytes, never the pathname
+    - require initial/final object identity, metadata identity, kind, and size to match
+    - require bytes read to equal stable observed size
+    - require file and parent path binding to remain same_object
+    - close through RAII and preserve primary versus cleanup observations
+  json_contract:
+    parser: nlohmann SAX construction with explicit limit enforcement
+    - consume only ExactDocument.bytes and require valid UTF-8
+    - reject duplicate object keys at every depth
+    - enforce depth, total-value, per-object, per-array, key, and string bounds before unbounded allocation
+    - reject floating point unless caller explicitly permits it
+    - reject binary, discarded, and unsupported values
+    - bound diagnostics without echoing document contents
+  default_json_limits:
+    maximum_depth: 64
+    maximum_values: 1000000
+    maximum_object_members: 100000
+    maximum_array_items: 100000
+    maximum_key_utf8_bytes: 4096
+    maximum_string_utf8_bytes: 1048576
+    allow_floating_point: false
+
+durable_state_publisher:
+  public_header: include/arena/ports/durable_state_publisher.hpp
+  common_implementation: src/adapters/durable_state_publisher.cpp
+  platform_factory_header: include/arena/platform/durable_state_publisher.hpp
+  platform_implementations:
+    windows: src/platform/windows/durable_state_publisher.cpp
+    linux: src/platform/linux/durable_state_publisher.cpp
+  namespace: arena::ports
+  cxx_shape: |
+    enum class PublicationPrecondition { absent, exact_sha256 };
+    enum class PublicationOutcome {
+        activated,
+        not_activated,
+        activated_durability_unproven,
+        indeterminate,
+    };
+
+    struct PublicationDiagnostic {
+        std::string code;
+        std::string message;
+    };
+
+    struct PublicationRequest {
+        std::filesystem::path target;
+        std::span<const std::byte> bytes;
+        std::uint64_t maximum_bytes;
+        PublicationPrecondition precondition;
+        std::optional<std::string> expected_prior_sha256;
+        std::chrono::milliseconds timeout;
+    };
+
+    struct PublicationResult {
+        PublicationOutcome outcome;
+        std::uint64_t candidate_size_bytes;
+        std::string candidate_sha256;
+        std::optional<std::string> prior_sha256;
+        std::optional<std::string> observed_target_sha256;
+        std::optional<PublicationDiagnostic> primary_diagnostic;
+        std::vector<PublicationDiagnostic> cleanup_diagnostics;
+    };
+
+    class DurableStatePublisher {
+      public:
+        virtual ~DurableStatePublisher() = default;
+        [[nodiscard]] PublicationResult publish(const PublicationRequest& request);
+      protected:
+        [[nodiscard]] virtual PublicationResult publish_validated(
+            const PublicationRequest& request,
+            std::string_view candidate_sha256,
+            std::string_view random_stage_id,
+            std::chrono::steady_clock::time_point deadline) = 0;
+    };
+  platform_factory_shape: |
+    namespace arena::platform {
+    [[nodiscard]] std::unique_ptr<arena::ports::DurableStatePublisher>
+    make_durable_state_publisher(arena::ports::FilesystemIdentity& identity);
+    }
+  dependency_rule: >
+    Every platform publisher adapter stores a non-owning reference to the
+    supplied FilesystemIdentity service and uses it for parent, lock, stage,
+    prior-target, and post-target admission/verification. No publisher adapter
+    may duplicate physical identity or path-binding logic.
+  common_enforcement:
+    - require absolute lexically normalized target, valid leaf, and bounded UTF-8 path
+    - require nonempty bytes, valid maximum, and bytes.size not exceeding maximum
+    - require exact_sha256 to carry one lowercase 64-hex prior digest and absent to carry none
+    - bound timeout; hash candidate once; generate random 128-bit lowercase-hex stage id
+    - capture one steady-clock deadline exactly once
+    - validate platform result identity, diagnostics, and outcome invariants
+    - any ordinary exception escaping a platform adapter becomes indeterminate with adapter_exception
+    - platform adapters must catch operational failures at the phase where they can still prove a narrower truthful outcome
+  precondition_contract:
+    absent: target must be physically absent while the per-target lease is held
+    exact_sha256: >
+      target must be an exact admitted regular file whose descriptor-bound digest
+      equals expected_prior_sha256 while the lease is held
+    rule: >
+      There is no unconditional authoritative-state overwrite. The semantic owner
+      proves absence or binds replacement to prior exact bytes.
+  platform_operation_contract:
+    - admit every parent component no-follow and reject ancestor substitution
+    - reject broad untrusted directory write authority according to platform rules
+    - derive persistent lock leaf from domain-separated SHA-256 of target leaf
+    - validate/open lock no-follow as private regular file and acquire bounded exclusive OS lock
+    - hold lock through precondition, staging, activation, post-verification, and cleanup decision
+    - create random same-directory stage exclusively with private permissions
+    - write all bytes, flush, close, exact-reopen, and verify size/digest
+    - atomically activate within the same directory; never delete prior target first
+    - exact-reopen target and verify candidate after activation
+    - perform strongest required directory/rename durability operation
+    - remove only the exact stage created by this publication
+    - collect cleanup failures without hiding primary outcome
+  outcome_contract:
+    activated:
+      - activation succeeded
+      - exact target equals candidate
+      - required file and directory durability succeeded
+    not_activated:
+      - adapter proves activation did not occur
+      - prior exact authority remains or target remains absent
+    activated_durability_unproven:
+      - adapter proves target currently equals candidate and activation occurred
+      - required post-activation durability proof failed or is unsupported
+    indeterminate:
+      - adapter cannot prove whether target is candidate, prior, absent, or another object
+    rules:
+      - only activated is semantic success
+      - post-activation uncertainty never becomes not_activated
+      - cleanup failure after activated remains activated with cleanup diagnostics
+      - callers preserve non-success outcome for recovery/operator evidence
+  diagnostics:
+    code_pattern: '^[A-Za-z0-9_.:-]+$'
+    fixed_common_codes: [invalid_request, adapter_exception, adapter_contract_violation]
+    secrets: forbidden
+  windows_rules:
+    identity: use supplied FilesystemIdentity for every exact observation
+    access_policy: >
+      Reject a parent DACL that grants file-create, directory-delete-child,
+      delete, write-DAC, or write-owner authority to Everyone, Anonymous,
+      Authenticated Users, Builtin Users, or Builtin Guests. Explicit current-user,
+      LocalSystem, Builtin Administrators, or individually named service-principal
+      ACEs are not broad authority and may remain.
+    operations:
+      - use extended paths and reparse rejection for lock/stage/native activation operations
+      - use a byte-range/file lock on the validated persistent lock handle
+      - create stage with CREATE_NEW and private or authoritative inherited ACL
+      - FlushFileBuffers on stage and post-activation target
+      - MoveFileExW without REPLACE_EXISTING for absent
+      - MoveFileExW with REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH for exact replacement
+      - exact-reopen and verify after every move result, including reported move failure
+      - if target is candidate but durability proof fails, return activated_durability_unproven
+      - if target state cannot be inspected, return indeterminate
+      - do not use unsupported REPLACEFILE_WRITE_THROUGH as proof
+  linux_rules:
+    identity: use supplied FilesystemIdentity for every exact observation
+    access_policy: >
+      Parent owner is effective uid or root and no group/other write bit is set.
+      A broader shared-directory policy requires later explicit architecture and
+      is not inferred from sticky-bit behavior.
+    operations:
+      - use openat/O_NOFOLLOW relative to admitted parent
+      - use flock or fcntl lock on validated persistent lock file
+      - create stage with O_CREAT|O_EXCL|O_NOFOLLOW mode 0600
+      - fsync stage before activation
+      - use renameat2 RENAME_NOREPLACE for absent; unsupported no-replace semantics fail closed
+      - use renameat for exact replacement while lease is held
+      - exact-reopen and verify after every rename result, including reported failure
+      - fsync parent directory after activation
+      - if target is candidate but directory fsync fails, return activated_durability_unproven
+      - if target state cannot be inspected, return indeterminate
+
+tuf_json_trust:
+  implementation_files:
+    canonical_header: include/arena/application/installer/tuf_canonical_json.hpp
+    canonical_source: src/application/installer/tuf_canonical_json.cpp
+    trust_consumer: src/application/installer/setup.cpp
+  pouf:
+    id: arena_tuf_olpc_canonical_json_v1
+    signed_bytes: >
+      UTF-8 OLPC Canonical JSON serialization of the top-level `signed` object
+      only. Wire metadata may contain permitted whitespace; signatures never
+      cover the `signatures` array.
+    allowed_types:
+      - object with string keys
+      - array
+      - string
+      - signed or unsigned integer representable by nlohmann JSON integer storage
+      - true
+      - false
+      - null
+    forbidden_types: [floating_point, binary, discarded]
+    object_order: ascending valid-UTF-8 string order matching the reference encoder
+    whitespace: none
+    string_encoding:
+      - output valid UTF-8 unchanged
+      - escape backslash and quote only
+      - reject U+0000 through U+001F
+    integers: base-10, no plus, whitespace, or redundant leading zero
+    rule: >
+      Generic nlohmann json.dump() is not canonical authority. The dedicated
+      encoder rejects every unsupported value explicitly.
+  reference_vectors:
+    - {input: '', output: '""'}
+    - {input: [1, 2, 3], output: '[1,2,3]'}
+    - {input: [], output: '[]'}
+    - {input: {}, output: '{}'}
+    - {input: {A: [99]}, output: '{"A":[99]}'}
+    - {input: {A: true}, output: '{"A":true}'}
+    - {input: {B: false}, output: '{"B":false}'}
+    - {input: {x: 3, y: 2}, output: '{"x":3,"y":2}'}
+    - {input: {x: 3, y: null}, output: '{"x":3,"y":null}'}
+    - {input_string: '"', output: '"\""'}
+    - {input_string: '\', output: '"\\"'}
+    - {rejects: floating_point}
+  role_document_limits:
+    root: {maximum_bytes: 4194304, maximum_values: 100000}
+    timestamp: {maximum_bytes: 1048576, maximum_values: 50000}
+    snapshot: {maximum_bytes: 8388608, maximum_values: 1000000}
+    targets: {maximum_bytes: 16777216, maximum_values: 1000000}
+    catalog: {maximum_bytes: 33554432, maximum_values: 1000000}
+    rollback_state: {maximum_bytes: 1048576, maximum_values: 50000}
+    retained_development_trust: {maximum_bytes: 1048576, maximum_values: 50000}
+  exact_chain_contract:
+    - admit metadata directory once and exact-read root, timestamp, snapshot, and targets as children
+    - hash and parse each document once; never reopen a role path
+    - compare described snapshot/targets length/hash to ExactDocument size/digest
+    - admit catalog parent and exact-read catalog once; compare targets description to exact size/digest
+    - verify signatures over dedicated canonical bytes of parsed signed object
+    - compute pinned root digest from ExactDocument bytes
+    - reject duplicate keys and unsupported canonical values before signature verification
+    - retain existing role, threshold, expiry, and version semantics unless separately specified
+  rollback_state_contract:
+    - exact-read prior state if present and parse under rollback-state limits
+    - serialize next bounded state deterministically
+    - publish with absent or exact prior digest precondition
+    - accept only PublicationOutcome::activated
+    - preserve durability-unproven or indeterminate outcome in failure evidence
+  retained_development_trust_contract:
+    - admit retained release directory and exact-read catalog.json plus development-trust.json
+    - compare trust catalog_sha256 to exact catalog digest
+    - never hash then reopen either path
+    - surrounding retained release-media activation remains its current lifecycle owner
+  direct_migration_boundary:
+    migrate_now:
+      - official TUF root/timestamp/snapshot/targets/catalog verification
+      - TUF rollback-state read/publication
+      - retained development catalog/trust exact admission
+    defer:
+      - transaction journals and receipts: issue 9
+      - removal preservation: issue 10
+      - installed-layout descriptor: issue 80
+      - artifact cache/download stage: issue 8
+      - generated provider configuration and locators: lifecycle owner and issue 9
+    transitional_rule: >
+      Legacy read_json, sha256_file, and write_json_atomic may remain for deferred
+      consumers, but migrated trust paths may not call them. Issue #7 does not
+      absorb every JSON read/write in setup.cpp.
+
+validation:
+  test_files:
+    filesystem_identity: tests/unit/filesystem_identity_tests.cpp
+    exact_document: tests/unit/exact_document_tests.cpp
+    durable_publication: tests/unit/durable_state_publisher_tests.cpp
+    tuf_trust: tests/unit/tuf_trust_tests.cpp
+    integration: tests/unit/setup_tests.cpp
+  required_filesystem_cases:
+    - invalid relative/non-normalized/oversized/control path
+    - missing, wrong-kind, symlink, junction/reparse, device/FIFO/socket/special object
+    - permission and inspection failure
+    - stable regular-file and directory observation
+    - descriptor read remains bound after pathname replacement
+    - path binding reports replacement and ancestor substitution
+    - child leaf rejects separator and dot/dot-dot
+    - legitimate mount admitted, later ancestor/mount identity change detected
+    - opaque identity stable for same object and different for replacement
+  required_document_cases:
+    - empty policy, exact maximum, one-byte overflow, truncation, growth, same-size mutation
+    - replacement before/during/after read and parent rebinding
+    - digest equals exact returned bytes
+    - invalid UTF-8, duplicate keys, all structural bounds, float policy
+    - no pathname reopen between hash and parse
+  required_publication_cases:
+    - absent and exact precondition success/conflict
+    - target/stage/lock link or reparse substitution
+    - stage collision, partial write, flush, reread, digest, and lock timeout failure
+    - activation failure before mutation returns not_activated
+    - target candidate plus durability failure returns activated_durability_unproven
+    - uninspectable post-state returns indeterminate
+    - cleanup failure never rewrites activation truth
+    - concurrent legitimate writers serialize and stale precondition loses safely
+    - prior authority survives every pre-activation failure
+  required_tuf_cases:
+    - OLPC canonical vectors, ordering, escaping, UTF-8, integer, control, and float behavior
+    - vectors generated by current securesystemslib reference implementation
+    - root/timestamp/snapshot/targets/catalog substitution at former check/open points
+    - same-size mutation, duplicate keys, and canonical mismatch
+    - signature threshold counts a key id once
+    - rollback-state publication outcomes and retained exact catalog binding
+    - source search proves migrated trust paths avoid legacy read/hash/write helpers
+
+implementation_slices:
+  - id: FI-01
+    goal: add neutral FilesystemIdentity types/template validation and fake-capability tests
+    may_touch:
+      - include/arena/ports/filesystem_identity.hpp
+      - include/arena/platform/filesystem_identity.hpp
+      - src/adapters/filesystem_identity.cpp
+      - tests/unit/filesystem_identity_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [platform adapters, exact document, publisher, TUF, SetupEngine]
+  - id: FI-02
+    goal: implement Windows filesystem identity/capabilities and native tests
+    prerequisite: FI-01
+    may_touch:
+      - src/platform/windows/filesystem_identity.cpp
+      - tests/unit/filesystem_identity_tests.cpp
+      - private Windows identity support files if strictly necessary
+      - CMakeLists.txt
+  - id: FI-03
+    goal: implement Linux filesystem identity/capabilities and native tests
+    prerequisite: FI-01
+    may_touch:
+      - src/platform/linux/filesystem_identity.cpp
+      - tests/unit/filesystem_identity_tests.cpp
+      - private Linux identity support files if strictly necessary
+      - CMakeLists.txt
+  - id: ED-01
+    goal: implement ExactDocumentReader and bounded duplicate-rejecting JSON parser
+    prerequisite: FI-01
+    may_touch:
+      - include/arena/application/installer/exact_document.hpp
+      - src/application/installer/exact_document.cpp
+      - tests/unit/exact_document_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [TUF semantics, durable publication, SetupEngine]
+  - id: DP-01
+    goal: add neutral DurableStatePublisher contract/common enforcement and fake-adapter tests
+    may_touch:
+      - include/arena/ports/durable_state_publisher.hpp
+      - include/arena/platform/durable_state_publisher.hpp
+      - src/adapters/durable_state_publisher.cpp
+      - tests/unit/durable_state_publisher_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [platform publication adapters, semantic state consumers]
+  - id: DP-02
+    goal: implement Windows publisher composed with FilesystemIdentity and native tests
+    prerequisites: [DP-01, FI-02]
+    may_touch:
+      - src/platform/windows/durable_state_publisher.cpp
+      - tests/unit/durable_state_publisher_tests.cpp
+      - private Windows publication support files if strictly necessary
+      - CMakeLists.txt
+  - id: DP-03
+    goal: implement Linux publisher composed with FilesystemIdentity and native tests
+    prerequisites: [DP-01, FI-03]
+    may_touch:
+      - src/platform/linux/durable_state_publisher.cpp
+      - tests/unit/durable_state_publisher_tests.cpp
+      - private Linux publication support files if strictly necessary
+      - CMakeLists.txt
+  - id: TJ-01
+    goal: implement dedicated OLPC canonical JSON encoder and reference-vector tests
+    may_touch:
+      - include/arena/application/installer/tuf_canonical_json.hpp
+      - src/application/installer/tuf_canonical_json.cpp
+      - tests/unit/tuf_trust_tests.cpp
+      - CMakeLists.txt
+    must_not_touch: [TUF chain caller, generic document contract, publication contract]
+  - id: TJ-02
+    goal: migrate official TUF, rollback state, and retained development trust
+    prerequisites: [FI-02, FI-03, ED-01, DP-02, DP-03, TJ-01]
+    may_touch:
+      - src/application/installer/setup.cpp
+      - include/arena/application/installer/setup.hpp only if composition requires it without transaction redesign
+      - tests/unit/tuf_trust_tests.cpp
+      - tests/unit/setup_tests.cpp
+      - CMakeLists.txt
+    must_not_touch:
+      - download/archive
+      - transaction phases, receipts, general journals, rollback, or recovery
+      - removal, layout, provider lifecycle, release provenance, or another repository
+
+delegation_stop_conditions:
+  - native handle, platform object id, or platform error must cross a neutral port
+  - lexical path comparison appears necessary as identity authority
+  - a mutation method is proposed on read-only FilesystemIdentity capability
+  - hashing and parsing would use different buffers
+  - duplicate keys or structural bounds cannot be enforced
+  - publication needs unconditional overwrite or prior-target deletion
+  - platform cannot distinguish pre-activation failure from post-activation uncertainty
+  - current signed media requires a POUF other than declared OLPC JSON
+  - semantic receipt/journal/layout/removal/download ownership must change
+  - platform-native behavior cannot be tested on that platform
+
+completion: >
+  Issue #7 completes only after FI-01 through FI-03, ED-01, DP-01 through
+  DP-03, and TJ-01 through TJ-02 are integrated; trust paths hash, verify, and
+  parse exact admitted bytes; rollback state uses truthful durable publication;
+  canonical signatures use the declared POUF; and dependent issues have not
+  created competing identity, exact-read, or publication mechanisms.
