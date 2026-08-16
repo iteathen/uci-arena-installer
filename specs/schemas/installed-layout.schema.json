@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/installed-layout.schema.json",
+  "title": "arena_installed_layout_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "installation_id",
+    "layout_generation",
+    "platform",
+    "scope",
+    "policy",
+    "integration_root",
+    "roots",
+    "stable_paths"
+  ],
+  "properties": {
+    "schema": {"const": "arena_installed_layout_v1"},
+    "schema_version": {"const": 1},
+    "installation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "layout_generation": {"type": "integer", "minimum": 1},
+    "platform": {"const": "windows-x86_64"},
+    "scope": {"enum": ["per-user", "per-machine"]},
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "policy_version", "path", "sha256"],
+      "properties": {
+        "policy_id": {"$ref": "#/$defs/identifier"},
+        "policy_version": {"type": "integer", "minimum": 1},
+        "path": {"$ref": "#/$defs/absolute_windows_path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "integration_root": {"$ref": "#/$defs/absolute_windows_path"},
+    "roots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "install",
+        "cache",
+        "workspace",
+        "knowledge",
+        "release",
+        "receipts",
+        "transactions",
+        "preservation"
+      ],
+      "properties": {
+        "data": {"$ref": "#/$defs/absolute_windows_path"},
+        "install": {"$ref": "#/$defs/absolute_windows_path"},
+        "cache": {"$ref": "#/$defs/absolute_windows_path"},
+        "workspace": {"$ref": "#/$defs/absolute_windows_path"},
+        "knowledge": {"$ref": "#/$defs/absolute_windows_path"},
+        "release": {"$ref": "#/$defs/absolute_windows_path"},
+        "receipts": {"$ref": "#/$defs/absolute_windows_path"},
+        "transactions": {"$ref": "#/$defs/absolute_windows_path"},
+        "preservation": {"$ref": "#/$defs/absolute_windows_path"}
+      }
+    },
+    "stable_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "descriptor",
+        "scope_marker",
+        "setup_launcher",
+        "installer_runtime",
+        "path_directory"
+      ],
+      "properties": {
+        "descriptor": {"$ref": "#/$defs/absolute_windows_path"},
+        "scope_marker": {"$ref": "#/$defs/absolute_windows_path"},
+        "setup_launcher": {"$ref": "#/$defs/absolute_windows_path"},
+        "installer_runtime": {"$ref": "#/$defs/absolute_windows_path"},
+        "path_directory": {"$ref": "#/$defs/absolute_windows_path"}
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolute_windows_path": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 32767,
+      "pattern": "^(?:[A-Za-z]:\\\\|\\\\\\\\[^\\\\/]+\\\\[^\\\\/]+\\\\)[^\\u0000\\r\\n]*$"
+    }
+  }
+}
