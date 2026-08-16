@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uci-arena.example/schemas/provenance-trust-policy.schema.json",
+  "title": "arena_provenance_trust_policy_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "policy_id",
+    "policy_version",
+    "suite_installer_authority",
+    "cosign_version",
+    "producers"
+  ],
+  "properties": {
+    "schema": {"const": "arena_provenance_trust_policy_v1"},
+    "schema_version": {"const": 1},
+    "policy_id": {"$ref": "#/$defs/identifier"},
+    "policy_version": {"type": "integer", "minimum": 1},
+    "suite_installer_authority": {
+      "type": "string",
+      "const": "iteathen/uci-arena-installer"
+    },
+    "cosign_version": {"const": "3.0.6"},
+    "producers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/github_producer"},
+          {"$ref": "#/$defs/local_keyed_producer"}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[A-Za-z0-9._/-]+$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_repository", "ownership", "component_ids"],
+      "properties": {
+        "source_repository": {"$ref": "#/$defs/repository"},
+        "ownership": {"enum": ["provider", "installer_managed"]},
+        "component_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"}
+        }
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": [
+        "producer_id",
+        "kind",
+        "key_epoch",
+        "evidence_format",
+        "scopes"
+      ],
+      "properties": {
+        "producer_id": {"$ref": "#/$defs/identifier"},
+        "kind": {
+          "enum": ["sigstore_keyless_github", "sigstore_keyed_local"]
+        },
+        "key_epoch": {"type": "integer", "minimum": 1},
+        "evidence_format": {
+          "enum": [
+            "provider_result_v1",
+            "managed_result_v1",
+            "component_evidence_v1"
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/scope"}
+        }
+      }
+    },
+    "github_producer": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "producer_id",
+            "kind",
+            "key_epoch",
+            "evidence_format",
+            "scopes",
+            "predicate_type",
+            "oidc_issuer",
+            "workflow_path",
+            "workflow_name",
+            "official_ref",
+            "trigger",
+            "allow_diagnostic_refs",
+            "require_transparency_log",
+            "require_sct"
+          ],
+          "properties": {
+            "producer_id": {"$ref": "#/$defs/identifier"},
+            "kind": {"const": "sigstore_keyless_github"},
+            "key_epoch": {"type": "integer", "minimum": 1},
+            "evidence_format": {
+              "enum": ["provider_result_v1", "managed_result_v1"]
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {"$ref": "#/$defs/scope"}
+            },
+            "predicate_type": {
+              "type": "string",
+              "enum": [
+                "https://uci-arena.example/attestations/provider-release-result/v1",
+                "https://uci-arena.example/attestations/managed-component-release-result/v1"
+              ]
+            },
+            "oidc_issuer": {
+              "const": "https://token.actions.githubusercontent.com"
+            },
+            "workflow_path": {
+              "type": "string",
+              "pattern": "^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$"
+            },
+            "workflow_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000\\r\\n]+$"
+            },
+            "official_ref": {"const": "refs/heads/main"},
+            "trigger": {"const": "workflow_dispatch"},
+            "allow_diagnostic_refs": {"type": "boolean"},
+            "require_transparency_log": {"const": true},
+            "require_sct": {"const": true}
+          }
+        }
+      ]
+    },
+    "local_keyed_producer": {
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "producer_id",
+            "kind",
+            "key_epoch",
+            "evidence_format",
+            "scopes",
+            "predicate_type",
+            "public_key",
+            "transparency_log"
+          ],
+          "properties": {
+            "producer_id": {"$ref": "#/$defs/identifier"},
+            "kind": {"const": "sigstore_keyed_local"},
+            "key_epoch": {"type": "integer", "minimum": 1},
+            "evidence_format": {"const": "component_evidence_v1"},
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {"$ref": "#/$defs/scope"}
+            },
+            "predicate_type": {
+              "const": "https://uci-arena.example/attestations/component-release-evidence/v1"
+            },
+            "public_key": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256", "spki_sha256"],
+              "properties": {
+                "path": {"$ref": "#/$defs/relative_path"},
+                "sha256": {"$ref": "#/$defs/sha256"},
+                "spki_sha256": {"$ref": "#/$defs/sha256"}
+              }
+            },
+            "transparency_log": {"const": "none"}
+          }
+        }
+      ]
+    }
+  }
+}
