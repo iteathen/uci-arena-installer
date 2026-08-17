@@ -699,6 +699,34 @@ TEST_CASE("Windows FilesystemIdentity admits and re-observes the volume root") {
             ports::PathBindingState::same_object);
 }
 
+TEST_CASE("Windows FilesystemIdentity admits already-extended local paths") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto path = root / "payload.bin";
+    fs::create_directories(root);
+    write_bytes(path, "extended");
+
+    const auto extended_root = arena::platform::filesystem_api_path(root);
+    const auto extended_path = arena::platform::filesystem_api_path(path);
+    REQUIRE(extended_root.native().starts_with(L"\\\\?\\"));
+    REQUIRE(extended_path.native().starts_with(L"\\\\?\\"));
+
+    auto identity = arena::platform::make_filesystem_identity();
+    auto file = identity->admit_regular_file(extended_path);
+    REQUIRE(file->absolute_path() == extended_path);
+    REQUIRE(file->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+    REQUIRE(read_capability(*file, 8) == "extended");
+
+    auto directory = identity->admit_directory(extended_root);
+    auto child = directory->open_regular_file("payload.bin");
+    REQUIRE(directory->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+    REQUIRE(child->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+    REQUIRE(read_capability(*child, 8) == "extended");
+}
+
 TEST_CASE("Windows FilesystemIdentity reports missing wrong-kind and sharing denial") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
@@ -765,12 +793,45 @@ TEST_CASE("Windows FilesystemIdentity rejects a live named pipe as special") {
     }
 }
 
-TEST_CASE("Windows FilesystemIdentity UNC decomposition begins from the share root") {
+TEST_CASE("Windows FilesystemIdentity rejects extended object namespaces as special") {
+    const std::array<fs::path, 3> special_paths{
+        fs::path{LR"(\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\payload)"},
+        fs::path{LR"(\\?\PIPE\arena-fi-02-synthetic)"},
+        fs::path{LR"(\\?\UNC\server\pipe\arena-fi-02-synthetic)"},
+    };
+
+    auto identity = arena::platform::make_filesystem_identity();
+    for (const auto& special_path : special_paths) {
+        INFO(special_path.string());
+        try {
+            (void)identity->admit_regular_file(special_path);
+            FAIL("extended object namespace unexpectedly admitted");
+        } catch (const ports::FilesystemIdentityException& error) {
+            REQUIRE(error.code() ==
+                    ports::FilesystemIdentityErrorCode::special_object);
+        }
+    }
+}
+
+TEST_CASE("Windows FilesystemIdentity decomposition begins from physical roots") {
     const fs::path unc{LR"(\\server\share\directory\file.txt)"};
-    const auto first = windows_testing::first_component_path(unc);
-    REQUIRE_FALSE(first.empty());
-    REQUIRE(arena::platform::filesystem_api_path(first).native() ==
+    const auto unc_first = windows_testing::first_component_path(unc);
+    REQUIRE_FALSE(unc_first.empty());
+    REQUIRE(arena::platform::filesystem_api_path(unc_first).native() ==
             LR"(\\?\UNC\server\share)");
+
+    const fs::path extended_unc{
+        LR"(\\?\UNC\server\share\directory\file.txt)"};
+    const auto extended_unc_first =
+        windows_testing::first_component_path(extended_unc);
+    REQUIRE(extended_unc_first.native() == LR"(\\?\UNC\server\share)");
+
+    const fs::path volume_guid{
+        LR"(\\?\Volume{00000000-0000-0000-0000-000000000000}\directory\file.txt)"};
+    const auto volume_first =
+        windows_testing::first_component_path(volume_guid);
+    REQUIRE(volume_first.native() ==
+            LR"(\\?\Volume{00000000-0000-0000-0000-000000000000}\)");
 }
 
 TEST_CASE("Windows FilesystemIdentity rejects final and ancestor reparse points") {
@@ -854,7 +915,7 @@ TEST_CASE("Windows FilesystemIdentity identity-query failures are neutral and re
             failure_after, ERROR_NOT_SUPPORTED);
         try {
             (void)identity->admit_regular_file(path);
-            FAIL("injected identity query failure unexpectedly succeeded");
+            FAIL("injected identity query failure unexpectedly succeeeded");
         } catch (const ports::FilesystemIdentityException& error) {
             REQUIRE(error.code() ==
                     ports::FilesystemIdentityErrorCode::identity_unavailable);

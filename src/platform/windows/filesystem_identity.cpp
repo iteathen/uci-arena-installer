@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sodium.h>
 #include <span>
 #include <string>
@@ -315,6 +316,12 @@ void append_kind(
            ascii_iequals(value.substr(0, prefix.size()), prefix);
 }
 
+[[nodiscard]] bool is_named_object_namespace_name(
+    const std::wstring_view value) noexcept {
+    return ascii_iequals(value, L"pipe") ||
+           ascii_iequals(value, L"mailslot");
+}
+
 [[nodiscard]] bool is_remote_named_object_namespace(
     const std::filesystem::path& path) {
     const std::wstring_view value{path.native()};
@@ -339,16 +346,103 @@ void append_kind(
         namespace_end == std::wstring_view::npos
             ? std::wstring_view::npos
             : namespace_end - namespace_start);
-    return ascii_iequals(name, L"pipe") || ascii_iequals(name, L"mailslot");
+    return is_named_object_namespace_name(name);
+}
+
+constexpr std::wstring_view kExtendedPathPrefix = L"\\\\?\\";
+constexpr std::wstring_view kExtendedUncPrefix = L"\\\\?\\UNC\\";
+
+struct ExtendedFilesystemRoot final {
+    std::size_t root_length{};
+    std::size_t relative_offset{};
+};
+
+[[nodiscard]] bool is_ascii_letter(const wchar_t value) noexcept {
+    const auto folded = ascii_fold(value);
+    return folded >= L'A' && folded <= L'Z';
+}
+
+[[nodiscard]] bool is_ascii_hex_digit(const wchar_t value) noexcept {
+    const auto folded = ascii_fold(value);
+    return (folded >= L'0' && folded <= L'9') ||
+           (folded >= L'A' && folded <= L'F');
+}
+
+[[nodiscard]] bool is_volume_guid_root_name(
+    const std::wstring_view value) noexcept {
+    if (value.size() != 44U || !ascii_istarts_with(value, L"Volume{") ||
+        value.back() != L'}') {
+        return false;
+    }
+    for (std::size_t index = 7U; index < 43U; ++index) {
+        const bool separator =
+            index == 15U || index == 20U || index == 25U || index == 30U;
+        if (separator ? value[index] != L'-'
+                      : !is_ascii_hex_digit(value[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] std::optional<ExtendedFilesystemRoot>
+extended_filesystem_root(const std::wstring_view value) noexcept {
+    if (!value.starts_with(kExtendedPathPrefix) ||
+        value.find(L'/') != std::wstring_view::npos) {
+        return std::nullopt;
+    }
+
+    if (ascii_istarts_with(value, kExtendedUncPrefix)) {
+        const auto server_start = kExtendedUncPrefix.size();
+        const auto server_end = value.find(L'\\', server_start);
+        if (server_end == std::wstring_view::npos ||
+            server_end == server_start) {
+            return std::nullopt;
+        }
+
+        const auto share_start = server_end + 1U;
+        const auto share_end = value.find(L'\\', share_start);
+        const auto root_end = share_end == std::wstring_view::npos
+                                  ? value.size()
+                                  : share_end;
+        if (root_end == share_start ||
+            is_named_object_namespace_name(
+                value.substr(share_start, root_end - share_start))) {
+            return std::nullopt;
+        }
+        return ExtendedFilesystemRoot{
+            root_end,
+            share_end == std::wstring_view::npos ? value.size()
+                                                  : share_end + 1U,
+        };
+    }
+
+    const auto root_name_start = kExtendedPathPrefix.size();
+    const auto root_name_end = value.find(L'\\', root_name_start);
+    if (root_name_end == std::wstring_view::npos ||
+        root_name_end == root_name_start) {
+        return std::nullopt;
+    }
+
+    const auto root_name =
+        value.substr(root_name_start, root_name_end - root_name_start);
+    const bool drive_root = root_name.size() == 2U &&
+                            is_ascii_letter(root_name.front()) &&
+                            root_name.back() == L':';
+    if (!drive_root && !is_volume_guid_root_name(root_name)) {
+        return std::nullopt;
+    }
+    return ExtendedFilesystemRoot{root_name_end + 1U, root_name_end + 1U};
 }
 
 [[nodiscard]] bool is_win32_special_namespace(
     const std::filesystem::path& path) {
     const std::wstring_view value{path.native()};
+    if (value.starts_with(kExtendedPathPrefix)) {
+        return !extended_filesystem_root(value).has_value();
+    }
     return value.starts_with(L"\\\\.\\") ||
-           ascii_istarts_with(value, L"\\\\?\\GLOBALROOT\\") ||
-           ascii_istarts_with(value, L"\\\\?\\PIPE\\") ||
-           ascii_istarts_with(value, L"\\\\?\\MAILSLOT\\") ||
+           value.starts_with(L"\\??\\") ||
            is_remote_named_object_namespace(path);
 }
 
@@ -364,6 +458,42 @@ void append_kind(
 [[nodiscard]] std::vector<std::filesystem::path> component_paths(
     const std::filesystem::path& absolute_path) {
     std::vector<std::filesystem::path> result;
+    const std::wstring_view value{absolute_path.native()};
+
+    if (value.starts_with(kExtendedPathPrefix)) {
+        const auto extended_root = extended_filesystem_root(value);
+        if (!extended_root.has_value()) {
+            return result;
+        }
+
+        std::wstring current{value.substr(0, extended_root->root_length)};
+        result.emplace_back(current);
+        auto offset = extended_root->relative_offset;
+        while (offset < value.size()) {
+            while (offset < value.size() && value[offset] == L'\\') {
+                ++offset;
+            }
+            if (offset == value.size()) {
+                break;
+            }
+
+            const auto component_end = value.find(L'\\', offset);
+            const auto component_length =
+                component_end == std::wstring_view::npos
+                    ? value.size() - offset
+                    : component_end - offset;
+            if (!current.ends_with(L'\\')) {
+                current.push_back(L'\\');
+            }
+            current.append(value.data() + offset, component_length);
+            result.emplace_back(current);
+            offset = component_end == std::wstring_view::npos
+                         ? value.size()
+                         : component_end + 1U;
+        }
+        return result;
+    }
+
     const auto root = absolute_path.root_path();
     if (root.empty()) {
         return result;
