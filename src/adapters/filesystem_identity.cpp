@@ -38,8 +38,7 @@ void throw_invalid_path() {
 }
 
 void validate_absolute_path(const std::filesystem::path& path) {
-    if (path.empty() || !path.is_absolute() || path.lexically_normal() != path ||
-        path.filename().empty() || path.parent_path().empty()) {
+    if (path.empty() || !path.is_absolute() || path.lexically_normal() != path) {
         throw_invalid_path();
     }
 
@@ -54,6 +53,13 @@ void validate_absolute_path(const std::filesystem::path& path) {
 
     if (encoded.empty() || encoded.size() > kMaximumPathUtf8Bytes ||
         contains_disallowed_character(encoded)) {
+        throw_invalid_path();
+    }
+}
+
+void validate_regular_file_path(const std::filesystem::path& path) {
+    validate_absolute_path(path);
+    if (path.filename().empty() || path.parent_path().empty()) {
         throw_invalid_path();
     }
 }
@@ -181,7 +187,7 @@ AdmittedDirectory::open_directory(const std::string_view leaf) const {
 std::unique_ptr<AdmittedRegularFile>
 FilesystemIdentity::admit_regular_file(
     const std::filesystem::path& absolute_path) {
-    validate_absolute_path(absolute_path);
+    validate_regular_file_path(absolute_path);
     try {
         auto file = admit_regular_file_validated(absolute_path);
         if (!file) {
