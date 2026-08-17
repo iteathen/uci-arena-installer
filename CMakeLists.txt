@@ -58,6 +58,7 @@ target_link_libraries(
 if(WIN32)
   target_sources(arena_installer_core PRIVATE
     src/platform/windows/asset_search_index.cpp
+    src/platform/windows/filesystem_identity.cpp
     src/platform/windows/filesystem_path.cpp
     src/platform/windows/process_platform.cpp
     src/platform/windows/service_control.cpp
@@ -231,6 +232,8 @@ if(ARENA_INSTALLER_BUILD_TESTS)
       unofficial-sodium::sodium
   )
   if(WIN32)
+    target_compile_definitions(
+      arena_installer_core PRIVATE ARENA_INSTALLER_TESTING)
     add_dependencies(arena_installer_tests arena_bundle_bafunctions)
     target_sources(
       arena_installer_tests
