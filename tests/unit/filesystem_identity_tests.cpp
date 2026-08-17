@@ -2,7 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +16,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -372,7 +375,7 @@ TEST_CASE("FilesystemIdentity values are opaque equality-comparable evidence") {
                              std::byte{7});
     auto same = first;
     auto different = first;
-    different.metadata_identity[0] = std::byte{8};
+    different.metadata_identity[0] = std::byte{9};
 
     REQUIRE(first == same);
     REQUIRE_FALSE(first == different);
