@@ -254,9 +254,68 @@ void append_kind(
     return std::filesystem::path{encoded};
 }
 
-[[nodiscard]] bool is_win32_device_namespace(
+[[nodiscard]] wchar_t ascii_fold(const wchar_t value) noexcept {
+    return value >= L'a' && value <= L'z'
+               ? static_cast<wchar_t>(value - L'a' + L'A')
+               : value;
+}
+
+[[nodiscard]] bool ascii_iequals(
+    const std::wstring_view left,
+    const std::wstring_view right) noexcept {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        if (ascii_fold(left[index]) != ascii_fold(right[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool ascii_istarts_with(
+    const std::wstring_view value,
+    const std::wstring_view prefix) noexcept {
+    return value.size() >= prefix.size() &&
+           ascii_iequals(value.substr(0, prefix.size()), prefix);
+}
+
+[[nodiscard]] bool is_remote_named_object_namespace(
     const std::filesystem::path& path) {
-    return path.native().starts_with(L"\\\\.\\");
+    const std::wstring_view value{path.native()};
+    if (!value.starts_with(L"\\\\") ||
+        value.starts_with(L"\\\\?\\") ||
+        value.starts_with(L"\\\\.\\")) {
+        return false;
+    }
+
+    const auto server_end = value.find_first_of(L"\\/", 2U);
+    if (server_end == std::wstring_view::npos) {
+        return false;
+    }
+    const auto namespace_start = value.find_first_not_of(L"\\/", server_end);
+    if (namespace_start == std::wstring_view::npos) {
+        return false;
+    }
+    const auto namespace_end =
+        value.find_first_of(L"\\/", namespace_start);
+    const auto name = value.substr(
+        namespace_start,
+        namespace_end == std::wstring_view::npos
+            ? std::wstring_view::npos
+            : namespace_end - namespace_start);
+    return ascii_iequals(name, L"pipe") || ascii_iequals(name, L"mailslot");
+}
+
+[[nodiscard]] bool is_win32_special_namespace(
+    const std::filesystem::path& path) {
+    const std::wstring_view value{path.native()};
+    return value.starts_with(L"\\\\.\\") ||
+           ascii_istarts_with(value, L"\\\\?\\GLOBALROOT\\") ||
+           ascii_istarts_with(value, L"\\\\?\\PIPE\\") ||
+           ascii_istarts_with(value, L"\\\\?\\MAILSLOT\\") ||
+           is_remote_named_object_namespace(path);
 }
 
 [[nodiscard]] bool is_unc_filesystem_path(
@@ -264,7 +323,8 @@ void append_kind(
     const auto& value = path.native();
     return value.starts_with(L"\\\\") &&
            !value.starts_with(L"\\\\?\\") &&
-           !value.starts_with(L"\\\\.\\");
+           !value.starts_with(L"\\\\.\\") &&
+           !is_remote_named_object_namespace(path);
 }
 
 [[nodiscard]] std::vector<std::filesystem::path> component_paths(
@@ -326,14 +386,11 @@ void append_kind(
     const ports::FilesystemObjectKind expected_kind,
     const bool retain_for_read) {
     DWORD access = FILE_READ_ATTRIBUTES | SYNCHRONIZE;
-    DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT;
-    if (expected_kind == ports::FilesystemObjectKind::directory) {
-        flags |= FILE_FLAG_BACKUP_SEMANTICS;
-    } else {
+    DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS;
+    if (expected_kind == ports::FilesystemObjectKind::regular_file &&
+        retain_for_read) {
         access |= FILE_READ_DATA;
-        if (retain_for_read) {
-            flags |= FILE_FLAG_OVERLAPPED;
-        }
+        flags |= FILE_FLAG_OVERLAPPED;
     }
 
     const auto api_path = arena::platform::filesystem_api_path(path);
@@ -474,10 +531,10 @@ void append_kind(
 [[nodiscard]] AdmittedNativeObject admit_native_object(
     const std::filesystem::path& absolute_path,
     const ports::FilesystemObjectKind expected_kind) {
-    if (is_win32_device_namespace(absolute_path)) {
+    if (is_win32_special_namespace(absolute_path)) {
         throw ports::FilesystemIdentityException(
             ports::FilesystemIdentityErrorCode::special_object,
-            "filesystem object uses the Win32 device namespace");
+            "filesystem object uses a non-filesystem Windows namespace");
     }
 
     const auto paths = component_paths(absolute_path);
@@ -512,7 +569,7 @@ void append_kind(
     const std::filesystem::path& absolute_path,
     const std::vector<ChainEntry>& expected_chain) noexcept {
     try {
-        if (is_win32_device_namespace(absolute_path)) {
+        if (is_win32_special_namespace(absolute_path)) {
             return ports::PathBindingState::different_object;
         }
         const auto paths = component_paths(absolute_path);
