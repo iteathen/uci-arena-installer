@@ -940,21 +940,28 @@ TEST_CASE("Windows admitted handles are released exactly by capability lifetime"
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
     const auto path = root / "payload.bin";
-    const auto renamed = root / "renamed.bin";
     fs::create_directories(root);
     write_bytes(path, "data");
 
     auto identity = arena::platform::make_filesystem_identity();
-    {
-        auto file = identity->admit_regular_file(path);
-        REQUIRE(file != nullptr);
+    const auto baseline = process_handle_count();
+    const auto api_path = arena::platform::filesystem_api_path(path);
+
+    for (std::size_t i = 0; i < 24; ++i) {
+        {
+            auto file = identity->admit_regular_file(path);
+            REQUIRE(file != nullptr);
+            REQUIRE(file->initial_observation().kind ==
+                    ports::FilesystemObjectKind::regular_file);
+        }
+        REQUIRE(process_handle_count() <= baseline + 2U);
     }
 
-    std::error_code error;
-    fs::rename(path, renamed, error);
-    REQUIRE_FALSE(error);
-    fs::remove(renamed, error);
-    REQUIRE_FALSE(error);
+    NativeHandle exclusive{
+        CreateFileW(api_path.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL, nullptr)};
+    REQUIRE(exclusive.valid());
+    REQUIRE(process_handle_count() <= baseline + 2U);
 }
 
 #endif
