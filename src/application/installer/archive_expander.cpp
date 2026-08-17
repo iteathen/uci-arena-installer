@@ -147,7 +147,7 @@ void check_terminal(
 
 struct PortablePath final {
     std::string value;
-    std::vector<std::string_view> components;
+    std::vector<std::string> components;
 };
 
 [[nodiscard]] PortablePath parse_portable_path(const std::string_view path) {
@@ -179,7 +179,7 @@ struct PortablePath final {
             component[1] == ':') {
             throw_archive_error("archive entry path is drive-rooted");
         }
-        result.components.push_back(component);
+        result.components.emplace_back(component);
         if (result.components.size() > kMaximumDepth) {
             throw_archive_error("archive entry path exceeds depth limit");
         }
