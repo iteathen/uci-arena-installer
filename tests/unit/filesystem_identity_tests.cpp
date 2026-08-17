@@ -219,16 +219,29 @@ class FakeFilesystemIdentity final : public ports::FilesystemIdentity {
 };
 
 template <typename T>
-concept HasMutationMethod = requires(T& value, std::span<const std::byte> bytes) {
+concept HasWriteMethod = requires(T& value, std::span<const std::byte> bytes) {
     value.write(bytes);
+};
+
+template <typename T>
+concept HasRemoveMethod = requires(T& value) {
     value.remove();
+};
+
+template <typename T>
+concept HasPublishMethod = requires(T& value,
+                                    std::span<const std::byte> bytes) {
     value.publish(bytes);
 };
 
 static_assert(std::is_same_v<ports::FilesystemIdentityToken,
                              std::array<std::byte, 32>>);
-static_assert(!HasMutationMethod<ports::AdmittedRegularFile>);
-static_assert(!HasMutationMethod<ports::AdmittedDirectory>);
+static_assert(!HasWriteMethod<ports::AdmittedRegularFile>);
+static_assert(!HasRemoveMethod<ports::AdmittedRegularFile>);
+static_assert(!HasPublishMethod<ports::AdmittedRegularFile>);
+static_assert(!HasWriteMethod<ports::AdmittedDirectory>);
+static_assert(!HasRemoveMethod<ports::AdmittedDirectory>);
+static_assert(!HasPublishMethod<ports::AdmittedDirectory>);
 static_assert(std::is_abstract_v<ports::AdmittedRegularFile>);
 static_assert(std::is_abstract_v<ports::AdmittedDirectory>);
 static_assert(std::is_abstract_v<ports::FilesystemIdentity>);
@@ -283,10 +296,15 @@ TEST_CASE("FilesystemIdentity rejects invalid paths before adapter invocation") 
     };
 
     for (const auto& path : invalid_paths) {
-        FakeFilesystemIdentity identity;
-        REQUIRE_THROWS_AS(identity.admit_regular_file(path),
+        FakeFilesystemIdentity regular_identity;
+        REQUIRE_THROWS_AS(regular_identity.admit_regular_file(path),
                           ports::FilesystemIdentityException);
-        REQUIRE(identity.regular_admit_calls == 0);
+        REQUIRE(regular_identity.regular_admit_calls == 0);
+
+        FakeFilesystemIdentity directory_identity;
+        REQUIRE_THROWS_AS(directory_identity.admit_directory(path),
+                          ports::FilesystemIdentityException);
+        REQUIRE(directory_identity.directory_admit_calls == 0);
     }
 }
 
@@ -308,32 +326,56 @@ TEST_CASE("AdmittedDirectory validates one child leaf before adapter invocation"
         std::string(4097, 'x'), "C:\\absolute",
     };
     for (const auto& leaf : invalid_leaves) {
-        const auto prior_calls = directory.regular_open_calls;
+        const auto prior_regular_calls = directory.regular_open_calls;
         REQUIRE_THROWS_AS(directory.open_regular_file(leaf),
                           ports::FilesystemIdentityException);
-        REQUIRE(directory.regular_open_calls == prior_calls);
+        REQUIRE(directory.regular_open_calls == prior_regular_calls);
+
+        const auto prior_directory_calls = directory.directory_open_calls;
+        REQUIRE_THROWS_AS(directory.open_directory(leaf),
+                          ports::FilesystemIdentityException);
+        REQUIRE(directory.directory_open_calls == prior_directory_calls);
     }
 }
 
 TEST_CASE("FilesystemIdentity rejects wrong-kind direct and child results") {
-    FakeFilesystemIdentity identity;
-    identity.regular_observation =
+    FakeFilesystemIdentity file_identity;
+    file_identity.regular_observation =
         observation(ports::FilesystemObjectKind::directory);
     try {
-        (void)identity.admit_regular_file(valid_absolute_path("file"));
-        FAIL("wrong-kind direct admission unexpectedly succeeded");
+        (void)file_identity.admit_regular_file(valid_absolute_path("file"));
+        FAIL("wrong-kind direct file admission unexpectedly succeeded");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::wrong_kind);
+    }
+
+    FakeFilesystemIdentity directory_identity;
+    directory_identity.directory_observation =
+        observation(ports::FilesystemObjectKind::regular_file);
+    try {
+        (void)directory_identity.admit_directory(valid_absolute_path("directory"));
+        FAIL("wrong-kind direct directory admission unexpectedly succeeded");
     } catch (const ports::FilesystemIdentityException& error) {
         REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::wrong_kind);
     }
 
     FakeDirectory directory(
-        valid_absolute_path("directory"),
+        valid_absolute_path("parent"),
         observation(ports::FilesystemObjectKind::directory));
     directory.regular_observation =
         observation(ports::FilesystemObjectKind::directory);
     try {
-        (void)directory.open_regular_file("child");
-        FAIL("wrong-kind child admission unexpectedly succeeded");
+        (void)directory.open_regular_file("child-file");
+        FAIL("wrong-kind child file admission unexpectedly succeeded");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::wrong_kind);
+    }
+
+    directory.directory_observation =
+        observation(ports::FilesystemObjectKind::regular_file);
+    try {
+        (void)directory.open_directory("child-directory");
+        FAIL("wrong-kind child directory admission unexpectedly succeeded");
     } catch (const ports::FilesystemIdentityException& error) {
         REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::wrong_kind);
     }
@@ -398,6 +440,13 @@ TEST_CASE("FilesystemIdentity values are opaque equality-comparable evidence") {
 
     REQUIRE(first == same);
     REQUIRE_FALSE(first == different);
+
+    const auto first_token = token(std::byte{3});
+    const auto same_token = first_token;
+    auto different_token = first_token;
+    different_token[0] = std::byte{4};
+    REQUIRE(first_token == same_token);
+    REQUIRE_FALSE(first_token == different_token);
 
     FakeRegularFile file(valid_absolute_path("file"), first, same,
                          ports::PathBindingState::same_object);
