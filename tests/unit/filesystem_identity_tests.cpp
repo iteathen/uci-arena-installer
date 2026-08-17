@@ -1,8 +1,18 @@
 #include "arena/ports/filesystem_identity.hpp"
 
+#if defined(_WIN32)
+#include "arena/platform/filesystem_identity.hpp"
+#include "arena/platform/filesystem_path.hpp"
+
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +24,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -409,3 +420,319 @@ TEST_CASE("FilesystemIdentity enum vocabulary exposes all neutral states") {
     REQUIRE(binding_states.size() == 4);
     REQUIRE(error_codes.size() == 9);
 }
+
+#if defined(_WIN32)
+namespace {
+
+class NativeHandle final {
+  public:
+    explicit NativeHandle(HANDLE handle = INVALID_HANDLE_VALUE) noexcept
+        : handle_(handle) {}
+
+    ~NativeHandle() {
+        if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
+            (void)CloseHandle(handle_);
+        }
+    }
+
+    NativeHandle(const NativeHandle&) = delete;
+    NativeHandle& operator=(const NativeHandle&) = delete;
+
+    [[nodiscard]] bool valid() const noexcept {
+        return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE;
+    }
+
+    [[nodiscard]] HANDLE get() const noexcept {
+        return handle_;
+    }
+
+  private:
+    HANDLE handle_;
+};
+
+struct NativeTempDirectory final {
+    fs::path root;
+
+    NativeTempDirectory() {
+        const auto stamp = std::chrono::high_resolution_clock::now()
+                               .time_since_epoch()
+                               .count();
+        root = (fs::temp_directory_path() /
+                ("arena-fi-02-" + std::to_string(stamp)))
+                   .lexically_normal();
+        fs::create_directories(root);
+    }
+
+    ~NativeTempDirectory() {
+        std::error_code ignored;
+        fs::remove_all(root, ignored);
+    }
+};
+
+void write_bytes(const fs::path& path, const std::string_view bytes) {
+    const auto api_path = arena::platform::filesystem_api_path(path);
+    NativeHandle file{CreateFileW(
+        api_path.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr)};
+    REQUIRE(file.valid());
+
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto remaining = bytes.size() - offset;
+        const auto request = static_cast<DWORD>(
+            (std::min)(remaining, static_cast<std::size_t>(MAXDWORD)));
+        DWORD written = 0;
+        REQUIRE(WriteFile(file.get(), bytes.data() + offset, request,
+                          &written, nullptr) != FALSE);
+        REQUIRE(written != 0);
+        offset += written;
+    }
+    REQUIRE(FlushFileBuffers(file.get()) != FALSE);
+}
+
+[[nodiscard]] std::string read_capability(
+    ports::AdmittedRegularFile& file,
+    const std::size_t size) {
+    std::vector<std::byte> buffer(size);
+    const auto read = file.read_at(0, buffer);
+    return std::string{
+        reinterpret_cast<const char*>(buffer.data()), read};
+}
+
+[[nodiscard]] bool make_file_symlink(
+    const fs::path& target,
+    const fs::path& link) {
+    std::error_code error;
+    fs::create_symlink(target, link, error);
+    return !error;
+}
+
+[[nodiscard]] bool make_directory_symlink(
+    const fs::path& target,
+    const fs::path& link) {
+    std::error_code error;
+    fs::create_directory_symlink(target, link, error);
+    return !error;
+}
+
+} // namespace
+
+TEST_CASE("Windows FilesystemIdentity admits stable files directories and children") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto nested = root / "nested";
+    fs::create_directories(nested);
+    write_bytes(root / "direct.txt", "direct");
+    write_bytes(nested / "child.txt", "child");
+
+    auto identity = arena::platform::make_filesystem_identity();
+    REQUIRE(identity != nullptr);
+
+    auto file = identity->admit_regular_file(root / "direct.txt");
+    REQUIRE(file->initial_observation().kind ==
+            ports::FilesystemObjectKind::regular_file);
+    REQUIRE(file->initial_observation().size_bytes == 6);
+    REQUIRE(file->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+    REQUIRE(read_capability(*file, 6) == "direct");
+
+    auto directory = identity->admit_directory(root);
+    REQUIRE(directory->initial_observation().kind ==
+            ports::FilesystemObjectKind::directory);
+    REQUIRE(directory->initial_observation().size_bytes == 0);
+    REQUIRE(directory->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+
+    auto child_directory = directory->open_directory("nested");
+    auto child = child_directory->open_regular_file("child.txt");
+    REQUIRE(child_directory->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+    REQUIRE(child->observe_path_binding() ==
+            ports::PathBindingState::same_object);
+    REQUIRE(read_capability(*child, 5) == "child");
+}
+
+TEST_CASE("Windows FilesystemIdentity reports missing wrong-kind and sharing denial") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto file_path = root / "file.txt";
+    fs::create_directories(root);
+    write_bytes(file_path, "data");
+
+    auto identity = arena::platform::make_filesystem_identity();
+
+    try {
+        (void)identity->admit_regular_file(root / "missing.txt");
+        FAIL("missing file unexpectedly admitted");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::missing);
+    }
+
+    try {
+        (void)identity->admit_regular_file(root);
+        FAIL("directory unexpectedly admitted as regular file");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::wrong_kind);
+    }
+
+    try {
+        (void)identity->admit_directory(file_path);
+        FAIL("file unexpectedly admitted as directory");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::wrong_kind);
+    }
+
+    const auto api_path = arena::platform::filesystem_api_path(file_path);
+    NativeHandle exclusive{CreateFileW(
+        api_path.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr)};
+    REQUIRE(exclusive.valid());
+    try {
+        (void)identity->admit_regular_file(file_path);
+        FAIL("share-denied file unexpectedly admitted");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::access_denied);
+    }
+}
+
+TEST_CASE("Windows FilesystemIdentity rejects final and ancestor reparse points") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto target_directory = root / "target-directory";
+    const auto target_file = root / "target.txt";
+    fs::create_directories(target_directory);
+    write_bytes(target_file, "target");
+    write_bytes(target_directory / "child.txt", "child");
+
+    const auto file_link = root / "file-link.txt";
+    const auto directory_link = root / "directory-link";
+    if (!make_file_symlink(target_file, file_link) ||
+        !make_directory_symlink(target_directory, directory_link)) {
+        SUCCEED("Windows symlink creation is unavailable in this test environment");
+        return;
+    }
+
+    auto identity = arena::platform::make_filesystem_identity();
+    try {
+        (void)identity->admit_regular_file(file_link);
+        FAIL("final reparse point unexpectedly admitted");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() ==
+                ports::FilesystemIdentityErrorCode::link_or_reparse);
+    }
+
+    try {
+        (void)identity->admit_regular_file(directory_link / "child.txt");
+        FAIL("reparse ancestor unexpectedly admitted");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() ==
+                ports::FilesystemIdentityErrorCode::link_or_reparse);
+    }
+}
+
+TEST_CASE("Windows file capability remains descriptor-bound after pathname replacement") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto path = root / "payload.bin";
+    const auto old_path = root / "payload.old";
+    fs::create_directories(root);
+    write_bytes(path, "original");
+
+    auto identity = arena::platform::make_filesystem_identity();
+    auto file = identity->admit_regular_file(path);
+    const auto initial = file->initial_observation();
+
+    fs::rename(path, old_path);
+    write_bytes(path, "replaced");
+
+    REQUIRE(read_capability(*file, 8) == "original");
+    REQUIRE(file->observe_open_object().object_identity ==
+            initial.object_identity);
+    REQUIRE(file->observe_path_binding() ==
+            ports::PathBindingState::different_object);
+}
+
+TEST_CASE("Windows child capability retains its opened descriptor across parent rebinding") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto old_root = workspace.root / "root-old";
+    fs::create_directories(root);
+    write_bytes(root / "child.txt", "original-child");
+
+    auto identity = arena::platform::make_filesystem_identity();
+    auto directory = identity->admit_directory(root);
+    auto child = directory->open_regular_file("child.txt");
+
+    fs::rename(root, old_root);
+    fs::create_directories(root);
+    write_bytes(root / "child.txt", "replacement!!");
+
+    REQUIRE(read_capability(*child, 14) == "original-child");
+    REQUIRE(child->observe_path_binding() ==
+            ports::PathBindingState::different_object);
+    const auto parent_binding = directory->observe_path_binding();
+    REQUIRE((parent_binding == ports::PathBindingState::different_object ||
+             parent_binding == ports::PathBindingState::missing));
+}
+
+TEST_CASE("Windows open-object metadata changes after same-size mutation") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto path = root / "payload.bin";
+    fs::create_directories(root);
+    write_bytes(path, "abcd");
+
+    auto identity = arena::platform::make_filesystem_identity();
+    auto file = identity->admit_regular_file(path);
+    const auto initial = file->initial_observation();
+
+    write_bytes(path, "wxyz");
+    const auto changed = file->observe_open_object();
+
+    REQUIRE(changed.object_identity == initial.object_identity);
+    REQUIRE(changed.metadata_identity != initial.metadata_identity);
+    REQUIRE(changed.size_bytes == initial.size_bytes);
+}
+
+TEST_CASE("Windows read_at uses explicit 64-bit offsets and reports EOF") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto path = root / "payload.bin";
+    fs::create_directories(root);
+    write_bytes(path, "0123456789");
+
+    auto identity = arena::platform::make_filesystem_identity();
+    auto file = identity->admit_regular_file(path);
+    std::array<std::byte, 4> bytes{};
+
+    REQUIRE(file->read_at(3, bytes) == 4);
+    REQUIRE(bytes[0] == std::byte{'3'});
+    REQUIRE(bytes[1] == std::byte{'4'});
+    REQUIRE(bytes[2] == std::byte{'5'});
+    REQUIRE(bytes[3] == std::byte{'6'});
+    REQUIRE(file->read_at(UINT64_C(0x100000000), bytes) == 0);
+}
+
+TEST_CASE("Windows admitted handles are released exactly by capability lifetime") {
+    NativeTempDirectory workspace;
+    const auto root = workspace.root / "root";
+    const auto path = root / "payload.bin";
+    const auto renamed = root / "renamed.bin";
+    fs::create_directories(root);
+    write_bytes(path, "data");
+
+    auto identity = arena::platform::make_filesystem_identity();
+    {
+        auto file = identity->admit_regular_file(path);
+        REQUIRE(file != nullptr);
+    }
+
+    std::error_code error;
+    fs::rename(path, renamed, error);
+    REQUIRE_FALSE(error);
+    fs::remove(renamed, error);
+    REQUIRE_FALSE(error);
+}
+
+#endif
