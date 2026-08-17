@@ -253,6 +253,25 @@ TEST_CASE("FilesystemIdentity admits valid absolute normalized paths once") {
             ports::FilesystemObjectKind::directory);
 }
 
+TEST_CASE("FilesystemIdentity admits root directories but not root files") {
+    const auto root = valid_absolute_path("object").root_path();
+    REQUIRE_FALSE(root.empty());
+
+    FakeFilesystemIdentity directory_identity;
+    auto directory = directory_identity.admit_directory(root);
+    REQUIRE(directory_identity.directory_admit_calls == 1);
+    REQUIRE(directory->absolute_path() == root);
+
+    FakeFilesystemIdentity file_identity;
+    try {
+        (void)file_identity.admit_regular_file(root);
+        FAIL("filesystem root unexpectedly admitted as a regular file");
+    } catch (const ports::FilesystemIdentityException& error) {
+        REQUIRE(error.code() == ports::FilesystemIdentityErrorCode::invalid_path);
+    }
+    REQUIRE(file_identity.regular_admit_calls == 0);
+}
+
 TEST_CASE("FilesystemIdentity rejects invalid paths before adapter invocation") {
     const auto base = valid_absolute_path("object");
     const std::array<fs::path, 5> invalid_paths{
