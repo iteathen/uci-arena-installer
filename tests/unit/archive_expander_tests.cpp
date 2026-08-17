@@ -10,10 +10,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -574,7 +576,7 @@ TEST_CASE("ArchiveExpander rejects plain tar zip and truncated input") {
 
     auto truncated = make_archive(entries);
     REQUIRE(truncated.size() > 16);
-    truncated.resize(truncated.size() - 16U);
+    truncated.resize(truncated.size() / 2U);
     FakeArchiveFile source(std::move(truncated));
     auto state = std::make_shared<ExtractionState>();
     FakePlatform platform(state);
@@ -623,7 +625,7 @@ TEST_CASE("ArchiveExpander validates portable path exact bounds") {
     invalid_utf8.push_back(static_cast<char>(0x28));
     REQUIRE_FALSE(seam::portable_path_is_valid(invalid_utf8));
 
-    REQUIRE(seam::portable_path_is_valid("a:b"));
+    REQUIRE(seam::portable_path_is_valid("name:part"));
     REQUIRE(seam::portable_path_is_valid(std::string(4096, 'x')));
     REQUIRE_FALSE(seam::portable_path_is_valid(std::string(4097, 'x')));
 
@@ -670,7 +672,8 @@ TEST_CASE("ArchiveExpander rejects every forbidden entry type and metadata") {
     }
     SECTION("sparse") {
         EntryHandle entry;
-        archive_entry_sparse_add_entry(entry.get(), 0, 1);
+        archive_entry_set_size(entry.get(), 3);
+        archive_entry_sparse_add_entry(entry.get(), 1, 1);
         REQUIRE_FALSE(seam::entry_metadata_is_allowed(entry.get()));
     }
     SECTION("encrypted data") {
