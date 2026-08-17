@@ -25,6 +25,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <thread>
 
 #if defined(_WIN32)
 namespace arena::platform::windows_identity_testing {
@@ -920,6 +921,7 @@ TEST_CASE("Windows FilesystemIdentity open-object metadata changes after same-si
     auto file = identity->admit_regular_file(path);
     const auto initial = file->initial_observation();
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     write_bytes(path, "wxyz");
     const auto changed = file->observe_open_object();
 
