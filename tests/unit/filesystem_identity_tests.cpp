@@ -30,6 +30,8 @@
 namespace arena::platform::windows_identity_testing {
 void set_query_failure_after(std::size_t successful_queries, DWORD code) noexcept;
 void reset_query_failure() noexcept;
+void set_file_id_mutation_after(std::size_t successful_file_id_queries) noexcept;
+void reset_file_id_mutation() noexcept;
 [[nodiscard]] std::filesystem::path first_component_path(
     const std::filesystem::path& absolute_path);
 } // namespace arena::platform::windows_identity_testing
@@ -554,6 +556,16 @@ struct QueryFailureReset final {
     }
 };
 
+struct FileIdMutationReset final {
+    explicit FileIdMutationReset(
+        const std::size_t successful_queries) noexcept {
+        windows_testing::set_file_id_mutation_after(successful_queries);
+    }
+    ~FileIdMutationReset() {
+        windows_testing::reset_file_id_mutation();
+    }
+};
+
 void write_bytes(const fs::path& path, const std::string_view bytes) {
     const auto api_path = arena::platform::filesystem_api_path(path);
     NativeHandle file{CreateFileW(
@@ -752,7 +764,7 @@ TEST_CASE("Windows FilesystemIdentity rejects a live named pipe as special") {
     }
 }
 
-TEST_CASE("Windows UNC decomposition begins from the share root") {
+TEST_CASE("Windows FilesystemIdentity UNC decomposition begins from the share root") {
     const fs::path unc{LR"(\\server\share\directory\file.txt)"};
     const auto first = windows_testing::first_component_path(unc);
     REQUIRE_FALSE(first.empty());
@@ -825,7 +837,7 @@ TEST_CASE("Windows FilesystemIdentity rejects directory junctions") {
     }
 }
 
-TEST_CASE("Windows identity-query failures are neutral and release handles") {
+TEST_CASE("Windows FilesystemIdentity identity-query failures are neutral and release handles") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
     const auto path = root / "payload.bin";
@@ -853,7 +865,7 @@ TEST_CASE("Windows identity-query failures are neutral and release handles") {
     REQUIRE(after <= baseline + 2U);
 }
 
-TEST_CASE("Windows file capability remains descriptor-bound after pathname replacement") {
+TEST_CASE("Windows FilesystemIdentity file capability remains descriptor-bound after pathname replacement") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
     const auto path = root / "payload.bin";
@@ -875,30 +887,29 @@ TEST_CASE("Windows file capability remains descriptor-bound after pathname repla
             ports::PathBindingState::different_object);
 }
 
-TEST_CASE("Windows child capability retains its opened descriptor across parent rebinding") {
+TEST_CASE("Windows FilesystemIdentity child capability detects ancestor identity mismatch during binding") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
-    const auto old_root = workspace.root / "root-old";
     fs::create_directories(root);
     write_bytes(root / "child.txt", "original-child");
 
     auto identity = arena::platform::make_filesystem_identity();
     auto directory = identity->admit_directory(root);
     auto child = directory->open_regular_file("child.txt");
+    const auto initial = child->observe_open_object();
 
-    fs::rename(root, old_root);
-    fs::create_directories(root);
-    write_bytes(root / "child.txt", "replacement!!");
+    {
+        FileIdMutationReset mutation{0};
+        REQUIRE(child->observe_path_binding() ==
+                ports::PathBindingState::different_object);
+    }
 
     REQUIRE(read_capability(*child, 14) == "original-child");
-    REQUIRE(child->observe_path_binding() ==
-            ports::PathBindingState::different_object);
-    const auto parent_binding = directory->observe_path_binding();
-    REQUIRE((parent_binding == ports::PathBindingState::different_object ||
-             parent_binding == ports::PathBindingState::missing));
+    REQUIRE(child->observe_open_object().object_identity ==
+            initial.object_identity);
 }
 
-TEST_CASE("Windows open-object metadata changes after same-size mutation") {
+TEST_CASE("Windows FilesystemIdentity open-object metadata changes after same-size mutation") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
     const auto path = root / "payload.bin";
@@ -917,7 +928,7 @@ TEST_CASE("Windows open-object metadata changes after same-size mutation") {
     REQUIRE(changed.size_bytes == initial.size_bytes);
 }
 
-TEST_CASE("Windows read_at uses explicit 64-bit offsets and reports EOF") {
+TEST_CASE("Windows FilesystemIdentity read_at uses explicit 64-bit offsets and reports EOF") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
     const auto path = root / "payload.bin";
@@ -936,7 +947,7 @@ TEST_CASE("Windows read_at uses explicit 64-bit offsets and reports EOF") {
     REQUIRE(file->read_at(UINT64_C(0x100000000), bytes) == 0);
 }
 
-TEST_CASE("Windows admitted handles are released exactly by capability lifetime") {
+TEST_CASE("Windows FilesystemIdentity admitted handles are released exactly by capability lifetime") {
     NativeTempDirectory workspace;
     const auto root = workspace.root / "root";
     const auto path = root / "payload.bin";

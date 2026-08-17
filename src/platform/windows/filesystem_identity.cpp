@@ -27,6 +27,7 @@ namespace arena::platform::windows_identity_testing {
 namespace {
 std::atomic<std::int64_t> g_query_failure_after{-1};
 std::atomic<DWORD> g_query_failure_code{ERROR_NOT_SUPPORTED};
+std::atomic<std::int64_t> g_file_id_mutation_after{-1};
 }
 
 void set_query_failure_after(
@@ -46,6 +47,20 @@ void reset_query_failure() noexcept {
     g_query_failure_after.store(-1, std::memory_order_relaxed);
 }
 
+void set_file_id_mutation_after(const std::size_t successful_queries) noexcept {
+    const auto bounded =
+        successful_queries >
+                static_cast<std::size_t>(
+                    (std::numeric_limits<std::int64_t>::max)())
+            ? (std::numeric_limits<std::int64_t>::max)()
+            : static_cast<std::int64_t>(successful_queries);
+    g_file_id_mutation_after.store(bounded, std::memory_order_relaxed);
+}
+
+void reset_file_id_mutation() noexcept {
+    g_file_id_mutation_after.store(-1, std::memory_order_relaxed);
+}
+
 [[nodiscard]] bool should_fail_query() noexcept {
     auto remaining = g_query_failure_after.load(std::memory_order_relaxed);
     if (remaining < 0) {
@@ -56,6 +71,25 @@ void reset_query_failure() noexcept {
     }
     g_query_failure_after.store(remaining - 1, std::memory_order_relaxed);
     return false;
+}
+
+[[nodiscard]] bool should_mutate_file_id_query() noexcept {
+    const auto remaining =
+        g_file_id_mutation_after.load(std::memory_order_relaxed);
+    if (remaining < 0) {
+        return false;
+    }
+    if (remaining == 0) {
+        g_file_id_mutation_after.store(-1, std::memory_order_relaxed);
+        return true;
+    }
+    g_file_id_mutation_after.store(remaining - 1, std::memory_order_relaxed);
+    return false;
+}
+
+void mutate_file_id_result(void* const buffer) {
+    auto* const file_id = static_cast<FILE_ID_INFO*>(buffer);
+    file_id->FileId.Identifier[0] ^= 0x1U;
 }
 
 [[nodiscard]] DWORD query_failure_code() noexcept {
@@ -377,8 +411,18 @@ void append_kind(
         return FALSE;
     }
 #endif
-    return GetFileInformationByHandleEx(
-        handle, info_class, buffer, buffer_size);
+    const BOOL success =
+        GetFileInformationByHandleEx(handle, info_class, buffer, buffer_size);
+#if defined(ARENA_INSTALLER_TESTING)
+    if (success && info_class == FileIdInfo) {
+        if (arena::platform::windows_identity_testing::
+                should_mutate_file_id_query()) {
+            arena::platform::windows_identity_testing::mutate_file_id_result(
+                buffer);
+        }
+    }
+#endif
+    return success;
 }
 
 [[nodiscard]] UniqueHandle open_component(
