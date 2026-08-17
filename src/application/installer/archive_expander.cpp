@@ -64,7 +64,8 @@ void check_terminal(
     const std::chrono::steady_clock::time_point deadline) {
     check_terminal(stop_token, deadline);
     const auto remaining = deadline - std::chrono::steady_clock::now();
-    auto milliseconds = std::chrono::ceil<std::chrono::milliseconds>(remaining);
+    const auto milliseconds =
+        std::chrono::ceil<std::chrono::milliseconds>(remaining);
     if (milliseconds <= std::chrono::milliseconds::zero()) {
         throw DeadlineFailure{};
     }
@@ -334,6 +335,7 @@ enum class NodeKind {
 struct NodeState final {
     NodeKind kind{};
     bool explicit_header{};
+    std::string portable_path;
 };
 
 using CollisionMap = std::map<ports::ArchivePathCollisionKey, NodeState>;
@@ -374,19 +376,18 @@ void ensure_directory_output(
     const ports::ArchiveTargetPath& target,
     const std::uint64_t expected_size,
     const bool executable) {
+    std::unique_ptr<ports::ArchiveOutputFile> output;
     try {
-        auto output = session.create_file(target, expected_size, executable);
-        if (!output) {
-            throw_archive_error("archive extraction platform returned no output file");
-        }
-        return output;
+        output = session.create_file(target, expected_size, executable);
     } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::runtime_error&) {
         throw;
     } catch (...) {
         throw_archive_error("archive output file creation failed");
     }
+    if (!output) {
+        throw_archive_error("archive extraction platform returned no output file");
+    }
+    return output;
 }
 
 void write_output(
@@ -425,15 +426,19 @@ void ensure_parent_directories(
         const auto target = validate_target_path(session, parent, index + 1U);
         const auto found = collisions.find(target.collision_key);
         if (found != collisions.end()) {
-            if (found->second.kind != NodeKind::directory) {
-                throw_archive_error("archive path collides with a file");
+            if (found->second.kind != NodeKind::directory ||
+                found->second.portable_path != target.portable_relative_path) {
+                throw_archive_error("archive parent path has a target collision");
             }
             continue;
         }
         ensure_directory_output(session, target);
         collisions.emplace(
             target.collision_key,
-            NodeState{NodeKind::directory, false});
+            NodeState{
+                NodeKind::directory,
+                false,
+                target.portable_relative_path});
         if (directory_count == std::numeric_limits<std::uint64_t>::max()) {
             throw_archive_error("archive directory count overflowed");
         }
@@ -464,6 +469,10 @@ void validate_entry_metadata(struct archive_entry* entry) {
     if ((permissions & 07000U) != 0U) {
         throw_archive_error("archive special permission bits are not permitted");
     }
+}
+
+[[nodiscard]] bool entry_type_allowed(const int filetype) noexcept {
+    return filetype == AE_IFREG || filetype == AE_IFDIR;
 }
 
 void require_supported_format(struct archive* reader) {
@@ -631,7 +640,7 @@ ExpandedArchive ArchiveExpander::expand(
 
         validate_entry_metadata(entry);
         const auto filetype = archive_entry_filetype(entry);
-        if (filetype != AE_IFREG && filetype != AE_IFDIR) {
+        if (!entry_type_allowed(filetype)) {
             throw_archive_error("archive entry type is not permitted");
         }
 
@@ -640,8 +649,8 @@ ExpandedArchive ArchiveExpander::expand(
             throw_archive_error("archive entry pathname is not valid UTF-8");
         }
         const std::string_view pathname{pathname_text};
-        if (pathname.size() >
-            kMaximumPathMetadataBytes - pathname_bytes) {
+        if (pathname_bytes > kMaximumPathMetadataBytes ||
+            pathname.size() > kMaximumPathMetadataBytes - pathname_bytes) {
             throw_archive_error("archive pathname metadata exceeds configured limit");
         }
         pathname_bytes += static_cast<std::uint64_t>(pathname.size());
@@ -668,7 +677,8 @@ ExpandedArchive ArchiveExpander::expand(
             const auto found = collisions.find(target.collision_key);
             if (found != collisions.end()) {
                 if (found->second.kind != NodeKind::directory ||
-                    found->second.explicit_header) {
+                    found->second.explicit_header ||
+                    found->second.portable_path != target.portable_relative_path) {
                     throw_archive_error("archive directory header collides with another entry");
                 }
                 found->second.explicit_header = true;
@@ -677,7 +687,10 @@ ExpandedArchive ArchiveExpander::expand(
             ensure_directory_output(extraction, target);
             collisions.emplace(
                 target.collision_key,
-                NodeState{NodeKind::directory, true});
+                NodeState{
+                    NodeKind::directory,
+                    true,
+                    target.portable_relative_path});
             if (directory_count == std::numeric_limits<std::uint64_t>::max()) {
                 throw_archive_error("archive directory count overflowed");
             }
@@ -695,7 +708,7 @@ ExpandedArchive ArchiveExpander::expand(
             (static_cast<unsigned int>(archive_entry_perm(entry)) & 0111U) != 0U;
         collisions.emplace(
             target.collision_key,
-            NodeState{NodeKind::file, true});
+            NodeState{NodeKind::file, true, target.portable_relative_path});
         auto output = create_file_output(
             extraction, target, declared_size, executable);
         stream_regular_file(
@@ -779,6 +792,27 @@ std::uint64_t maximum_headers() noexcept {
 
 std::uint64_t maximum_path_metadata_bytes() noexcept {
     return kMaximumPathMetadataBytes;
+}
+
+bool entry_metadata_is_allowed(struct archive_entry* entry) noexcept {
+    try {
+        validate_entry_metadata(entry);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool entry_type_is_allowed(const int filetype) noexcept {
+    return entry_type_allowed(filetype);
+}
+
+bool header_status_continues(const int status) noexcept {
+    return status == ARCHIVE_OK;
+}
+
+bool header_status_is_success_terminal(const int status) noexcept {
+    return status == ARCHIVE_EOF;
 }
 
 } // namespace archive_expander_test_seam
