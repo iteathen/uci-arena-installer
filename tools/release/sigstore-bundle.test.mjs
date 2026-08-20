@@ -1,0 +1,11 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { parseDsseBundle, SIGSTORE_BUNDLE_MEDIA_TYPE } from "./sigstore-bundle.mjs";
+
+const statement=()=>({_type:"https://in-toto.io/Statement/v1",subject:[{name:"artifact.tar",digest:{sha256:"a".repeat(64)}}],predicateType:"https://example/predicate",predicate:{ok:true}});
+const bundle=()=>({mediaType:SIGSTORE_BUNDLE_MEDIA_TYPE,verificationMaterial:{certificate:{rawBytes:"certificate"},tlogEntries:[{inclusionProof:{checkpoint:{}}}]},dsseEnvelope:{payloadType:"application/vnd.in-toto+json",payload:Buffer.from(JSON.stringify(statement())).toString("base64"),signatures:[{sig:Buffer.from("signature").toString("base64")}]}});
+const bytes=value=>Buffer.from(JSON.stringify(value));
+test("parses one bounded canonical DSSE statement",()=>{const parsed=parseDsseBundle({bytes:bytes(bundle()),maximumBytes:1024*1024});assert.equal(parsed.signatureCount,1);assert.equal(parsed.predicate.ok,true);assert(Object.isFrozen(parsed));});
+test("rejects malformed, oversized, unknown, and message-signature bundles",()=>{assert.throws(()=>parseDsseBundle({bytes:Buffer.from("{"),maximumBytes:10}));assert.throws(()=>parseDsseBundle({bytes:bytes(bundle()),maximumBytes:1}));for(const mutate of [x=>x.extra=true,x=>x.messageSignature={},x=>x.mediaType="v0.2"]){const value=bundle();mutate(value);assert.throws(()=>parseDsseBundle({bytes:bytes(value),maximumBytes:1024*1024}));}});
+test("rejects signature count and noncanonical base64",()=>{const a=bundle();a.dsseEnvelope.signatures=[];assert.throws(()=>parseDsseBundle({bytes:bytes(a),maximumBytes:1024*1024}));const b=bundle();b.dsseEnvelope.payload="AAAA=";assert.throws(()=>parseDsseBundle({bytes:bytes(b),maximumBytes:1024*1024}));const c=bundle();c.dsseEnvelope.signatures[0].sig="signature";assert.throws(()=>parseDsseBundle({bytes:bytes(c),maximumBytes:1024*1024}));});
+test("rejects wrong payload type and non-statement payload",()=>{const a=bundle();a.dsseEnvelope.payloadType="text/plain";assert.throws(()=>parseDsseBundle({bytes:bytes(a),maximumBytes:1024*1024}));const b=bundle();b.dsseEnvelope.payload=Buffer.from("{}").toString("base64");assert.throws(()=>parseDsseBundle({bytes:bytes(b),maximumBytes:1024*1024}));});
