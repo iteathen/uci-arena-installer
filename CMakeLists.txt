@@ -31,10 +31,12 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 
 add_library(arena_installer_core
+  src/adapters/archive_extraction.cpp
   src/adapters/asset_search_index.cpp
   src/adapters/filesystem_identity.cpp
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
+  src/application/installer/archive_expander.cpp
   src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
   src/application/process_supervisor.cpp
@@ -208,6 +210,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     arena_mock_service PRIVATE nlohmann_json::nlohmann_json)
   add_executable(
     arena_installer_tests
+    tests/unit/archive_expander_tests.cpp
     tests/unit/setup_tests.cpp
     tests/unit/filesystem_identity_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
