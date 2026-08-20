@@ -133,16 +133,17 @@ export function compareVerifiedProvenance({ verified, row, component, producer }
 }
 
 export async function verifyComponentCandidate({ row, component, candidateDirectory, trustPolicy, trustPolicyDirectory, cosignPath, validationMode="official" }) {
-  void trustPolicyDirectory;
   const policy=validateProvenanceTrustPolicy(trustPolicy);
   const producer=producerById(policy,row?.provenance?.producer_id);
   requireProducerScope(producer,{componentId:row.component_id,sourceRepository:row.source_repository,ownership:row.ownership});
   const assets=await admitCandidateAssets({row,candidateDirectory});
   let verified;
-  if(producer.kind==="sigstore_keyed_local")throw new Error("unsupported_producer_adapter");
-  if(producer.kind!=="sigstore_keyless_github")throw new Error("unsupported_producer_adapter");
-  if(producer.evidence_format==="provider_result_v1")verified=verifyGitHubProviderCandidate({assets,row,component,producer,cosignPath,validationMode});
-  else if(producer.evidence_format==="managed_result_v1")verified=verifyGitHubManagedCandidate({assets,row,component,producer,cosignPath,validationMode});
+  if(producer.kind==="sigstore_keyed_local"&&producer.evidence_format==="component_evidence_v1"){
+    const {verifyLocalKeyedCandidate}=await import("./local-provenance.mjs");
+    verified=verifyLocalKeyedCandidate({assets,row,component,producer,trustPolicyPath:trustPolicyDirectory,cosignPath,validationMode});
+  }
+  else if(producer.kind==="sigstore_keyless_github"&&producer.evidence_format==="provider_result_v1")verified=verifyGitHubProviderCandidate({assets,row,component,producer,cosignPath,validationMode});
+  else if(producer.kind==="sigstore_keyless_github"&&producer.evidence_format==="managed_result_v1")verified=verifyGitHubManagedCandidate({assets,row,component,producer,cosignPath,validationMode});
   else throw new Error("unsupported_producer_adapter");
   return compareVerifiedProvenance({verified:validateVerifiedComponentProvenance(verified),row,component,producer});
 }
