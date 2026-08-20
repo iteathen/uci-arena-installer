@@ -31,10 +31,12 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 
 add_library(arena_installer_core
+  src/adapters/artifact_cache.cpp
   src/adapters/asset_search_index.cpp
   src/adapters/durable_state_publisher.cpp
   src/adapters/filesystem_identity.cpp
   src/adapters/uci_process.cpp
+  src/application/installer/artifact_acquirer.cpp
   src/application/installer/credential_recovery.cpp
   src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
@@ -212,6 +214,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     tests/unit/setup_tests.cpp
     tests/unit/durable_state_publisher_tests.cpp
     tests/unit/filesystem_identity_tests.cpp
+    tests/unit/artifact_acquirer_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
   add_dependencies(
