@@ -183,7 +183,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048,
-          "pattern": "^(?:https://|git\+https://|urn:|file-name:)[^\\u0000\\r\\n]+$"
+          "pattern": "^(?:https://|git\\+https://|urn:|file-name:)[^\\u0000\\r\\n]+$"
         },
         "sha256": {"$ref": "#/$defs/sha256"}
       }

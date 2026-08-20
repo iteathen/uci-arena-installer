@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   lstatSync,
@@ -13,12 +12,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { runCosign } from "./cosign-cli.mjs";
+import { parseDsseBundle, SIGSTORE_BUNDLE_MEDIA_TYPE } from "./sigstore-bundle.mjs";
 
 export const MANAGED_PREDICATE_TYPE =
   "https://uci-arena.example/attestations/managed-component-release-result/v1";
 export const INTOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
-export const SIGSTORE_BUNDLE_MEDIA_TYPE =
-  "application/vnd.dev.sigstore.bundle.v0.3+json";
+export { SIGSTORE_BUNDLE_MEDIA_TYPE };
 
 const INSTALLER_REPOSITORY = "iteathen/uci-arena-installer";
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
@@ -50,30 +50,7 @@ function decodeCanonicalBase64(value) {
 }
 
 function readBundleStatement(bundlePath) {
-  const bundle = readJson(bundlePath);
-  if (bundle?.mediaType !== SIGSTORE_BUNDLE_MEDIA_TYPE) {
-    throw new Error("unsupported Sigstore bundle media type");
-  }
-  if (typeof bundle?.verificationMaterial?.certificate?.rawBytes !== "string"
-      || bundle.verificationMaterial.certificate.rawBytes.length === 0) {
-    throw new Error("Sigstore bundle is missing its signing certificate");
-  }
-  const logEntries = bundle.verificationMaterial.tlogEntries;
-  if (!Array.isArray(logEntries)
-      || logEntries.length === 0
-      || logEntries.some((entry) => !entry?.inclusionProof)) {
-    throw new Error("Sigstore bundle is missing a transparency-log inclusion proof");
-  }
-  if (bundle?.dsseEnvelope?.payloadType !== "application/vnd.in-toto+json") {
-    throw new Error("Sigstore bundle does not contain an in-toto DSSE payload");
-  }
-  if (!Array.isArray(bundle.dsseEnvelope.signatures)
-      || bundle.dsseEnvelope.signatures.length !== 1) {
-    throw new Error("Sigstore bundle must contain exactly one DSSE signature");
-  }
-  return JSON.parse(
-    decodeCanonicalBase64(bundle.dsseEnvelope.payload).toString("utf8"),
-  );
+  return parseDsseBundle({ bytes: readFileSync(bundlePath), maximumBytes: 16 * 1024 * 1024 }).statement;
 }
 
 export function buildExpectedManagedStatement(managedResult) {
@@ -145,7 +122,7 @@ function exactLockedFile(filename, expectedName, expectedSha256, label) {
 }
 
 function executeManagedCosignVerification(executable, request) {
-  const result = spawnSync(executable, [
+  runCosign({ cosignPath: executable, args: [
     "verify-blob-attestation",
     "--bundle", request.bundlePath,
     "--certificate-identity", request.certificateIdentity,
@@ -156,14 +133,41 @@ function executeManagedCosignVerification(executable, request) {
     "--certificate-github-workflow-ref", request.workflowRef,
     "--certificate-github-workflow-trigger", request.workflowTrigger,
     "--type", MANAGED_PREDICATE_TYPE,
+    "--new-bundle-format",
     request.artifactPath,
-  ], { encoding: "utf8", windowsHide: true });
-  if (result.error || result.status !== 0) {
-    const diagnostic = [result.error?.message, result.stderr, result.stdout]
-      .filter((value) => typeof value === "string" && value.trim().length > 0)
-      .join("\n");
-    throw new Error(`Cosign managed verification failed: ${diagnostic || `exit ${result.status}`}`);
-  }
+  ] });
+}
+
+function managedRef(result, producer, validationMode) {
+  const prefix=`${INSTALLER_REPOSITORY}/${producer.workflow_path}@`;
+  if(typeof result.workflow_identity!=="string"||!result.workflow_identity.startsWith(prefix)||!/#\d+\.\d+$/u.test(result.workflow_identity))throw new Error("managed result workflow_identity differs from the locked workflow");
+  const ref=result.workflow_identity.slice(prefix.length).replace(/#\d+\.\d+$/u,"");
+  if(validationMode==="official"&&ref!==producer.official_ref)throw new Error("managed result ref is not official");
+  if(validationMode==="diagnostic"&&!producer.allow_diagnostic_refs&&ref!==producer.official_ref)throw new Error("producer does not allow diagnostic refs");
+  if(!ref.startsWith("refs/heads/")||/[\u0000\r\n]/u.test(ref))throw new Error("managed result ref is invalid"); return ref;
+}
+
+function validateManagedResultShape(result) {
+  const required=["schema","release_authority","suite_installer_authority","source_repository","source_commit","component_id","component_version","target_triple","artifact_name","artifact_sha256","artifact_size_bytes","installed_bytes","component_manifest_sha256","licenses_sha256","upstream_inputs","validation_evidence","workflow_identity"];
+  const optional=["source_offer_url","file_count"];
+  if(!result||typeof result!=="object"||Array.isArray(result)||required.some(key=>!(key in result))||Object.keys(result).some(key=>![...required,...optional].includes(key)))throw new Error("managed result fields are invalid");
+  const sha=/^[0-9a-f]{64}$/u,commit=/^[0-9a-f]{40}$/u;
+  if(!commit.test(result.source_commit??"")||!["artifact_sha256","component_manifest_sha256","licenses_sha256"].every(key=>sha.test(result[key]??""))||![result.artifact_size_bytes,result.installed_bytes].every(value=>Number.isSafeInteger(value)&&value>0)||!Array.isArray(result.upstream_inputs)||result.upstream_inputs.length<1||result.upstream_inputs.some(item=>!item||typeof item!=="object"||!new Set(["source","evaluation_network"]).has(item.role)||typeof item.url!=="string"||!item.url.startsWith("https://")||!sha.test(item.sha256??""))||!result.validation_evidence||typeof result.validation_evidence!=="object"||Array.isArray(result.validation_evidence))throw new Error("managed result structure is invalid");
+}
+
+export function verifyGitHubManagedCandidate({ assets, row, component, producer, cosignPath, validationMode="official", cosignVerify=executeManagedCosignVerification }) {
+  void component;
+  const result=assets.evidence.json;
+  validateManagedResultShape(result);
+  const expected={schema:"arena_managed_component_release_result_v1",component_id:row.component_id,component_version:row.component_version,artifact_name:row.artifact.name,artifact_sha256:row.artifact.sha256,component_manifest_sha256:row.component_manifest_sha256,source_repository:INSTALLER_REPOSITORY,source_commit:row.source_commit,release_authority:"installer_managed_component_only",suite_installer_authority:INSTALLER_REPOSITORY};
+  for(const [field,value] of Object.entries(expected))if(result[field]!==value)throw new Error(`managed result ${field} differs from the locked candidate`);
+  const target=result.target_triple==="any-any"?"any":result.target_triple;if(target!==row.target_triple||result.artifact_size_bytes!==assets.artifact.sizeBytes)throw new Error("managed result artifact identity differs from the locked candidate");
+  if(row.artifact.type==="file_set"&&(result.file_count!==row.artifact.file_count||result.installed_bytes!==row.artifact.installed_bytes))throw new Error("managed result file-set metrics differ from the locked candidate");
+  const ref=managedRef(result,producer,validationMode); const certificateIdentity=`https://github.com/${row.source_repository}/${producer.workflow_path}@${ref}`;
+  cosignVerify(cosignPath,{artifactPath:assets.artifact.path,bundlePath:assets.bundle.path,certificateIdentity,oidcIssuer:producer.oidc_issuer,sourceCommit:row.source_commit,workflowName:producer.workflow_name,workflowRef:ref,workflowTrigger:producer.trigger});
+  const parsed=parseDsseBundle({bytes:assets.bundle.bytes,maximumBytes:16*1024*1024});if(typeof parsed.verificationMaterial?.certificate?.rawBytes!=="string"||!Array.isArray(parsed.verificationMaterial?.tlogEntries)||parsed.verificationMaterial.tlogEntries.length<1||parsed.verificationMaterial.tlogEntries.some(entry=>!entry?.inclusionProof))throw new Error("Sigstore bundle lacks required keyless verification material");
+  if(!isDeepStrictEqual(parsed.statement,buildExpectedManagedStatement(result)))throw new Error("Sigstore bundle payload does not equal the locked managed result");
+  return Object.freeze({schema:"arena_verified_component_provenance_v1",component_id:row.component_id,component_version:row.component_version,target_triple:row.target_triple,ownership:"installer_managed",source_repository:row.source_repository,source_commit:row.source_commit,artifact:structuredClone(row.artifact),component_manifest_sha256:row.component_manifest_sha256,dependencies:[...row.dependencies].sort(),dependencies_verified_by:"release_lock",producer:{producer_id:producer.producer_id,kind:producer.kind,key_epoch:producer.key_epoch,audit_level:"transparency_logged"},evidence:structuredClone(row.evidence),bundle:{name:row.provenance.bundle_name,sha256:row.provenance.bundle_sha256}});
 }
 
 export function verifyManagedCandidate({
