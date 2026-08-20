@@ -13,6 +13,7 @@ import {
   prepareManagedProvenance,
   verifyBundlePayload,
   verifyManagedCandidate,
+  verifyGitHubManagedCandidate,
 } from "./managed-provenance.mjs";
 
 const repositoryRoot = path.resolve(
@@ -58,7 +59,7 @@ test("Installer managed provenance binds exact artifact and predicate", () => {
       dsseEnvelope: {
         payload: Buffer.from(JSON.stringify(prepared.statement), "utf8").toString("base64"),
         payloadType: "application/vnd.in-toto+json",
-        signatures: [{ sig: "signature" }],
+        signatures: [{ sig: Buffer.from("signature").toString("base64") }],
       },
     };
     mkdirSync(path.dirname(prepared.bundlePath), { recursive: true });
@@ -137,7 +138,7 @@ test("managed candidate consumption pins lock bytes, workflow claims, and predic
       dsseEnvelope: {
         payload: Buffer.from(JSON.stringify(statement), "utf8").toString("base64"),
         payloadType: "application/vnd.in-toto+json",
-        signatures: [{ sig: "signature" }],
+        signatures: [{ sig: Buffer.from("signature").toString("base64") }],
       },
     })}\n`);
     const lockRow = {
@@ -190,3 +191,5 @@ test("managed candidates are manual, private, keyless, and Installer-owned", () 
   assert.match(workflow, /uci-arena-installer retains|Installer-managed/u);
   assert.doesNotMatch(workflow, /uci-arena-manager\\tools|uci-arena-manager\/tools/u);
 });
+
+test("GitHub managed adapter returns exact normalized provenance",()=>{const root=mkdtempSync(path.join(os.tmpdir(),"managed-adapter-"));try{const artifactPath=path.join(root,"node.tar");const artifact=Buffer.from("artifact");writeFileSync(artifactPath,artifact);const result={schema:"arena_managed_component_release_result_v1",component_id:"node_runtime.private",component_version:"24.15.0",target_triple:"any-any",release_authority:"installer_managed_component_only",suite_installer_authority:"iteathen/uci-arena-installer",source_repository:"iteathen/uci-arena-installer",source_commit:"4".repeat(40),artifact_name:"node.tar",artifact_sha256:sha256(artifact),artifact_size_bytes:artifact.length,installed_bytes:artifact.length,component_manifest_sha256:"5".repeat(64),licenses_sha256:"8".repeat(64),upstream_inputs:[{role:"source",url:"https://example.invalid/node.tar",sha256:"9".repeat(64)}],validation_evidence:{executable_smoke:{status:"passed"}},workflow_identity:"iteathen/uci-arena-installer/.github/workflows/managed-component-release.yml@refs/heads/main#2.1"};const statement=buildExpectedManagedStatement(result);const bundle=Buffer.from(JSON.stringify({mediaType:SIGSTORE_BUNDLE_MEDIA_TYPE,verificationMaterial:{certificate:{rawBytes:"certificate"},tlogEntries:[{inclusionProof:{checkpoint:{}}}]},dsseEnvelope:{payloadType:"application/vnd.in-toto+json",payload:Buffer.from(JSON.stringify(statement)).toString("base64"),signatures:[{sig:Buffer.from("signature").toString("base64")}]}}));const row={component_id:result.component_id,component_version:result.component_version,target_triple:"any",ownership:"installer_managed",source_repository:result.source_repository,source_commit:result.source_commit,artifact:{name:"node.tar",sha256:result.artifact_sha256,size_bytes:artifact.length,type:"archive"},component_manifest_sha256:result.component_manifest_sha256,dependencies:[],evidence:{format:"managed_result_v1",name:"result.json",sha256:"6".repeat(64)},provenance:{producer_id:"managed",bundle_name:"bundle.json",bundle_sha256:"7".repeat(64)}};const producer={producer_id:"managed",kind:"sigstore_keyless_github",key_epoch:2,evidence_format:"managed_result_v1",workflow_path:".github/workflows/managed-component-release.yml",workflow_name:"Managed component candidate",official_ref:"refs/heads/main",allow_diagnostic_refs:false,oidc_issuer:"https://token.actions.githubusercontent.com",trigger:"workflow_dispatch"};const verified=verifyGitHubManagedCandidate({assets:{artifact:{path:artifactPath,sizeBytes:artifact.length},evidence:{json:result},bundle:{path:path.join(root,"bundle.json"),bytes:bundle}},row,component:{},producer,cosignPath:"fixture",cosignVerify(){}});assert.equal(verified.target_triple,"any");assert.equal(verified.ownership,"installer_managed");assert.equal(verified.dependencies_verified_by,"release_lock");}finally{rmSync(root,{recursive:true,force:true});}});

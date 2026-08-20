@@ -32,11 +32,13 @@ find_package(unofficial-sodium CONFIG REQUIRED)
 
 add_library(arena_installer_core
   src/adapters/asset_search_index.cpp
+  src/adapters/durable_state_publisher.cpp
   src/adapters/filesystem_identity.cpp
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
   src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
+  src/application/installer/tuf_canonical_json.cpp
   src/application/process_supervisor.cpp
   src/domain/uuid.cpp
 )
@@ -209,7 +211,9 @@ if(ARENA_INSTALLER_BUILD_TESTS)
   add_executable(
     arena_installer_tests
     tests/unit/setup_tests.cpp
+    tests/unit/durable_state_publisher_tests.cpp
     tests/unit/filesystem_identity_tests.cpp
+    tests/unit/tuf_trust_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
   add_dependencies(

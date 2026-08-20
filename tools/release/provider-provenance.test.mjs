@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   buildExpectedProviderStatement,
   SIGSTORE_BUNDLE_MEDIA_TYPE,
+  verifyGitHubProviderCandidate,
   verifyProviderCandidate,
 } from "./provider-provenance.mjs";
 
@@ -69,7 +70,7 @@ function fixture() {
     dsseEnvelope: {
       payloadType: "application/vnd.in-toto+json",
       payload: Buffer.from(JSON.stringify(statement)).toString("base64"),
-      signatures: [{ sig: "signature" }],
+      signatures: [{ sig: Buffer.from("signature").toString("base64") }],
     },
   };
   writeFileSync(bundlePath, `${JSON.stringify(bundle, null, 2)}\n`);
@@ -152,3 +153,7 @@ test("provider verifier rejects workflow identity drift before signature accepta
     cosignVerify() { assert.fail("Cosign must not run after identity drift"); },
   }), /workflow_identity differs/u);
 });
+
+test("GitHub provider adapter returns exact normalized provenance",(t)=>{const value=fixture();t.after(()=>rmSync(value.root,{recursive:true,force:true}));const result=JSON.parse(readFileSync(value.resultPath,"utf8"));const row={component_id:result.component_id,component_version:result.component_version,target_triple:result.target_triple,ownership:"provider",source_repository:result.source_repository,source_commit:result.source_commit,artifact:{name:result.artifact_name,sha256:result.artifact_sha256,size_bytes:result.artifact_size_bytes,type:"archive"},component_manifest_sha256:result.component_manifest_sha256,dependencies:["dep"],evidence:{format:"provider_result_v1",name:path.basename(value.resultPath),sha256:sha256(value.resultPath)},provenance:{producer_id:"github",bundle_name:path.basename(value.bundlePath),bundle_sha256:sha256(value.bundlePath)}};const producer={producer_id:"github",kind:"sigstore_keyless_github",key_epoch:3,evidence_format:"provider_result_v1",workflow_path:value.provider.workflow_path,workflow_name:value.provider.workflow_name,official_ref:"refs/heads/main",allow_diagnostic_refs:true,oidc_issuer:"https://token.actions.githubusercontent.com",trigger:"workflow_dispatch"};let request;const verified=verifyGitHubProviderCandidate({assets:{artifact:{path:value.artifactPath,sizeBytes:result.artifact_size_bytes},evidence:{json:result},bundle:{path:value.bundlePath,bytes:readFileSync(value.bundlePath)}},row,component:{},producer,cosignPath:"fixture",validationMode:"diagnostic",cosignVerify(executable,input){request={executable,...input};}});assert.equal(verified.schema,"arena_verified_component_provenance_v1");assert.equal(verified.dependencies_verified_by,"release_lock");assert.deepEqual(Object.keys(verified.producer).sort(),["audit_level","key_epoch","kind","producer_id"]);assert.equal(request.workflowRef,"refs/heads/agent/review");});
+
+test("GitHub provider adapter rejects diagnostic refs in official mode",(t)=>{const value=fixture();t.after(()=>rmSync(value.root,{recursive:true,force:true}));const result=JSON.parse(readFileSync(value.resultPath,"utf8"));const row={component_id:result.component_id,component_version:result.component_version,target_triple:result.target_triple,ownership:"provider",source_repository:result.source_repository,source_commit:result.source_commit,artifact:{name:result.artifact_name,sha256:result.artifact_sha256,size_bytes:result.artifact_size_bytes,type:"archive"},component_manifest_sha256:result.component_manifest_sha256,dependencies:[],evidence:{format:"provider_result_v1",name:path.basename(value.resultPath),sha256:sha256(value.resultPath)},provenance:{producer_id:"github",bundle_name:path.basename(value.bundlePath),bundle_sha256:sha256(value.bundlePath)}};const producer={producer_id:"github",kind:"sigstore_keyless_github",key_epoch:1,evidence_format:"provider_result_v1",workflow_path:value.provider.workflow_path,workflow_name:value.provider.workflow_name,official_ref:"refs/heads/main",allow_diagnostic_refs:true,oidc_issuer:"https://token.actions.githubusercontent.com",trigger:"workflow_dispatch"};assert.throws(()=>verifyGitHubProviderCandidate({assets:{artifact:{path:value.artifactPath,sizeBytes:result.artifact_size_bytes},evidence:{json:result},bundle:{path:value.bundlePath,bytes:readFileSync(value.bundlePath)}},row,component:{},producer,cosignPath:"fixture",validationMode:"official",cosignVerify(){}}),/not official/u);});
