@@ -1,13 +1,14 @@
 meta:
   spec_id: arena_installer_foundation_v1
-  version: 1
+  version: 2
   status: active
   owner: installer_governance
 
 north_star: >
   Assemble independently released UCI Arena components into a recoverable,
-  comprehensible installation without making any component repository the
-  owner of the complete product.
+  comprehensible installation through a stable cross-platform mechanism whose
+  normal application evolution changes artifacts, manifests, composition,
+  provenance, or suite media rather than Installer control flow.
 
 principles:
   lego:
@@ -15,14 +16,36 @@ principles:
       versioned manifest and immutable provenance.
     - The installer owns compatibility resolution, planning, staging,
       validation, commit, recovery, and operator reporting.
-    - A foreseeable change replaces package data, policy, a validator, or an
-      adapter rather than rewriting the lifecycle.
+    - A foreseeable application change replaces package data, composition,
+      policy, or a bounded adapter input rather than rewriting the lifecycle.
+    - Stable OS integration and fresh-install bootstrap are independently
+      versioned from replaceable application payloads.
   boundaries:
     - Provider source trees are never installer inputs.
     - Product names never select implementation behavior.
     - Platform behavior remains behind explicit adapters.
+    - Windows and Linux share Installer lifecycle semantics even when their
+      filesystem, service, locator, package, and bootstrap adapters differ.
     - Internal provider SDK and storage types never cross the manifest or
       public service boundary.
+    - Supported routine installed lifecycle consumes exact persisted
+      installed-layout authority and never reconstructs an existing
+      installation from current environment variables, repository defaults,
+      executable adjacency, or package assumptions.
+  immutability:
+    - A routine application-only release within existing installation contracts
+      requires no native Installer control-flow change merely because component
+      bytes, versions, internal file layout, or manifest-declared relative
+      entrypoints changed.
+    - A new conforming component is introduced through manifest/composition data
+      and focused tests rather than a new product-name mechanism branch.
+    - Windows MSI/Burn/bootstrap and Linux stable integration/bootstrap are not
+      rebuilt merely because replaceable application payloads changed.
+    - Release-input generation is deterministic from explicit verified inputs;
+      operator-maintained cross-file bookkeeping is not release authority.
+    - Replacing an old authority with a new owner is incomplete while the old
+      product-aware, raw-root/current-default, duplicate-layout, or per-release
+      integration/bootstrap path remains reachable from supported normal use.
   reliability:
     - Validate manifests and package identity before mutation.
     - Plan before mutation; stage and validate before replacement.
@@ -33,6 +56,9 @@ principles:
     - The installer engine and product composition have independent versions.
     - Composition pins exact component versions, artifacts, manifests,
       provenance, and compatibility.
+    - Routine application changes become versioned suite-media changes; genuine
+      installation-protocol changes are explicitly classified for architecture
+      review instead of silently changing Installer mechanism code.
     - Automatic CI is disabled; release activity is explicit and private until
       approved.
 
@@ -40,6 +66,14 @@ hard_rules:
   - Never read a component repository's source tree during composition.
   - Never place credentials in manifests, logs, arguments, or receipts.
   - Never weaken provenance or repository visibility to make composition pass.
+  - Never let a current product/resource name select generic SetupEngine or
+    arena-setup mechanism behavior.
+  - Never treat raw roots or current platform defaults as installed authority
+    after exact InstalledLayout authority exists.
+  - Never rebuild stable platform integration/bootstrap merely to follow an
+    application-only byte/layout/version change within current contracts.
+  - Never leave an old competing normal-path authority reachable and call the
+    replacement migration complete.
   - Never bypass legitimate Windows elevation for an All users installation.
   - Never leave two Manager or provider daemon authorities active for one
     installation scope.
