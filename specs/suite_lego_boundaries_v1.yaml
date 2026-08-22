@@ -1,12 +1,20 @@
 meta:
   spec_id: arena_suite_lego_boundaries_v1
-  version: 2
+  version: 3
   status: active
   owner: suite_architecture
 
 authority_document: docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md
 mandatory_companion_documents:
   - docs/architecture/UCI_ARENA_MOVE_TIME_AUTHORITY.md
+authority_relationship:
+  rule: >
+    UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md remains the broad suite topology
+    authority. UCI_ARENA_MOVE_TIME_AUTHORITY.md is the more-specific authority
+    for move-time ownership, timing-policy production/application, clock and
+    useful-block authority, transport timing, and timing applicability. If broad
+    legacy wording can be read as assigning conflicting move-time semantics, the
+    more-specific companion controls.
 
 repository_role:
   name: uci-arena-installer
@@ -50,7 +58,7 @@ mandatory_boundaries:
   - Cross-repository calls use versioned project-owned contracts and typed
     operations; private SDK, storage, and arbitrary shell contracts are forbidden.
   - The full target document and mandatory move-time companion are authoritative
-    when a local rule is ambiguous.
+    together, with the move-time companion controlling within its narrower scope.
 
 governing_tests:
   - arbitrary_component_identity_substitution
