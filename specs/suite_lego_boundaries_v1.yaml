@@ -1,10 +1,12 @@
 meta:
   spec_id: arena_suite_lego_boundaries_v1
-  version: 1
+  version: 2
   status: active
   owner: suite_architecture
 
 authority_document: docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md
+mandatory_companion_documents:
+  - docs/architecture/UCI_ARENA_MOVE_TIME_AUTHORITY.md
 
 repository_role:
   name: uci-arena-installer
@@ -20,6 +22,9 @@ repository_role:
     - lichess_bot_behavior
     - book_production_behavior
     - evidence_production_behavior
+    - move_time_allocation_strategy
+    - timing_policy_semantics
+    - live_game_clock_authority
 
 mandatory_boundaries:
   - Provider inputs are immutable artifacts, manifests, checksums, provenance,
@@ -31,11 +36,21 @@ mandatory_boundaries:
     installer-integration contract as any other component configuration.
     Installer resolves typed paths and persists results but never interprets
     UCI, timing, model, book, or tablebase semantics.
+  - Timing-policy artifacts are installed and wired as owner-declared versioned
+    artifacts. Installer never interprets minimum useful timing blocks,
+    allocation-strategy parameters, live clock pressure, or move applicability.
+  - Engine chess-time policy, Evidence policy-production authority, and Lichess
+    transport/API timing remain distinct suite responsibilities even when a
+    composition binds all three into one installed product.
+  - Existing timing-profile/temporal-curve schemas retain their declared meaning;
+    a new move-time policy contract requires explicit versioned compatibility and
+    may not be inferred from filenames or field similarity.
   - A new installable component changes its provider manifest and product
     composition, not installer orchestration control flow.
   - Cross-repository calls use versioned project-owned contracts and typed
     operations; private SDK, storage, and arbitrary shell contracts are forbidden.
-  - The full target document is authoritative when a local rule is ambiguous.
+  - The full target document and mandatory move-time companion are authoritative
+    when a local rule is ambiguous.
 
 governing_tests:
   - arbitrary_component_identity_substitution
@@ -43,3 +58,4 @@ governing_tests:
   - manifest_driven_composition
   - transactional_install_repair_upgrade_uninstall
   - rollback_and_preservation
+  - timing_policy_artifact_semantic_opacity
