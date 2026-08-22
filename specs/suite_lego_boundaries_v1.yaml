@@ -1,10 +1,11 @@
 meta:
   spec_id: arena_suite_lego_boundaries_v1
-  version: 1
+  version: 2
   status: active
   owner: suite_architecture
 
 authority_document: docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md
+mandatory_companion: docs/architecture/INSTALLER_HARDENING_ARCHITECTURE.md
 
 repository_role:
   name: uci-arena-installer
@@ -14,32 +15,69 @@ repository_role:
     - installation_lifecycle
     - preservation_backup_and_rollback
     - windows_and_linux_release_assembly
+    - stable_installer_mechanism
+    - installed_layout_authority
   must_not_own:
     - engine_behavior
     - manager_control_plane_behavior
     - lichess_bot_behavior
     - book_production_behavior
     - evidence_production_behavior
+    - provider_semantic_qualification
 
 mandatory_boundaries:
   - Provider inputs are immutable artifacts, manifests, checksums, provenance,
     versions, and compatibility declarations; provider source and build trees
     are forbidden inputs.
   - Product or model names never select installer mechanism behavior. Package
-    knowledge belongs to component manifests and composition data.
+    knowledge and human-facing product/resource labels belong to component
+    manifests and composition data.
+  - Generic setup planning consumes Installer-owned semantic contracts such as
+    component identity, dependency, lifecycle disposition, resource ownership,
+    scope, and platform capability. It never adds a native control-flow branch
+    merely because a current or future product has a new name.
   - Engine-owned managed launch profiles use the same declared
     installer-integration contract as any other component configuration.
     Installer resolves typed paths and persists results but never interprets
-    UCI, timing, model, book, or tablebase semantics.
+    UCI, timing, model, book, tablebase, Lichess, or evidence semantics.
   - A new installable component changes its provider manifest and product
     composition, not installer orchestration control flow.
+  - Routine application-only releases within existing installation contracts
+    change artifacts, manifests, provenance, composition, or versioned suite
+    media; they do not require native Installer control-flow changes merely for
+    component bytes, versions, internal file layout, or manifest-declared
+    relative entrypoint changes.
+  - Stable Windows and Linux OS integration and fresh-install bootstrap are
+    independently versioned from replaceable application payloads. Application
+    changes alone do not require rebuilding those stable mechanism bytes.
+  - Windows and Linux use platform-specific adapters beneath one installation
+    semantic model. Platform-specific filesystem, locator, service, package, or
+    bootstrap mechanisms never become separate product-aware installers.
+  - Supported routine installed lifecycle loads exact persisted InstalledLayout
+    authority. Current environment variables, repository defaults, executable
+    adjacency, package-manager assumptions, or raw-root formulas are not
+    authority for an existing installation.
+  - Release preparation derives one deterministic release-input authority from
+    explicit verified inputs. Operator-maintained cross-file coordination is not
+    release authority.
+  - Replacing an old mechanism owner is incomplete while an equivalent legacy
+    product-aware, raw-root/current-default, duplicate-layout, or per-application
+    integration/bootstrap path remains reachable from supported normal use.
   - Cross-repository calls use versioned project-owned contracts and typed
-    operations; private SDK, storage, and arbitrary shell contracts are forbidden.
-  - The full target document is authoritative when a local rule is ambiguous.
+    operations; private SDK, storage, and arbitrary shell/plugin contracts are
+    forbidden.
+  - The full target document and mandatory Installer hardening companion are
+    authoritative when a local rule is ambiguous.
 
 governing_tests:
   - arbitrary_component_identity_substitution
   - provider_source_tree_absence
   - manifest_driven_composition
+  - product_name_independent_setup_planning
+  - exact_installed_layout_survives_default_policy_change
+  - stable_platform_integration_survives_application_update
+  - deterministic_release_input_without_manual_cross_file_authority
+  - windows_linux_semantic_parity
   - transactional_install_repair_upgrade_uninstall
   - rollback_and_preservation
+  - legacy_normal_path_authority_removed
