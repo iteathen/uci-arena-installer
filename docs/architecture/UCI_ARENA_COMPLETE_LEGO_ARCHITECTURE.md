@@ -139,11 +139,15 @@ compatibility:
 
 Contracts use project-owned schemas and types. Third-party SDK objects, private storage records, raw shell command strings, and provider-internal paths cannot cross a repository boundary.
 
-### 3.1 Future Lichess game archive and training-data boundary
+### 3.1 Lichess operational archive and reserved training-data boundary
 
-Status: architecture reserved; no current runtime or installation authority.
+Status: operational archive and Manager projection target approved but not runtime-implemented; training export remains architecture-reserved.
 
-Lichess Bot is the sole capture and export owner for games it plays. A future implementation should persist one provider-owned canonical game record and derive both Manager history/replay projections and optional training exports from that record. Manager and training consumers must not read the provider's SQLite database, logs, or private runtime files, and the provider must not emit CCR or import Restaurant internals.
+Lichess Bot is the sole capture owner for games it plays. The approved operational target persists one provider-owned canonical game record and derives Manager live/history/replay projections from bounded typed provider operations. The provider owns migration, reconciliation, terminal immutability, provenance, retention, and authoritative historical backfill. Manager must not read the provider's SQLite database, logs, or private runtime files, and Installer only preserves declared provider data paths and composes compatible published contracts.
+
+The operational target and rollout record are defined in [`LICHESS_RESILIENCE_HISTORY_AND_MANAGER_PERFORMANCE_PLAN.md`](./LICHESS_RESILIENCE_HISTORY_AND_MANAGER_PERFORMANCE_PLAN.md). Until the issue-owned runtime PRs land, this target grants no endpoint, storage-schema, installation, or release authority.
+
+Training export remains separately reserved. The provider must not emit CCR or import Restaurant internals, and no operational archive record is automatically eligible for training.
 
 The reserved portable export is an immutable, content-addressed, Zstandard-compressed bundle:
 
@@ -170,7 +174,7 @@ Lichess Bot canonical game archive
 
 Restaurant owns source eligibility, sampling, weighting, reanalysis, feature and target semantics, CCR selection, and dataset lineage. Raw game outcomes, played moves, and provider search evidence are provenance-bearing observations, not automatically valid value or policy targets. If the active Restaurant contract requires engine evaluations, an offline Restaurant-owned derivation may add genuine `evals` in a new immutable derived stream; it must never overwrite the provider's raw export or relabel game outcomes or MCGS statistics as Stockfish-style evaluation evidence.
 
-Future Manager Live Games, Game History, and Replay surfaces use bounded typed provider projections over the same canonical game identity. UI-specific records cannot become a second game archive, and Installer only preserves declared provider data paths and wires declared contract locations. Installer never interprets games, evaluations, model semantics, training eligibility, or CCR.
+Manager Live Games, Game History, and Replay surfaces will use bounded typed provider projections over the same canonical game identity. UI-specific records cannot become a second game archive. Installer never interprets games, evaluations, model semantics, training eligibility, or CCR.
 
 ## 4. Engine source topology
 
