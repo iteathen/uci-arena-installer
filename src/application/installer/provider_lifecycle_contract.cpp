@@ -1,9 +1,9 @@
 #include "arena/application/installer/provider_lifecycle_contract.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <initializer_list>
+#include <new>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -69,13 +69,20 @@ bool valid_utf8(const std::string_view value) noexcept {
     return true;
 }
 
+bool ascii_alpha(const unsigned char character) noexcept {
+    return (character >= 'a' && character <= 'z') ||
+           (character >= 'A' && character <= 'Z');
+}
+
+bool ascii_alphanumeric(const unsigned char character) noexcept {
+    return ascii_alpha(character) || (character >= '0' && character <= '9');
+}
+
 bool ascii_identifier(const std::string_view value,
                       const std::optional<std::size_t> maximum = std::nullopt) {
     if (value.empty() || (maximum && value.size() > *maximum)) return false;
     return std::ranges::all_of(value, [](const unsigned char character) {
-        return (character >= 'a' && character <= 'z') ||
-               (character >= 'A' && character <= 'Z') ||
-               (character >= '0' && character <= '9') || character == '.' ||
+        return ascii_alphanumeric(character) || character == '.' ||
                character == '_' || character == '-';
     });
 }
@@ -89,10 +96,9 @@ bool v3_flag(const std::string_view value) {
     if (value.size() < 3 || value.size() > 64 || !value.starts_with("--")) {
         return false;
     }
-    const auto first = static_cast<unsigned char>(value[2]);
-    if (!std::isalnum(first)) return false;
+    if (!ascii_alphanumeric(static_cast<unsigned char>(value[2]))) return false;
     return std::ranges::all_of(value.substr(3), [](const unsigned char character) {
-        return std::isalnum(character) != 0 || character == '-';
+        return ascii_alphanumeric(character) || character == '-';
     });
 }
 
@@ -102,38 +108,47 @@ bool contains_forbidden_text_byte(const std::string_view value) {
            value.find('\n') != std::string_view::npos;
 }
 
-bool legacy_relative_path(const std::string& value) {
-    if (value == ".") return true;
-    if (value.empty() || contains_forbidden_text_byte(value) || !valid_utf8(value)) {
-        return false;
-    }
-    const std::filesystem::path path(value);
-    if (path.is_absolute() || path.has_root_name()) return false;
-    return std::ranges::none_of(path, [](const std::filesystem::path& part) {
-        return part == "." || part == "..";
-    });
-}
-
-bool v3_relative_path(const std::string& value) {
-    if (value.empty() || value.size() > 512 || contains_forbidden_text_byte(value) ||
-        !valid_utf8(value)) {
+bool portable_relative_path(const std::string_view value,
+                            const std::optional<std::size_t> maximum,
+                            const bool reject_dot_segments) {
+    if (value.empty() || (maximum && value.size() > *maximum) ||
+        contains_forbidden_text_byte(value) || !valid_utf8(value)) {
         return false;
     }
     if (value == ".") return true;
     if (value.front() == '/' || value.front() == '\\') return false;
-    if (value.size() >= 2 &&
-        std::isalpha(static_cast<unsigned char>(value[0])) != 0 && value[1] == ':') {
+    if (value.size() >= 2 && ascii_alpha(static_cast<unsigned char>(value[0])) &&
+        value[1] == ':') {
         return false;
     }
     std::size_t start = 0;
     while (start <= value.size()) {
         const auto separator = value.find_first_of("/\\", start);
-        const auto end = separator == std::string::npos ? value.size() : separator;
-        if (value.substr(start, end - start) == "..") return false;
-        if (separator == std::string::npos) break;
+        const auto end = separator == std::string_view::npos ? value.size() : separator;
+        const auto segment = value.substr(start, end - start);
+        if (segment == ".." || (reject_dot_segments && segment == ".")) return false;
+        if (separator == std::string_view::npos) break;
         start = separator + 1;
     }
     return true;
+}
+
+bool legacy_relative_path(const std::string_view value) {
+    return portable_relative_path(value, std::nullopt, true);
+}
+
+bool v3_relative_path(const std::string_view value) {
+    return portable_relative_path(value, 512, false);
+}
+
+std::filesystem::path normalized_relative_path(const std::string& value) {
+    try {
+        return std::filesystem::path(value).lexically_normal();
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (...) {
+        invalid_contract();
+    }
 }
 
 std::vector<std::string> legacy_arguments(const json& value) {
@@ -210,7 +225,7 @@ LegacyCommon parse_legacy_common(const json& startup_control) {
     }
     return {entrypoint,
             workspace_flag,
-            std::filesystem::path(workspace_relative).lexically_normal(),
+            normalized_relative_path(workspace_relative),
             configuration_flag,
             legacy_envelope(result),
             result.at("require_configuration_match_on_install").get<bool>(),
@@ -449,7 +464,7 @@ ProviderLifecycleControl parse_v3(const json& startup_control) {
             entrypoint,
             std::move(operations),
             workspace_flag,
-            std::filesystem::path(workspace_relative).lexically_normal(),
+            normalized_relative_path(workspace_relative),
             configuration_flag,
             std::move(previous_root_flag),
             std::move(replacement_root_flag),
@@ -468,7 +483,7 @@ parse_provider_lifecycle_control(const nlohmann::json& startup_control) {
         invalid_contract();
     }
     const auto schema = startup_control.at("schema").get<std::string>();
-    const auto version = startup_control.at("schema_version").get<int>();
+    const auto& version = startup_control.at("schema_version");
     if (schema == "arena_provider_startup_control_v1" && version == 1) {
         return parse_v1(startup_control);
     }
