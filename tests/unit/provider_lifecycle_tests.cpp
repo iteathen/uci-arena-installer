@@ -5,10 +5,12 @@
 
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 using namespace arena::ports;
@@ -540,8 +542,8 @@ TEST_CASE("ProviderLifecycle contract parser normalizes exact legacy v1") {
     CHECK(parsed.wire_protocol == ProviderLifecycleWireProtocol::legacy_v1);
     CHECK(parsed.entrypoint == "cli");
     REQUIRE(parsed.operations.size() == 2);
-    CHECK(parsed.operations.at(ProviderLifecycleOperation::install).arguments ==
-          std::vector<std::string>{"lifecycle", "enable"});
+    CHECK((parsed.operations.at(ProviderLifecycleOperation::install).arguments ==
+           std::vector<std::string>{"lifecycle", "enable"}));
     CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::install).allow_safe_inactive);
     CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::uninstall).allow_safe_inactive);
     CHECK(parsed.workspace_flag == "--workspace");
@@ -622,6 +624,11 @@ TEST_CASE("ProviderLifecycle contract parser rejects unknown mixed and contradic
         control["schema_version"] = 2;
         require_contract_invalid(control);
     }
+    SECTION("large schema version") {
+        auto control = startup_control_v1();
+        control["schema_version"] = nlohmann::json::parse("18446744073709551615");
+        require_contract_invalid(control);
+    }
     SECTION("v1 extra operation") {
         auto control = startup_control_v1();
         control["actions"]["pre_replace"] = nlohmann::json::array({"lifecycle"});
@@ -630,6 +637,16 @@ TEST_CASE("ProviderLifecycle contract parser rejects unknown mixed and contradic
     SECTION("v1 extra result field") {
         auto control = startup_control_v1();
         control["result"]["provider_policy"] = true;
+        require_contract_invalid(control);
+    }
+    SECTION("v1 parent path with Windows separators") {
+        auto control = startup_control_v1();
+        control["workspace_argument"]["relative_path"] = "state\\..\\escape";
+        require_contract_invalid(control);
+    }
+    SECTION("v1 unsafe flag") {
+        auto control = startup_control_v1();
+        control["workspace_argument"]["flag"] = "workspace";
         require_contract_invalid(control);
     }
     SECTION("v2 live and deferred contradict") {
@@ -744,6 +761,11 @@ TEST_CASE("ProviderLifecycle contract parser rejects malformed typed v3 shapes")
     SECTION("parent workspace path") {
         auto control = startup_control_v3();
         control["workspace_argument"]["relative_path"] = "state/../escape";
+        require_contract_invalid(control);
+    }
+    SECTION("parent workspace path with Windows separators") {
+        auto control = startup_control_v3();
+        control["workspace_argument"]["relative_path"] = "state\\..\\escape";
         require_contract_invalid(control);
     }
     SECTION("unknown operation") {
