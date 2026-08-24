@@ -1,3 +1,4 @@
+#include "arena/application/installer/provider_lifecycle_contract.hpp"
 #include "arena/ports/provider_lifecycle.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -449,4 +450,305 @@ TEST_CASE("provider lifecycle serializer is deterministic pure neutral projectio
     CHECK_FALSE(first.contains("transaction"));
     CHECK_FALSE(first.contains("timestamp"));
     CHECK_FALSE(first.contains("path"));
+}
+
+namespace {
+
+using arena::application::installer::ProviderLifecycleControl;
+using arena::application::installer::parse_provider_lifecycle_control;
+
+nlohmann::json startup_control_v1() {
+    return {
+        {"schema", "arena_provider_startup_control_v1"},
+        {"schema_version", 1},
+        {"entrypoint", "cli"},
+        {"actions",
+         {{"install", nlohmann::json::array({"lifecycle", "enable"})},
+          {"uninstall", nlohmann::json::array({"lifecycle", "disable"})}}},
+        {"workspace_argument", {{"flag", "--workspace"}, {"relative_path", "."}}},
+        {"configuration_argument", "--configuration"},
+        {"result",
+         {{"envelope", "startup"},
+          {"require_configuration_match_on_install", false},
+          {"require_live_on_install", true}}},
+    };
+}
+
+nlohmann::json startup_control_v2(const bool deferred = false) {
+    auto control = startup_control_v1();
+    control["schema"] = "arena_provider_startup_control_v2";
+    control["schema_version"] = 2;
+    control["actions"]["pre_replace"] =
+        nlohmann::json::array({"lifecycle", "prepare_replace"});
+    control["actions"]["post_replace"] =
+        nlohmann::json::array({"lifecycle", "complete_replace"});
+    control["replacement_arguments"] = {
+        {"previous_root", "--previous-root"},
+        {"replacement_root", "--replacement-root"},
+    };
+    control["result"]["require_live_on_post_replace"] = !deferred;
+    if (deferred) {
+        control["result"]["allow_deferred_requalification_on_post_replace"] = true;
+    }
+    return control;
+}
+
+nlohmann::json startup_control_v3(const bool replacement = false) {
+    nlohmann::json control = {
+        {"schema", "arena_provider_startup_control_v3"},
+        {"schema_version", 3},
+        {"entrypoint", "cli"},
+        {"operations",
+         {{"install",
+           {{"arguments", nlohmann::json::array({"lifecycle", "enable"})},
+            {"success_dispositions",
+             nlohmann::json::array({"ready", "safe_inactive"})}}},
+          {"uninstall",
+           {{"arguments", nlohmann::json::array({"lifecycle", "disable"})},
+            {"success_dispositions", nlohmann::json::array({"ready"})}}}}},
+        {"workspace_argument",
+         {{"flag", "--workspace"}, {"relative_path", "state/control"}}},
+        {"configuration_argument", "--configuration"},
+    };
+    if (replacement) {
+        control["operations"]["pre_replace"] = {
+            {"arguments", nlohmann::json::array({"lifecycle", "prepare_replace"})},
+            {"success_dispositions", nlohmann::json::array({"ready"})},
+        };
+        control["operations"]["post_replace"] = {
+            {"arguments", nlohmann::json::array({"lifecycle", "complete_replace"})},
+            {"success_dispositions",
+             nlohmann::json::array({"ready", "safe_inactive"})},
+        };
+        control["replacement_arguments"] = {
+            {"previous_root", "--previous-root"},
+            {"replacement_root", "--replacement-root"},
+        };
+    }
+    return control;
+}
+
+void require_contract_invalid(const nlohmann::json& control) {
+    CHECK_THROWS_AS(parse_provider_lifecycle_control(control), std::invalid_argument);
+}
+
+} // namespace
+
+TEST_CASE("ProviderLifecycle contract parser normalizes exact legacy v1") {
+    auto control = startup_control_v1();
+    const ProviderLifecycleControl parsed = parse_provider_lifecycle_control(control);
+    CHECK(parsed.wire_protocol == ProviderLifecycleWireProtocol::legacy_v1);
+    CHECK(parsed.entrypoint == "cli");
+    REQUIRE(parsed.operations.size() == 2);
+    CHECK(parsed.operations.at(ProviderLifecycleOperation::install).arguments ==
+          std::vector<std::string>{"lifecycle", "enable"});
+    CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::install).allow_safe_inactive);
+    CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::uninstall).allow_safe_inactive);
+    CHECK(parsed.workspace_flag == "--workspace");
+    CHECK(parsed.workspace_relative_path == std::filesystem::path{"."});
+    CHECK(parsed.configuration_flag == "--configuration");
+    CHECK_FALSE(parsed.previous_root_flag);
+    CHECK_FALSE(parsed.replacement_root_flag);
+    CHECK(parsed.legacy_envelope == ProviderLegacyResultEnvelope::startup);
+    CHECK_FALSE(parsed.legacy_require_configuration_match);
+
+    control["result"]["require_live_on_install"] = false;
+    CHECK(parse_provider_lifecycle_control(control)
+              .operations.at(ProviderLifecycleOperation::install)
+              .allow_safe_inactive);
+}
+
+TEST_CASE("ProviderLifecycle contract parser contains legacy v2 policy while normalizing operations") {
+    SECTION("live post replace") {
+        const auto parsed = parse_provider_lifecycle_control(startup_control_v2());
+        CHECK(parsed.wire_protocol == ProviderLifecycleWireProtocol::legacy_v2);
+        REQUIRE(parsed.operations.size() == 4);
+        CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::pre_replace)
+                        .allow_safe_inactive);
+        CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::post_replace)
+                        .allow_safe_inactive);
+        REQUIRE(parsed.previous_root_flag);
+        REQUIRE(parsed.replacement_root_flag);
+        CHECK(*parsed.previous_root_flag == "--previous-root");
+        CHECK(*parsed.replacement_root_flag == "--replacement-root");
+    }
+    SECTION("deferred legacy result becomes neutral safe inactive permission") {
+        const auto parsed = parse_provider_lifecycle_control(startup_control_v2(true));
+        CHECK(parsed.operations.at(ProviderLifecycleOperation::post_replace)
+                  .allow_safe_inactive);
+        CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::pre_replace)
+                        .allow_safe_inactive);
+    }
+}
+
+TEST_CASE("ProviderLifecycle contract parser normalizes typed v3 without legacy influence") {
+    const auto parsed = parse_provider_lifecycle_control(startup_control_v3());
+    CHECK(parsed.wire_protocol == ProviderLifecycleWireProtocol::typed_v3);
+    CHECK(parsed.entrypoint == "cli");
+    REQUIRE(parsed.operations.size() == 2);
+    CHECK(parsed.operations.at(ProviderLifecycleOperation::install).allow_safe_inactive);
+    CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::uninstall).allow_safe_inactive);
+    CHECK(parsed.workspace_flag == "--workspace");
+    CHECK(parsed.workspace_relative_path == std::filesystem::path{"state/control"});
+    CHECK(parsed.configuration_flag == "--configuration");
+    CHECK_FALSE(parsed.previous_root_flag);
+    CHECK_FALSE(parsed.replacement_root_flag);
+    CHECK(parsed.legacy_envelope == ProviderLegacyResultEnvelope::root);
+    CHECK(parsed.legacy_require_configuration_match);
+}
+
+TEST_CASE("ProviderLifecycle contract parser normalizes the exact typed v3 replacement pair") {
+    const auto parsed = parse_provider_lifecycle_control(startup_control_v3(true));
+    REQUIRE(parsed.operations.size() == 4);
+    CHECK_FALSE(parsed.operations.at(ProviderLifecycleOperation::pre_replace)
+                    .allow_safe_inactive);
+    CHECK(parsed.operations.at(ProviderLifecycleOperation::post_replace)
+              .allow_safe_inactive);
+    REQUIRE(parsed.previous_root_flag);
+    REQUIRE(parsed.replacement_root_flag);
+    CHECK(*parsed.previous_root_flag == "--previous-root");
+    CHECK(*parsed.replacement_root_flag == "--replacement-root");
+}
+
+TEST_CASE("ProviderLifecycle contract parser rejects unknown mixed and contradictory legacy contracts") {
+    SECTION("unknown schema") {
+        auto control = startup_control_v1();
+        control["schema"] = "arena_provider_startup_control_v4";
+        control["schema_version"] = 4;
+        require_contract_invalid(control);
+    }
+    SECTION("mixed schema version") {
+        auto control = startup_control_v1();
+        control["schema_version"] = 2;
+        require_contract_invalid(control);
+    }
+    SECTION("v1 extra operation") {
+        auto control = startup_control_v1();
+        control["actions"]["pre_replace"] = nlohmann::json::array({"lifecycle"});
+        require_contract_invalid(control);
+    }
+    SECTION("v1 extra result field") {
+        auto control = startup_control_v1();
+        control["result"]["provider_policy"] = true;
+        require_contract_invalid(control);
+    }
+    SECTION("v2 live and deferred contradict") {
+        auto control = startup_control_v2();
+        control["result"]["allow_deferred_requalification_on_post_replace"] = true;
+        require_contract_invalid(control);
+    }
+    SECTION("v2 inactive without explicit deferred permission") {
+        auto control = startup_control_v2();
+        control["result"]["require_live_on_post_replace"] = false;
+        require_contract_invalid(control);
+    }
+    SECTION("v2 extra result field") {
+        auto control = startup_control_v2();
+        control["result"]["provider_selector"] = "forbidden";
+        require_contract_invalid(control);
+    }
+}
+
+TEST_CASE("ProviderLifecycle contract parser rejects malformed typed v3 shapes") {
+    SECTION("one sided pre replace") {
+        auto control = startup_control_v3();
+        control["operations"]["pre_replace"] = {
+            {"arguments", nlohmann::json::array({"lifecycle"})},
+            {"success_dispositions", nlohmann::json::array({"ready"})},
+        };
+        require_contract_invalid(control);
+    }
+    SECTION("replacement arguments without operations") {
+        auto control = startup_control_v3();
+        control["replacement_arguments"] = {
+            {"previous_root", "--previous-root"},
+            {"replacement_root", "--replacement-root"},
+        };
+        require_contract_invalid(control);
+    }
+    SECTION("replacement operations without arguments") {
+        auto control = startup_control_v3(true);
+        control.erase("replacement_arguments");
+        require_contract_invalid(control);
+    }
+    SECTION("safe inactive uninstall") {
+        auto control = startup_control_v3();
+        control["operations"]["uninstall"]["success_dispositions"] =
+            nlohmann::json::array({"ready", "safe_inactive"});
+        require_contract_invalid(control);
+    }
+    SECTION("safe inactive pre replace") {
+        auto control = startup_control_v3(true);
+        control["operations"]["pre_replace"]["success_dispositions"] =
+            nlohmann::json::array({"ready", "safe_inactive"});
+        require_contract_invalid(control);
+    }
+    SECTION("wrong disposition order") {
+        auto control = startup_control_v3();
+        control["operations"]["install"]["success_dispositions"] =
+            nlohmann::json::array({"safe_inactive", "ready"});
+        require_contract_invalid(control);
+    }
+    SECTION("legacy result envelope") {
+        auto control = startup_control_v3();
+        control["result"] = {{"envelope", "root"}};
+        require_contract_invalid(control);
+    }
+    SECTION("legacy live policy") {
+        auto control = startup_control_v3();
+        control["require_live_on_install"] = false;
+        require_contract_invalid(control);
+    }
+    SECTION("provider selector") {
+        auto control = startup_control_v3();
+        control["provider_selector"] = "forbidden";
+        require_contract_invalid(control);
+    }
+    SECTION("shell command field") {
+        auto control = startup_control_v3();
+        control["operations"]["install"]["command"] = "lifecycle enable";
+        require_contract_invalid(control);
+    }
+    SECTION("duplicate argument") {
+        auto control = startup_control_v3();
+        control["operations"]["install"]["arguments"] =
+            nlohmann::json::array({"lifecycle", "lifecycle"});
+        require_contract_invalid(control);
+    }
+    SECTION("empty argument") {
+        auto control = startup_control_v3();
+        control["operations"]["install"]["arguments"] = nlohmann::json::array({""});
+        require_contract_invalid(control);
+    }
+    SECTION("oversized argument") {
+        auto control = startup_control_v3();
+        control["operations"]["install"]["arguments"] =
+            nlohmann::json::array({std::string(129, 'x')});
+        require_contract_invalid(control);
+    }
+    SECTION("unsafe workspace flag") {
+        auto control = startup_control_v3();
+        control["workspace_argument"]["flag"] = "--bad_flag";
+        require_contract_invalid(control);
+    }
+    SECTION("absolute workspace path") {
+        auto control = startup_control_v3();
+        control["workspace_argument"]["relative_path"] = "/absolute";
+        require_contract_invalid(control);
+    }
+    SECTION("drive workspace path") {
+        auto control = startup_control_v3();
+        control["workspace_argument"]["relative_path"] = "C:/absolute";
+        require_contract_invalid(control);
+    }
+    SECTION("parent workspace path") {
+        auto control = startup_control_v3();
+        control["workspace_argument"]["relative_path"] = "state/../escape";
+        require_contract_invalid(control);
+    }
+    SECTION("unknown operation") {
+        auto control = startup_control_v3();
+        control["operations"]["restart"] = control["operations"]["install"];
+        require_contract_invalid(control);
+    }
 }
