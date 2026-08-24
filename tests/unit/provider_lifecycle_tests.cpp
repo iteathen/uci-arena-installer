@@ -1,10 +1,14 @@
 #include "arena/application/installer/provider_lifecycle_contract.hpp"
+#include "arena/adapters/provider_lifecycle.hpp"
+#include "arena/application/process_supervisor.hpp"
 #include "arena/ports/provider_lifecycle.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -177,7 +181,184 @@ nlohmann::json typed_v3_control(const bool replacement = false) {
     return value;
 }
 
+class TemporaryDirectory final {
+  public:
+    TemporaryDirectory() {
+        root_ = std::filesystem::temp_directory_path() /
+                ("arena-provider-lifecycle-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch()
+                                    .count()));
+        if (!std::filesystem::create_directory(root_)) {
+            throw std::runtime_error("failed to create provider lifecycle test directory");
+        }
+    }
+
+    ~TemporaryDirectory() {
+        std::error_code ignored;
+        std::filesystem::remove_all(root_, ignored);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return root_; }
+
+  private:
+    std::filesystem::path root_;
+};
+
+std::string operation_argument(const ProviderLifecycleOperation operation) {
+    switch (operation) {
+    case ProviderLifecycleOperation::install: return "install";
+    case ProviderLifecycleOperation::uninstall: return "uninstall";
+    case ProviderLifecycleOperation::pre_replace: return "pre_replace";
+    case ProviderLifecycleOperation::post_replace: return "post_replace";
+    }
+    throw std::logic_error("invalid lifecycle operation fixture");
+}
+
+ProviderLifecycleRequest cli_request(
+    const TemporaryDirectory& directory,
+    const ProviderLifecycleOperation operation,
+    const std::string& variant,
+    const std::chrono::milliseconds timeout = std::chrono::seconds{2}) {
+    const auto record = directory.path() / "invocations.log";
+    return {
+        "provider.core",
+        "1.2.3",
+        operation,
+        ARENA_MOCK_SERVICE_PATH,
+        directory.path(),
+        {"provider-lifecycle",
+         "--component-id",
+         "provider.core",
+         "--component-version",
+         "1.2.3",
+         "--operation",
+         operation_argument(operation),
+         "--variant",
+         variant,
+         "--expected-working-directory",
+         directory.path().string(),
+         "--literal-argument",
+         "opaque value & | ;",
+         "--invocation-record",
+         record.string()},
+        {ProviderLifecycleWireProtocol::typed_v3,
+         ProviderLegacyResultEnvelope::root,
+         true,
+         true},
+        timeout};
+}
+
+std::size_t invocation_count(const TemporaryDirectory& directory) {
+    std::ifstream input(directory.path() / "invocations.log", std::ios::binary);
+    std::size_t count = 0;
+    std::string line;
+    while (std::getline(input, line)) ++count;
+    return count;
+}
+
 } // namespace
+
+TEST_CASE("CLI ProviderLifecycle factory preserves process inputs and invokes once") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor process_supervisor;
+    auto lifecycle =
+        arena::adapters::make_cli_provider_lifecycle(process_supervisor);
+    REQUIRE(lifecycle);
+
+    std::size_t expected_invocations = 0;
+    for (const auto operation : {ProviderLifecycleOperation::install,
+                                 ProviderLifecycleOperation::uninstall,
+                                 ProviderLifecycleOperation::pre_replace,
+                                 ProviderLifecycleOperation::post_replace}) {
+        const auto actual = lifecycle->invoke(cli_request(directory, operation, "ready"));
+        CHECK(actual == result(operation));
+        CHECK(invocation_count(directory) == ++expected_invocations);
+    }
+}
+
+TEST_CASE("CLI ProviderLifecycle transports safe-inactive and failed typed results") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor process_supervisor;
+    auto lifecycle =
+        arena::adapters::make_cli_provider_lifecycle(process_supervisor);
+
+    for (const auto operation : {ProviderLifecycleOperation::install,
+                                 ProviderLifecycleOperation::post_replace}) {
+        const auto actual =
+            lifecycle->invoke(cli_request(directory, operation, "safe_inactive"));
+        CHECK(actual.disposition == ProviderLifecycleDisposition::safe_inactive);
+        REQUIRE(actual.reason);
+        CHECK(actual.reason->id == "fixture.safe_inactive");
+        CHECK(actual.observed == safe_inactive_observed(operation));
+    }
+    const auto failed = lifecycle->invoke(
+        cli_request(directory, ProviderLifecycleOperation::install, "failed"));
+    CHECK(failed.disposition == ProviderLifecycleDisposition::failed);
+    REQUIRE(failed.reason);
+    CHECK(failed.reason->id == "fixture.failed");
+    CHECK(invocation_count(directory) == 3);
+}
+
+TEST_CASE("CLI ProviderLifecycle leaves raw semantic failures to the neutral base") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor process_supervisor;
+    auto lifecycle =
+        arena::adapters::make_cli_provider_lifecycle(process_supervisor);
+
+    struct ExpectedFailure {
+        const char* variant;
+        const char* reason;
+    };
+    const std::array failures{
+        ExpectedFailure{"identity_mismatch", "identity_mismatch"},
+        ExpectedFailure{"operation_mismatch", "operation_mismatch"},
+        ExpectedFailure{"observation_mismatch", "observation_mismatch"},
+        ExpectedFailure{"malformed", "malformed_result"},
+        ExpectedFailure{"invalid_json", "adapter_exception"},
+        ExpectedFailure{"nonzero", "adapter_exception"},
+    };
+    for (const auto& expected : failures) {
+        require_failure(
+            lifecycle->invoke(cli_request(directory,
+                                          ProviderLifecycleOperation::install,
+                                          expected.variant)),
+            expected.reason);
+    }
+    CHECK(invocation_count(directory) == failures.size());
+}
+
+TEST_CASE("CLI ProviderLifecycle never extends or launches beyond its deadline") {
+    SECTION("remaining timeout") {
+        TemporaryDirectory directory;
+        arena::application::ProcessSupervisor process_supervisor;
+        auto lifecycle =
+            arena::adapters::make_cli_provider_lifecycle(process_supervisor);
+        const auto before = std::chrono::steady_clock::now();
+        require_failure(
+            lifecycle->invoke(cli_request(directory,
+                                          ProviderLifecycleOperation::install,
+                                          "timeout",
+                                          std::chrono::milliseconds{200})),
+            "adapter_exception");
+        const auto elapsed = std::chrono::steady_clock::now() - before;
+        CHECK(elapsed < std::chrono::seconds{2});
+        CHECK(invocation_count(directory) == 1);
+    }
+    SECTION("no whole millisecond remains") {
+        TemporaryDirectory directory;
+        arena::application::ProcessSupervisor process_supervisor;
+        auto lifecycle =
+            arena::adapters::make_cli_provider_lifecycle(process_supervisor);
+        require_failure(
+            lifecycle->invoke(cli_request(directory,
+                                          ProviderLifecycleOperation::install,
+                                          "ready",
+                                          provider_lifecycle_timeout_minimum)),
+            "adapter_exception");
+        CHECK(invocation_count(directory) == 0);
+    }
+}
 
 TEST_CASE("ProviderLifecycle contract parser normalizes exact legacy v1 control") {
     const auto parsed = parse_provider_lifecycle_control(legacy_v1_control(false));
