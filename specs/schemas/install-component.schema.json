@@ -178,7 +178,11 @@
       "required": ["flag", "relative_path"],
       "properties": {
         "flag": {"$ref": "#/$defs/legacy_startup_flag"},
-        "relative_path": {"type": "string", "minLength": 1}
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:\\.|(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$))[^\\u0000\\r\\n]+)$"
+        }
       }
     },
     "startup_control": {
