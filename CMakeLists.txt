@@ -38,6 +38,7 @@ add_library(arena_installer_core
   src/adapters/provider_lifecycle.cpp
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
+  src/application/installer/exact_document.cpp
   src/application/installer/provider_lifecycle_contract.cpp
   src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
@@ -216,6 +217,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     arena_installer_tests
     tests/unit/setup_tests.cpp
     tests/unit/durable_state_publisher_tests.cpp
+    tests/unit/exact_document_tests.cpp
     tests/unit/filesystem_identity_tests.cpp
     tests/unit/provider_lifecycle_tests.cpp
     tests/unit/tuf_trust_tests.cpp
