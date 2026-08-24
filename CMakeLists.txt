@@ -36,6 +36,7 @@ add_library(arena_installer_core
   src/adapters/durable_state_publisher.cpp
   src/adapters/filesystem_identity.cpp
   src/adapters/provider_lifecycle.cpp
+  src/adapters/service_control.cpp
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
   src/application/installer/exact_document.cpp
@@ -221,6 +222,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     tests/unit/exact_document_tests.cpp
     tests/unit/filesystem_identity_tests.cpp
     tests/unit/provider_lifecycle_tests.cpp
+    tests/unit/service_control_tests.cpp
     tests/unit/tuf_trust_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
