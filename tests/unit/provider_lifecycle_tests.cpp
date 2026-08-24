@@ -113,6 +113,26 @@ nlohmann::json ready_json(ProviderLifecycleOperation operation) {
     return provider_lifecycle_result_to_json(result(operation));
 }
 
+ProviderLifecycleRequest legacy_request(
+    const ProviderLifecycleWireProtocol protocol,
+    const ProviderLifecycleOperation operation,
+    const bool allow_safe_inactive = false,
+    const ProviderLegacyResultEnvelope envelope = ProviderLegacyResultEnvelope::root) {
+    auto candidate = request(operation);
+    candidate.policy = {protocol, envelope, true, allow_safe_inactive};
+    return candidate;
+}
+
+nlohmann::json legacy_status(const bool installed, const bool active,
+                             const bool replacement_ready = false,
+                             const bool deferred = false) {
+    return {{"installed", installed},
+            {"matchesCurrentConfiguration", true},
+            {"active", active},
+            {"replacementReady", replacement_ready},
+            {"requalificationRequired", deferred}};
+}
+
 nlohmann::json legacy_v1_control(const bool require_live = false) {
     return {
         {"schema", "arena_provider_startup_control_v1"},
@@ -728,21 +748,125 @@ TEST_CASE("ProviderLifecycle classifies every observation mismatch") {
     }
 }
 
-TEST_CASE("ProviderLifecycle bounds raw JSON and does not interpret legacy protocols") {
+TEST_CASE("ProviderLifecycle bounds raw JSON") {
     SECTION("raw size") {
         FakeLifecycle lifecycle;
         lifecycle.raw["padding"] =
             std::string(provider_lifecycle_raw_result_max_bytes + 1, 'x');
         require_failure(lifecycle.invoke(request()), "malformed_result");
     }
-    for (const auto protocol : {ProviderLifecycleWireProtocol::legacy_v1,
-                                ProviderLifecycleWireProtocol::legacy_v2}) {
+}
+
+TEST_CASE("ProviderLifecycle maps legacy v1 lifecycle output to neutral evidence") {
+    SECTION("install ready") {
         FakeLifecycle lifecycle;
-        auto candidate = request();
-        candidate.policy.wire_protocol = protocol;
-        require_failure(lifecycle.invoke(candidate), "legacy_contract_not_satisfied");
-        CHECK(lifecycle.calls == 0);
+        lifecycle.raw = legacy_status(true, true);
+        CHECK(lifecycle.invoke(legacy_request(
+                  ProviderLifecycleWireProtocol::legacy_v1,
+                  ProviderLifecycleOperation::install)) == result());
     }
+    SECTION("install explicitly safe inactive") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = {{"startup", legacy_status(true, false)}};
+        const auto actual = lifecycle.invoke(legacy_request(
+            ProviderLifecycleWireProtocol::legacy_v1,
+            ProviderLifecycleOperation::install, true,
+            ProviderLegacyResultEnvelope::startup));
+        CHECK(actual.observed == safe_inactive_observed(
+                                     ProviderLifecycleOperation::install));
+        CHECK(actual.disposition == ProviderLifecycleDisposition::safe_inactive);
+        REQUIRE(actual.reason);
+        CHECK(actual.reason->id == "legacy.safe_inactive");
+        const auto serialized = provider_lifecycle_result_to_json(actual).dump();
+        CHECK(serialized.find("matchesCurrentConfiguration") == std::string::npos);
+        CHECK(serialized.find("requalificationRequired") == std::string::npos);
+    }
+    SECTION("uninstall ready") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = legacy_status(false, false);
+        CHECK(lifecycle.invoke(legacy_request(
+                  ProviderLifecycleWireProtocol::legacy_v1,
+                  ProviderLifecycleOperation::uninstall)) ==
+              result(ProviderLifecycleOperation::uninstall));
+    }
+}
+
+TEST_CASE("ProviderLifecycle maps legacy v2 replacement output to neutral evidence") {
+    SECTION("install and uninstall retain v1 mapping") {
+        FakeLifecycle install;
+        install.raw = legacy_status(true, true);
+        CHECK(install.invoke(legacy_request(
+                  ProviderLifecycleWireProtocol::legacy_v2,
+                  ProviderLifecycleOperation::install)) == result());
+        FakeLifecycle uninstall;
+        uninstall.raw = legacy_status(false, false);
+        CHECK(uninstall.invoke(legacy_request(
+                  ProviderLifecycleWireProtocol::legacy_v2,
+                  ProviderLifecycleOperation::uninstall)) ==
+              result(ProviderLifecycleOperation::uninstall));
+    }
+    SECTION("pre replace ready") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = legacy_status(true, false, true);
+        CHECK(lifecycle.invoke(legacy_request(
+                  ProviderLifecycleWireProtocol::legacy_v2,
+                  ProviderLifecycleOperation::pre_replace)) ==
+              result(ProviderLifecycleOperation::pre_replace));
+    }
+    SECTION("post replace ready") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = legacy_status(true, true);
+        CHECK(lifecycle.invoke(legacy_request(
+                  ProviderLifecycleWireProtocol::legacy_v2,
+                  ProviderLifecycleOperation::post_replace)) ==
+              result(ProviderLifecycleOperation::post_replace));
+    }
+    SECTION("post replace explicitly safe inactive") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = legacy_status(true, false, false, true);
+        const auto actual = lifecycle.invoke(legacy_request(
+            ProviderLifecycleWireProtocol::legacy_v2,
+            ProviderLifecycleOperation::post_replace, true));
+        CHECK(actual.disposition == ProviderLifecycleDisposition::safe_inactive);
+        CHECK(actual.observed == safe_inactive_observed(
+                                     ProviderLifecycleOperation::post_replace));
+        REQUIRE(actual.reason);
+        CHECK(actual.reason->id == "legacy.safe_inactive");
+    }
+}
+
+TEST_CASE("ProviderLifecycle contains every unsatisfied legacy result") {
+    const std::array malformed{
+        nlohmann::json::object(),
+        nlohmann::json{{"installed", "yes"}},
+        legacy_status(true, false),
+        nlohmann::json{{"installed", true},
+                       {"active", true},
+                       {"matchesCurrentConfiguration", false}},
+        nlohmann::json{{"installed", true},
+                       {"active", true},
+                       {"matchesCurrentConfiguration", true},
+                       {"component_id", "other.provider"}},
+    };
+    for (const auto& raw : malformed) {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = raw;
+        require_failure(
+            lifecycle.invoke(legacy_request(
+                ProviderLifecycleWireProtocol::legacy_v1,
+                ProviderLifecycleOperation::install)),
+            "legacy_contract_not_satisfied");
+        CHECK(lifecycle.calls == 1);
+    }
+    FakeLifecycle oversized;
+    oversized.raw = legacy_status(true, true);
+    oversized.raw["padding"] =
+        std::string(provider_lifecycle_raw_result_max_bytes + 1, 'x');
+    require_failure(
+        oversized.invoke(legacy_request(
+            ProviderLifecycleWireProtocol::legacy_v1,
+            ProviderLifecycleOperation::install)),
+        "legacy_contract_not_satisfied");
 }
 
 TEST_CASE("provider lifecycle serializer emits exact ready JSON for all operations") {

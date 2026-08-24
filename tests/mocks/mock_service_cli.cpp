@@ -40,6 +40,14 @@ bool has_option(const int argc, char** argv, const std::string_view option) {
     return false;
 }
 
+std::string option_value(const int argc, char** argv,
+                         const std::string_view option) {
+    for (int index = 1; index + 1 < argc; ++index) {
+        if (std::string_view(argv[index]) == option) return argv[index + 1];
+    }
+    return {};
+}
+
 bool has_dependency_version(const int argc, char** argv,
                             const std::string_view binding,
                             const std::string_view version) {
@@ -227,6 +235,50 @@ int main(int argc, char** argv) {
             cli.find("fail-new-binding") != std::string::npos &&
             has_dependency_version(argc, argv, "runtime", "2.0.0")) {
             return 23;
+        }
+        if (has_option(argc, argv, "--typed-lifecycle")) {
+            const std::string component_id =
+                option_value(argc, argv, "--component-id");
+            const std::string component_version =
+                option_value(argc, argv, "--component-version");
+            const std::string variant = option_value(argc, argv, "--variant");
+            if (component_id.empty() || component_version.empty() ||
+                (variant != "ready" && variant != "safe_inactive" &&
+                 variant != "failed" && variant != "malformed")) {
+                return 24;
+            }
+            const std::string lifecycle_operation =
+                operation == "enable"          ? "install"
+                : operation == "disable"       ? "uninstall"
+                : operation == "prepare_replace" ? "pre_replace"
+                                                   : "post_replace";
+            const bool safe_inactive = variant == "safe_inactive";
+            const bool failed = variant == "failed";
+            nlohmann::json result{
+                {"schema", "arena_provider_lifecycle_result_v1"},
+                {"schema_version", 1},
+                {"component_id", component_id},
+                {"component_version", component_version},
+                {"operation", lifecycle_operation},
+                {"disposition",
+                 failed ? "failed"
+                        : safe_inactive ? "safe_inactive" : "ready"},
+                {"observed",
+                 failed
+                     ? nlohmann::json{{"installation", "unknown"},
+                                      {"activity", "unknown"},
+                                      {"configuration", "unknown"},
+                                      {"replacement", "unknown"}}
+                     : lifecycle_observed(lifecycle_operation, safe_inactive)},
+            };
+            if (safe_inactive || failed) {
+                result["reason"] = {
+                    {"id", failed ? "fixture.failed" : "fixture.safe_inactive"},
+                    {"message", "opaque setup fixture reason"}};
+            }
+            if (variant == "malformed") result["provider_field"] = true;
+            std::cout << result.dump() << '\n';
+            return 0;
         }
         const bool installed = operation == "enable" ||
                                operation == "prepare_replace" ||

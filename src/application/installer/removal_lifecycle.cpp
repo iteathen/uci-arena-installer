@@ -809,9 +809,28 @@ json RemovalLifecycle::uninstall(const SetupPaths& paths, const json& plan,
         json evidence =
             preservation_record(receipt, receipt_sha256, "prepared");
         write_json_atomic(evidence_path, evidence);
-        json startup_cleanup;
+        json lifecycle_result;
         if (component.at("startup_cleanup_required").get<bool>()) {
-            startup_cleanup = hooks.uninstall_startup(receipt);
+            lifecycle_result = hooks.uninstall_startup(receipt);
+            const json expected_observed{
+                {"installation", "absent"},
+                {"activity", "inactive"},
+                {"configuration", "not_applicable"},
+                {"replacement", "not_applicable"}};
+            if (!lifecycle_result.is_object() ||
+                lifecycle_result.value("schema", "") !=
+                    "arena_provider_lifecycle_result_v1" ||
+                lifecycle_result.value("schema_version", 0) != 1 ||
+                lifecycle_result.value("component_id", "") != id ||
+                lifecycle_result.value("component_version", "") !=
+                    receipt.at("component_version").get<std::string>() ||
+                lifecycle_result.value("operation", "") != "uninstall" ||
+                lifecycle_result.value("disposition", "") != "ready" ||
+                lifecycle_result.value("observed", json::object()) !=
+                    expected_observed) {
+                throw std::runtime_error(
+                    "uninstall lifecycle evidence is not ready for component " + id);
+            }
         }
         if (component.at("remove_active_root").get<bool>()) {
             if (!strictly_within(paths.install_root / "components", active_root)) {
@@ -848,8 +867,8 @@ json RemovalLifecycle::uninstall(const SetupPaths& paths, const json& plan,
                     {"state", "uninstalled"},
                     {"data_preserved", true},
                     {"preservation_record", evidence_path.string()}};
-        if (!startup_cleanup.empty()) {
-            result["startup_cleanup"] = std::move(startup_cleanup);
+        if (!lifecycle_result.empty()) {
+            result["lifecycle_result"] = std::move(lifecycle_result);
         }
         results.push_back(std::move(result));
     }

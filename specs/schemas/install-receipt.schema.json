@@ -65,11 +65,14 @@
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "legacy_startup_receipt": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": ["installed"],
       "properties": {
         "installed": {"type": "boolean"},
-        "matchesCurrentConfiguration": {"type": "boolean"}
+        "matchesCurrentConfiguration": {"type": "boolean"},
+        "active": {"type": "boolean"},
+        "replacementReady": {"type": "boolean"},
+        "requalificationRequired": {"type": "boolean"}
       }
     },
     "activated_file": {
