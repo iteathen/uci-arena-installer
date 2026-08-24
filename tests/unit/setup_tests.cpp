@@ -43,7 +43,7 @@ using nlohmann::json;
 
 TEST_CASE("provider startup lifecycle has a bounded replacement-safe deadline") {
     STATIC_REQUIRE(arena::ports::provider_lifecycle_timeout_default ==
-                   std::chrono::seconds(120));
+                   std::chrono::minutes(10));
 }
 
 class FakeAssetSearchIndex final : public arena::ports::AssetSearchIndex {

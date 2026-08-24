@@ -540,8 +540,8 @@ TEST_CASE("ProviderLifecycle fixed constants match the contract") {
     CHECK(provider_lifecycle_reason_id_max_bytes == 64);
     CHECK(provider_lifecycle_reason_message_max_utf8_bytes == 512);
     CHECK(provider_lifecycle_timeout_minimum == std::chrono::milliseconds{1});
-    CHECK(provider_lifecycle_timeout_maximum == std::chrono::seconds{120});
-    CHECK(provider_lifecycle_timeout_default == std::chrono::seconds{120});
+    CHECK(provider_lifecycle_timeout_maximum == std::chrono::minutes{10});
+    CHECK(provider_lifecycle_timeout_default == std::chrono::minutes{10});
 }
 
 TEST_CASE("ProviderLifecycle invokes a valid typed adapter once with an absolute deadline") {
@@ -579,7 +579,10 @@ TEST_CASE("ProviderLifecycle rejects invalid requests before adapter invocation"
     SECTION("argument NUL") { candidate.arguments = {std::string{"a\0b", 3}}; }
     SECTION("argument UTF-8") { candidate.arguments = {std::string{"\xC0\xAF", 2}}; }
     SECTION("timeout low") { candidate.timeout = std::chrono::milliseconds{0}; }
-    SECTION("timeout high") { candidate.timeout = std::chrono::milliseconds{120001}; }
+    SECTION("timeout high") {
+        candidate.timeout = provider_lifecycle_timeout_maximum +
+                            std::chrono::milliseconds{1};
+    }
     SECTION("typed legacy envelope") {
         candidate.policy.legacy_envelope = ProviderLegacyResultEnvelope::startup;
     }

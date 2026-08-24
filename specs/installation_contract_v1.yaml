@@ -593,10 +593,11 @@ provider_installer_integration:
       documents, and journals those writes for rollback. Components already
       replaced and rendered by the same transaction are excluded. Installer
       then resumes consumers in dependency order.
-      Each provider lifecycle command has one 120-second outer deadline so a
+      Each provider lifecycle command has one ten-minute outer deadline so a
       provider can complete its own bounded sequence of operating-system task,
-      process-tree teardown, retargeting, and readiness operations. The outer
-      deadline never shortens a provider's declared internal teardown bounds.
+      process-tree teardown, retargeting, readiness, and exact large-file
+      validation operations. The outer deadline never shortens a provider's
+      declared internal bounds and never selects behavior by provider identity.
       A replaced v2 consumer uses post_replace from the installed replacement.
       A contract that requires a live result retains the existing fail-closed
       behavior. A credential-gated provider may instead explicitly declare

@@ -28,8 +28,8 @@ inline constexpr std::size_t provider_lifecycle_raw_result_max_bytes = 65536;
 inline constexpr std::size_t provider_lifecycle_reason_id_max_bytes = 64;
 inline constexpr std::size_t provider_lifecycle_reason_message_max_utf8_bytes = 512;
 inline constexpr auto provider_lifecycle_timeout_minimum = std::chrono::milliseconds{1};
-inline constexpr auto provider_lifecycle_timeout_maximum = std::chrono::seconds{120};
-inline constexpr auto provider_lifecycle_timeout_default = std::chrono::seconds{120};
+inline constexpr auto provider_lifecycle_timeout_maximum = std::chrono::minutes{10};
+inline constexpr auto provider_lifecycle_timeout_default = std::chrono::minutes{10};
 
 struct ProviderLifecycleReason {
     std::string id;
