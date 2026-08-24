@@ -37,6 +37,7 @@ add_library(arena_installer_core
   src/adapters/provider_lifecycle.cpp
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
+  src/application/installer/provider_lifecycle_contract.cpp
   src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
   src/application/installer/tuf_canonical_json.cpp
