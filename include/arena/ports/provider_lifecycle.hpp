@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -18,6 +19,17 @@ enum class ProviderConfigurationObservation { matches, mismatch, not_applicable,
 enum class ProviderReplacementObservation { safe, unsafe, not_applicable, unknown };
 enum class ProviderLifecycleWireProtocol { legacy_v1, legacy_v2, typed_v3 };
 enum class ProviderLegacyResultEnvelope { root, startup };
+
+inline constexpr std::size_t provider_lifecycle_component_id_max_utf8_bytes = 128;
+inline constexpr std::size_t provider_lifecycle_component_version_max_utf8_bytes = 64;
+inline constexpr std::size_t provider_lifecycle_arguments_max_count = 32;
+inline constexpr std::size_t provider_lifecycle_argument_max_utf8_bytes = 1024;
+inline constexpr std::size_t provider_lifecycle_raw_result_max_bytes = 65536;
+inline constexpr std::size_t provider_lifecycle_reason_id_max_bytes = 64;
+inline constexpr std::size_t provider_lifecycle_reason_message_max_utf8_bytes = 512;
+inline constexpr auto provider_lifecycle_timeout_minimum = std::chrono::milliseconds{1};
+inline constexpr auto provider_lifecycle_timeout_maximum = std::chrono::seconds{120};
+inline constexpr auto provider_lifecycle_timeout_default = std::chrono::seconds{120};
 
 struct ProviderLifecycleReason {
     std::string id;

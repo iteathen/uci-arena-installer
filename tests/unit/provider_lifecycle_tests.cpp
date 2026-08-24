@@ -2,20 +2,21 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <new>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace {
 using namespace arena::ports;
 
-ProviderLifecycleObserved observations(ProviderLifecycleOperation operation,
-                                       bool inactive = false) {
+ProviderLifecycleObserved ready_observed(ProviderLifecycleOperation operation) {
     switch (operation) {
     case ProviderLifecycleOperation::install:
         return {ProviderInstallationObservation::installed,
-                inactive ? ProviderActivityObservation::inactive
-                         : ProviderActivityObservation::active,
+                ProviderActivityObservation::active,
                 ProviderConfigurationObservation::matches,
                 ProviderReplacementObservation::not_applicable};
     case ProviderLifecycleOperation::uninstall:
@@ -30,27 +31,39 @@ ProviderLifecycleObserved observations(ProviderLifecycleOperation operation,
                 ProviderReplacementObservation::safe};
     case ProviderLifecycleOperation::post_replace:
         return {ProviderInstallationObservation::installed,
-                inactive ? ProviderActivityObservation::inactive
-                         : ProviderActivityObservation::active,
+                ProviderActivityObservation::active,
                 ProviderConfigurationObservation::matches,
                 ProviderReplacementObservation::safe};
     }
     throw std::logic_error("operation");
 }
 
-ProviderLifecycleResult result(ProviderLifecycleOperation operation,
-                               ProviderLifecycleDisposition disposition =
-                                   ProviderLifecycleDisposition::ready) {
-    const bool inactive = disposition == ProviderLifecycleDisposition::safe_inactive;
-    return {"provider.core", "1.2.3", operation, disposition,
-            observations(operation, inactive),
-            disposition == ProviderLifecycleDisposition::ready
-                ? std::nullopt
-                : std::optional{ProviderLifecycleReason{"provider.wait", "bounded"}}};
+ProviderLifecycleObserved safe_inactive_observed(ProviderLifecycleOperation operation) {
+    auto observed = ready_observed(operation);
+    observed.activity = ProviderActivityObservation::inactive;
+    return observed;
 }
 
-ProviderLifecycleRequest request(ProviderLifecycleOperation operation =
-                                     ProviderLifecycleOperation::install) {
+ProviderLifecycleResult result(
+    ProviderLifecycleOperation operation = ProviderLifecycleOperation::install,
+    ProviderLifecycleDisposition disposition = ProviderLifecycleDisposition::ready) {
+    ProviderLifecycleObserved observed = disposition == ProviderLifecycleDisposition::safe_inactive
+        ? safe_inactive_observed(operation)
+        : ready_observed(operation);
+    if (disposition == ProviderLifecycleDisposition::failed) {
+        observed = {ProviderInstallationObservation::unknown,
+                    ProviderActivityObservation::unknown,
+                    ProviderConfigurationObservation::unknown,
+                    ProviderReplacementObservation::unknown};
+    }
+    return {"provider.core", "1.2.3", operation, disposition, observed,
+            disposition == ProviderLifecycleDisposition::ready
+                ? std::nullopt
+                : std::optional{ProviderLifecycleReason{"provider.reason", "opaque"}}};
+}
+
+ProviderLifecycleRequest request(
+    ProviderLifecycleOperation operation = ProviderLifecycleOperation::install) {
     return {"provider.core", "1.2.3", operation, "C:/provider.exe", "C:/work",
             {"--lifecycle"},
             {ProviderLifecycleWireProtocol::typed_v3,
@@ -60,12 +73,12 @@ ProviderLifecycleRequest request(ProviderLifecycleOperation operation =
 
 class FakeLifecycle final : public ProviderLifecycle {
   public:
-    nlohmann::json raw = provider_lifecycle_result_to_json(
-        result(ProviderLifecycleOperation::install));
+    nlohmann::json raw = provider_lifecycle_result_to_json(result());
     int calls{};
     bool throw_runtime{};
     bool throw_allocation{};
     std::chrono::steady_clock::time_point deadline{};
+
   private:
     nlohmann::json invoke_raw_validated(
         const ProviderLifecycleRequest&,
@@ -78,58 +91,101 @@ class FakeLifecycle final : public ProviderLifecycle {
     }
 };
 
-std::string reason_id(const ProviderLifecycleResult& value) {
-    REQUIRE(value.reason.has_value());
-    return value.reason->id;
-}
-} // namespace
-
-TEST_CASE("ProviderLifecycle invokes typed adapter once with an absolute deadline") {
-    FakeLifecycle lifecycle;
-    const auto before = std::chrono::steady_clock::now();
-    const auto actual = lifecycle.invoke(request());
-    CHECK(actual.disposition == ProviderLifecycleDisposition::ready);
-    CHECK(lifecycle.calls == 1);
-    CHECK(lifecycle.deadline > before);
+void require_failure(const ProviderLifecycleResult& actual, std::string_view id) {
+    REQUIRE(actual.disposition == ProviderLifecycleDisposition::failed);
+    REQUIRE(actual.reason.has_value());
+    CHECK(actual.reason->id == id);
 }
 
-TEST_CASE("ProviderLifecycle rejects invalid requests before adapter invocation") {
+void require_invalid(ProviderLifecycleRequest candidate) {
     FakeLifecycle lifecycle;
-    auto candidate = request();
-    SECTION("identifier") { candidate.component_id = "bad id"; }
-    SECTION("version") { candidate.component_version = ""; }
-    SECTION("executable") { candidate.executable.clear(); }
-    SECTION("working directory") { candidate.working_directory.clear(); }
-    SECTION("arguments") { candidate.arguments.assign(33, "x"); }
-    SECTION("argument bytes") { candidate.arguments = {std::string(1025, 'x')}; }
-    SECTION("timeout low") { candidate.timeout = std::chrono::milliseconds{0}; }
-    SECTION("timeout high") { candidate.timeout = std::chrono::seconds{121}; }
-    SECTION("typed legacy envelope") { candidate.policy.legacy_envelope = ProviderLegacyResultEnvelope::startup; }
-    const auto actual = lifecycle.invoke(candidate);
-    CHECK(actual.disposition == ProviderLifecycleDisposition::failed);
-    CHECK(reason_id(actual) == "invalid_request");
+    require_failure(lifecycle.invoke(candidate), "invalid_request");
     CHECK(lifecycle.calls == 0);
 }
 
-TEST_CASE("ProviderLifecycle converts adapter exceptions and propagates allocation") {
+nlohmann::json ready_json(ProviderLifecycleOperation operation) {
+    return provider_lifecycle_result_to_json(result(operation));
+}
+
+} // namespace
+
+TEST_CASE("ProviderLifecycle fixed constants match the contract") {
+    CHECK(provider_lifecycle_component_id_max_utf8_bytes == 128);
+    CHECK(provider_lifecycle_component_version_max_utf8_bytes == 64);
+    CHECK(provider_lifecycle_arguments_max_count == 32);
+    CHECK(provider_lifecycle_argument_max_utf8_bytes == 1024);
+    CHECK(provider_lifecycle_raw_result_max_bytes == 65536);
+    CHECK(provider_lifecycle_reason_id_max_bytes == 64);
+    CHECK(provider_lifecycle_reason_message_max_utf8_bytes == 512);
+    CHECK(provider_lifecycle_timeout_minimum == std::chrono::milliseconds{1});
+    CHECK(provider_lifecycle_timeout_maximum == std::chrono::seconds{120});
+    CHECK(provider_lifecycle_timeout_default == std::chrono::seconds{120});
+}
+
+TEST_CASE("ProviderLifecycle invokes a valid typed adapter once with an absolute deadline") {
+    FakeLifecycle lifecycle;
+    const auto candidate = request();
+    const auto before = std::chrono::steady_clock::now();
+    const auto actual = lifecycle.invoke(candidate);
+    const auto after = std::chrono::steady_clock::now();
+    CHECK(actual.disposition == ProviderLifecycleDisposition::ready);
+    CHECK(lifecycle.calls == 1);
+    CHECK(lifecycle.deadline >= before + candidate.timeout);
+    CHECK(lifecycle.deadline <= after + candidate.timeout);
+}
+
+TEST_CASE("ProviderLifecycle rejects invalid requests before adapter invocation") {
+    auto candidate = request();
+    SECTION("id pattern") { candidate.component_id = "bad id"; }
+    SECTION("id bound") {
+        candidate.component_id = std::string(provider_lifecycle_component_id_max_utf8_bytes + 1, 'a');
+    }
+    SECTION("version") { candidate.component_version.clear(); }
+    SECTION("version pattern") { candidate.component_version = "1/2"; }
+    SECTION("version bound") {
+        candidate.component_version =
+            std::string(provider_lifecycle_component_version_max_utf8_bytes + 1, '1');
+    }
+    SECTION("executable") { candidate.executable.clear(); }
+    SECTION("working directory") { candidate.working_directory.clear(); }
+    SECTION("argument count") {
+        candidate.arguments.assign(provider_lifecycle_arguments_max_count + 1, "x");
+    }
+    SECTION("argument bytes") {
+        candidate.arguments = {std::string(provider_lifecycle_argument_max_utf8_bytes + 1, 'x')};
+    }
+    SECTION("argument NUL") { candidate.arguments = {std::string{"a\0b", 3}}; }
+    SECTION("argument UTF-8") { candidate.arguments = {std::string{"\xC0\xAF", 2}}; }
+    SECTION("timeout low") { candidate.timeout = std::chrono::milliseconds{0}; }
+    SECTION("timeout high") { candidate.timeout = std::chrono::milliseconds{120001}; }
+    SECTION("typed legacy envelope") {
+        candidate.policy.legacy_envelope = ProviderLegacyResultEnvelope::startup;
+    }
+    SECTION("typed legacy requirement") {
+        candidate.policy.require_configuration_match = false;
+    }
+    require_invalid(candidate);
+}
+
+TEST_CASE("ProviderLifecycle maps ordinary adapter exceptions and propagates allocation") {
     FakeLifecycle lifecycle;
     lifecycle.throw_runtime = true;
-    CHECK(reason_id(lifecycle.invoke(request())) == "adapter_exception");
+    require_failure(lifecycle.invoke(request()), "adapter_exception");
+    CHECK(lifecycle.calls == 1);
     lifecycle.throw_runtime = false;
     lifecycle.throw_allocation = true;
     CHECK_THROWS_AS(lifecycle.invoke(request()), std::bad_alloc);
 }
 
-TEST_CASE("ProviderLifecycle accepts exact ready observations for every operation") {
+TEST_CASE("ProviderLifecycle accepts exact ready results for all operations") {
     for (const auto operation : {ProviderLifecycleOperation::install,
                                  ProviderLifecycleOperation::uninstall,
                                  ProviderLifecycleOperation::pre_replace,
                                  ProviderLifecycleOperation::post_replace}) {
         FakeLifecycle lifecycle;
-        lifecycle.raw = provider_lifecycle_result_to_json(result(operation));
-        const auto actual = lifecycle.invoke(request(operation));
-        CHECK(actual.disposition == ProviderLifecycleDisposition::ready);
-        CHECK(actual.operation == operation);
+        lifecycle.raw = ready_json(operation);
+        CHECK(lifecycle.invoke(request(operation)) == result(operation));
+        CHECK(lifecycle.calls == 1);
     }
 }
 
@@ -137,88 +193,260 @@ TEST_CASE("ProviderLifecycle gates safe inactive by operation and policy") {
     for (const auto operation : {ProviderLifecycleOperation::install,
                                  ProviderLifecycleOperation::post_replace}) {
         FakeLifecycle lifecycle;
-        lifecycle.raw = provider_lifecycle_result_to_json(
-            result(operation, ProviderLifecycleDisposition::safe_inactive));
-        CHECK(lifecycle.invoke(request(operation)).disposition ==
-              ProviderLifecycleDisposition::safe_inactive);
+        const auto expected = result(operation, ProviderLifecycleDisposition::safe_inactive);
+        lifecycle.raw = provider_lifecycle_result_to_json(expected);
+        CHECK(lifecycle.invoke(request(operation)) == expected);
     }
-    FakeLifecycle lifecycle;
-    auto raw = provider_lifecycle_result_to_json(
-        result(ProviderLifecycleOperation::install,
-               ProviderLifecycleDisposition::safe_inactive));
-    lifecycle.raw = raw;
-    auto denied = request();
-    denied.policy.allow_safe_inactive = false;
-    CHECK(reason_id(lifecycle.invoke(denied)) == "disposition_not_allowed");
+
+    SECTION("policy denies") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = provider_lifecycle_result_to_json(
+            result(ProviderLifecycleOperation::install,
+                   ProviderLifecycleDisposition::safe_inactive));
+        auto candidate = request();
+        candidate.policy.allow_safe_inactive = false;
+        require_failure(lifecycle.invoke(candidate), "disposition_not_allowed");
+    }
+
+    for (const auto operation : {ProviderLifecycleOperation::uninstall,
+                                 ProviderLifecycleOperation::pre_replace}) {
+        FakeLifecycle lifecycle;
+        lifecycle.raw = provider_lifecycle_result_to_json(
+            result(ProviderLifecycleOperation::install,
+                   ProviderLifecycleDisposition::safe_inactive));
+        lifecycle.raw["operation"] = operation == ProviderLifecycleOperation::uninstall
+            ? "uninstall"
+            : "pre_replace";
+        lifecycle.raw["observed"] = ready_json(operation).at("observed");
+        require_failure(lifecycle.invoke(request(operation)), "disposition_not_allowed");
+    }
 }
 
-TEST_CASE("ProviderLifecycle fails closed on identity operation and observations") {
+TEST_CASE("ProviderLifecycle requires bounded reasons and preserves opaque provider reasons") {
     FakeLifecycle lifecycle;
-    SECTION("identity") {
-        lifecycle.raw["component_id"] = "other";
-        CHECK(reason_id(lifecycle.invoke(request())) == "identity_mismatch");
+    auto expected = result(ProviderLifecycleOperation::install,
+                           ProviderLifecycleDisposition::safe_inactive);
+    lifecycle.raw = provider_lifecycle_result_to_json(expected);
+    const auto actual = lifecycle.invoke(request());
+    REQUIRE(actual.reason);
+    CHECK(actual.reason->id == "provider.reason");
+    CHECK(actual.reason->message == "opaque");
+
+    SECTION("safe inactive missing reason") {
+        lifecycle.raw.erase("reason");
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+    SECTION("failed missing reason") {
+        lifecycle.raw = provider_lifecycle_result_to_json(
+            result(ProviderLifecycleOperation::install,
+                   ProviderLifecycleDisposition::failed));
+        lifecycle.raw.erase("reason");
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+    SECTION("reason id oversized") {
+        lifecycle.raw["reason"]["id"] =
+            std::string(provider_lifecycle_reason_id_max_bytes + 1, 'a');
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+    SECTION("reason message oversized") {
+        lifecycle.raw["reason"]["message"] =
+            std::string(provider_lifecycle_reason_message_max_utf8_bytes + 1, 'a');
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+}
+
+TEST_CASE("ProviderLifecycle fails closed on schema identity version and operation mismatch") {
+    SECTION("schema") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw["schema"] = "wrong";
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+    SECTION("schema version") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw["schema_version"] = 2;
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+    SECTION("component id") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw["component_id"] = "other.core";
+        require_failure(lifecycle.invoke(request()), "identity_mismatch");
+    }
+    SECTION("component version") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw["component_version"] = "9.9.9";
+        require_failure(lifecycle.invoke(request()), "identity_mismatch");
     }
     SECTION("operation") {
-        lifecycle.raw = provider_lifecycle_result_to_json(
-            result(ProviderLifecycleOperation::uninstall));
-        CHECK(reason_id(lifecycle.invoke(request())) == "operation_mismatch");
-    }
-    SECTION("observations") {
-        lifecycle.raw["observed"]["activity"] = "inactive";
-        CHECK(reason_id(lifecycle.invoke(request())) == "observation_mismatch");
+        FakeLifecycle lifecycle;
+        lifecycle.raw = ready_json(ProviderLifecycleOperation::uninstall);
+        require_failure(lifecycle.invoke(request()), "operation_mismatch");
     }
 }
 
-TEST_CASE("ProviderLifecycle rejects malformed typed results") {
+TEST_CASE("ProviderLifecycle rejects malformed typed-v3 document shapes") {
     FakeLifecycle lifecycle;
     SECTION("extra field") { lifecycle.raw["provider"] = "forbidden"; }
     SECTION("missing field") { lifecycle.raw.erase("observed"); }
-    SECTION("wrong schema") { lifecycle.raw["schema"] = "wrong"; }
-    SECTION("reason required") {
-        lifecycle.raw["disposition"] = "failed";
-        lifecycle.raw.erase("reason");
+    SECTION("wrong type") { lifecycle.raw["component_id"] = 7; }
+    SECTION("unknown disposition") { lifecycle.raw["disposition"] = "deferred"; }
+    SECTION("observed extra field") { lifecycle.raw["observed"]["extra"] = true; }
+    SECTION("reason wrong type") {
+        lifecycle.raw = provider_lifecycle_result_to_json(
+            result(ProviderLifecycleOperation::install,
+                   ProviderLifecycleDisposition::failed));
+        lifecycle.raw["reason"] = "bad";
     }
-    CHECK(reason_id(lifecycle.invoke(request())) == "malformed_result");
+    SECTION("reason malformed id") {
+        lifecycle.raw = provider_lifecycle_result_to_json(
+            result(ProviderLifecycleOperation::install,
+                   ProviderLifecycleDisposition::failed));
+        lifecycle.raw["reason"]["id"] = "bad/id";
+    }
+    require_failure(lifecycle.invoke(request()), "malformed_result");
 }
 
-TEST_CASE("ProviderLifecycle preserves opaque provider reasons") {
-    FakeLifecycle lifecycle;
-    lifecycle.raw = provider_lifecycle_result_to_json(
-        result(ProviderLifecycleOperation::install,
-               ProviderLifecycleDisposition::safe_inactive));
-    const auto actual = lifecycle.invoke(request());
-    REQUIRE(actual.reason);
-    CHECK(actual.reason->id == "provider.wait");
-    CHECK(actual.reason->message == "bounded");
+TEST_CASE("ProviderLifecycle classifies every observation mismatch") {
+    for (const auto operation : {ProviderLifecycleOperation::install,
+                                 ProviderLifecycleOperation::uninstall,
+                                 ProviderLifecycleOperation::pre_replace,
+                                 ProviderLifecycleOperation::post_replace}) {
+        const auto expected = ready_json(operation).at("observed");
+        const std::array<std::pair<std::string, std::string>, 4> mismatches{{
+            {"installation", expected.at("installation") == "installed" ? "absent" : "installed"},
+            {"activity", expected.at("activity") == "active" ? "inactive" : "active"},
+            {"configuration", expected.at("configuration") == "matches" ? "mismatch" : "matches"},
+            {"replacement", expected.at("replacement") == "safe" ? "unsafe" : "safe"},
+        }};
+        for (const auto& [field, value] : mismatches) {
+            FakeLifecycle lifecycle;
+            lifecycle.raw = ready_json(operation);
+            lifecycle.raw["observed"][field] = value;
+            require_failure(lifecycle.invoke(request(operation)), "observation_mismatch");
+        }
+    }
 }
 
-TEST_CASE("ProviderLifecycle legacy protocols return fixed unsupported failure") {
-    FakeLifecycle lifecycle;
-    auto legacy = request();
-    legacy.policy.wire_protocol = ProviderLifecycleWireProtocol::legacy_v1;
-    const auto actual = lifecycle.invoke(legacy);
-    CHECK(reason_id(actual) == "legacy_contract_not_satisfied");
-    CHECK(lifecycle.calls == 0);
+TEST_CASE("ProviderLifecycle bounds raw JSON and does not interpret legacy protocols") {
+    SECTION("raw size") {
+        FakeLifecycle lifecycle;
+        lifecycle.raw["padding"] =
+            std::string(provider_lifecycle_raw_result_max_bytes + 1, 'x');
+        require_failure(lifecycle.invoke(request()), "malformed_result");
+    }
+    for (const auto protocol : {ProviderLifecycleWireProtocol::legacy_v1,
+                                ProviderLifecycleWireProtocol::legacy_v2}) {
+        FakeLifecycle lifecycle;
+        auto candidate = request();
+        candidate.policy.wire_protocol = protocol;
+        require_failure(lifecycle.invoke(candidate), "legacy_contract_not_satisfied");
+        CHECK(lifecycle.calls == 0);
+    }
 }
 
-TEST_CASE("provider lifecycle serializer emits exact deterministic neutral JSON") {
-    const auto value = result(ProviderLifecycleOperation::post_replace);
-    const auto first = provider_lifecycle_result_to_json(value);
-    const auto second = provider_lifecycle_result_to_json(value);
-    CHECK(first == second);
-    CHECK(first.size() == 7);
-    CHECK(first.at("schema") == "arena_provider_lifecycle_result_v1");
-    CHECK(first.at("operation") == "post_replace");
-    CHECK_FALSE(first.contains("reason"));
-    CHECK_FALSE(first.contains("provider"));
+TEST_CASE("provider lifecycle serializer emits exact ready JSON for all operations") {
+    struct Expected {
+        ProviderLifecycleOperation operation;
+        const char* operation_text;
+        const char* installation;
+        const char* activity;
+        const char* configuration;
+        const char* replacement;
+    };
+    const std::array<Expected, 4> expected{{
+        Expected{ProviderLifecycleOperation::install, "install", "installed", "active",
+                 "matches", "not_applicable"},
+        Expected{ProviderLifecycleOperation::uninstall, "uninstall", "absent", "inactive",
+                 "not_applicable", "not_applicable"},
+        Expected{ProviderLifecycleOperation::pre_replace, "pre_replace", "installed", "inactive",
+                 "matches", "safe"},
+        Expected{ProviderLifecycleOperation::post_replace, "post_replace", "installed", "active",
+                 "matches", "safe"},
+    }};
+    for (const auto& item : expected) {
+        const auto actual = provider_lifecycle_result_to_json(result(item.operation));
+        const nlohmann::json exact = {
+            {"schema", "arena_provider_lifecycle_result_v1"},
+            {"schema_version", 1}, {"component_id", "provider.core"},
+            {"component_version", "1.2.3"}, {"operation", item.operation_text},
+            {"disposition", "ready"},
+            {"observed", {{"installation", item.installation}, {"activity", item.activity},
+                          {"configuration", item.configuration}, {"replacement", item.replacement}}}};
+        CHECK(actual == exact);
+        CHECK_FALSE(actual.contains("reason"));
+    }
+}
+
+TEST_CASE("provider lifecycle serializer emits exact safe-inactive and failed JSON") {
+    for (const auto operation : {ProviderLifecycleOperation::install,
+                                 ProviderLifecycleOperation::post_replace}) {
+        const auto actual = provider_lifecycle_result_to_json(
+            result(operation, ProviderLifecycleDisposition::safe_inactive));
+        const bool install = operation == ProviderLifecycleOperation::install;
+        const nlohmann::json exact = {
+            {"schema", "arena_provider_lifecycle_result_v1"},
+            {"schema_version", 1}, {"component_id", "provider.core"},
+            {"component_version", "1.2.3"},
+            {"operation", install ? "install" : "post_replace"},
+            {"disposition", "safe_inactive"},
+            {"observed", {{"installation", "installed"}, {"activity", "inactive"},
+                          {"configuration", "matches"},
+                          {"replacement", install ? "not_applicable" : "safe"}}},
+            {"reason", {{"id", "provider.reason"}, {"message", "opaque"}}}};
+        CHECK(actual == exact);
+    }
+    const auto failed = provider_lifecycle_result_to_json(
+        result(ProviderLifecycleOperation::install, ProviderLifecycleDisposition::failed));
+    const nlohmann::json exact_failed = {
+        {"schema", "arena_provider_lifecycle_result_v1"},
+        {"schema_version", 1}, {"component_id", "provider.core"},
+        {"component_version", "1.2.3"}, {"operation", "install"},
+        {"disposition", "failed"},
+        {"observed", {{"installation", "unknown"}, {"activity", "unknown"},
+                      {"configuration", "unknown"}, {"replacement", "unknown"}}},
+        {"reason", {{"id", "provider.reason"}, {"message", "opaque"}}}};
+    CHECK(failed == exact_failed);
 }
 
 TEST_CASE("provider lifecycle serializer rejects invalid constructed results") {
-    auto invalid = result(ProviderLifecycleOperation::install);
-    SECTION("observation") { invalid.observed.activity = ProviderActivityObservation::inactive; }
-    SECTION("reason") {
-        invalid.disposition = ProviderLifecycleDisposition::failed;
+    auto invalid = result();
+    SECTION("operation") { invalid.operation = static_cast<ProviderLifecycleOperation>(999); }
+    SECTION("disposition") {
+        invalid.disposition = static_cast<ProviderLifecycleDisposition>(999);
+    }
+    SECTION("observation enum") {
+        invalid.observed.activity = static_cast<ProviderActivityObservation>(999);
+    }
+    SECTION("observation tuple") {
+        invalid.observed.activity = ProviderActivityObservation::inactive;
+    }
+    SECTION("safe inactive operation") {
+        invalid = result(ProviderLifecycleOperation::uninstall);
+        invalid.disposition = ProviderLifecycleDisposition::safe_inactive;
+        invalid.reason = ProviderLifecycleReason{"provider.reason", "opaque"};
+    }
+    SECTION("missing reason") {
+        invalid = result(ProviderLifecycleOperation::install,
+                         ProviderLifecycleDisposition::failed);
         invalid.reason.reset();
     }
+    SECTION("reason") {
+        invalid.reason = ProviderLifecycleReason{"bad/id", "opaque"};
+    }
     CHECK_THROWS_AS(provider_lifecycle_result_to_json(invalid), std::invalid_argument);
+}
+
+TEST_CASE("provider lifecycle serializer is deterministic pure neutral projection") {
+    FakeLifecycle lifecycle;
+    const auto value = result(ProviderLifecycleOperation::install,
+                              ProviderLifecycleDisposition::safe_inactive);
+    const auto first = provider_lifecycle_result_to_json(value);
+    const auto second = provider_lifecycle_result_to_json(value);
+    CHECK(first == second);
+    CHECK(lifecycle.calls == 0);
+    CHECK_FALSE(first.contains("legacy_envelope"));
+    CHECK_FALSE(first.contains("provider"));
+    CHECK_FALSE(first.contains("receipt"));
+    CHECK_FALSE(first.contains("transaction"));
+    CHECK_FALSE(first.contains("timestamp"));
+    CHECK_FALSE(first.contains("path"));
 }
