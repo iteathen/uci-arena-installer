@@ -191,8 +191,8 @@ neutral_public_surface:
     reason_id_bytes: 64
     reason_message_utf8_bytes: 512
     timeout_minimum: 1ms
-    timeout_maximum: 120s
-    timeout_default: 120s
+    timeout_maximum: 10m
+    timeout_default: 10m
 
 neutral_enforcement:
   owner: arena::ports::ProviderLifecycle::invoke
@@ -224,6 +224,11 @@ neutral_enforcement:
   rule: >
     Callers branch only on disposition and operation. They may present a bounded
     reason but never interpret its id to choose Installer behavior.
+  deadline_rationale: >
+    The neutral outer deadline covers bounded provider-owned validation of exact
+    large-file evidence as well as operating-system lifecycle work. It remains
+    one captured deadline and never grants unbounded execution, retry, or
+    provider-identity-specific policy.
 
 result_contract:
   schema: arena_provider_lifecycle_result_v1
