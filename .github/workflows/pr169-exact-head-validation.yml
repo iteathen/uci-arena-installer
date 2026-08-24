@@ -1,0 +1,201 @@
+name: PR 169 exact-head validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr169-exact-head-validation
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: db2a087d3b8a29277465b8d49e45dc0f32399602
+  BASE_SHA: a4e2e220abf3b0ce5cc0a97b342d73a0d546d78d
+  VCPKG_BASELINE: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3
+
+jobs:
+  linux-official-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout immutable candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+
+      - name: Prove exact candidate and four-path diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" "$CANDIDATE_SHA"
+          git diff --check "$BASE_SHA...$CANDIDATE_SHA"
+          git diff --name-only "$BASE_SHA...$CANDIDATE_SHA" | sort > /tmp/actual-paths
+          printf '%s\n' \
+            CMakeLists.txt \
+            include/arena/ports/provider_lifecycle.hpp \
+            src/adapters/provider_lifecycle.cpp \
+            tests/unit/provider_lifecycle_tests.cpp | sort > /tmp/expected-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths
+
+      - name: Tool identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          cmake --version
+          ninja --version
+          c++ --version
+
+      - name: Spec preflight
+        shell: bash
+        run: >-
+          node tools/spec-preflight.mjs
+          --task "Implement the neutral ProviderLifecycle port and typed-v3 result enforcement"
+          --changed-files
+          CMakeLists.txt
+          include/arena/ports/provider_lifecycle.hpp
+          src/adapters/provider_lifecycle.cpp
+          tests/unit/provider_lifecycle_tests.cpp
+
+      - name: Repository spec and release-tool checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run check
+
+      - name: Bootstrap official vcpkg baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" checkout "$VCPKG_BASELINE"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/vcpkg/vcpkg" version
+          git -C "$RUNNER_TEMP/vcpkg" rev-parse HEAD
+
+      - name: Configure official Linux preset
+        shell: bash
+        run: cmake --preset linux-release
+
+      - name: Build official native test target
+        shell: bash
+        run: cmake --build --preset linux-release --target arena_installer_tests
+
+      - name: Focused ProviderLifecycle native tests
+        shell: bash
+        run: >-
+          ./build/linux-release/arena_installer_tests
+          "ProviderLifecycle*,provider lifecycle serializer*"
+
+      - name: Full applicable Linux native suite
+        shell: bash
+        run: ctest --preset linux-release
+
+      - name: Reprove immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --check "$BASE_SHA...HEAD"
+
+  windows-official-gate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout immutable candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+
+      - name: Prove exact candidate and four-path diff
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:CANDIDATE_SHA) { throw "candidate SHA mismatch" }
+          git merge-base --is-ancestor $env:BASE_SHA $env:CANDIDATE_SHA
+          if ($LASTEXITCODE -ne 0) { throw "base is not an ancestor of candidate" }
+          git diff --check "$env:BASE_SHA...$env:CANDIDATE_SHA"
+          if ($LASTEXITCODE -ne 0) { throw "diff check failed" }
+          $actual = @(git diff --name-only "$env:BASE_SHA...$env:CANDIDATE_SHA" | Sort-Object)
+          $expected = @(
+            'CMakeLists.txt',
+            'include/arena/ports/provider_lifecycle.hpp',
+            'src/adapters/provider_lifecycle.cpp',
+            'tests/unit/provider_lifecycle_tests.cpp'
+          ) | Sort-Object
+          if ((Compare-Object $expected $actual).Count -ne 0) { throw "candidate changed-path set is not exact" }
+
+      - name: Tool identities
+        shell: pwsh
+        run: |
+          node --version
+          npm --version
+          cmake --version
+          cl 2>&1 | Select-Object -First 4
+
+      - name: Spec preflight
+        shell: pwsh
+        run: |
+          node tools/spec-preflight.mjs --task "Implement the neutral ProviderLifecycle port and typed-v3 result enforcement" --changed-files CMakeLists.txt include/arena/ports/provider_lifecycle.hpp src/adapters/provider_lifecycle.cpp tests/unit/provider_lifecycle_tests.cpp
+          if ($LASTEXITCODE -ne 0) { throw "spec preflight failed" }
+
+      - name: Repository spec and release-tool checks
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run check
+          if ($LASTEXITCODE -ne 0) { throw "npm run check failed" }
+
+      - name: Bootstrap official vcpkg baseline
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
+          git clone https://github.com/microsoft/vcpkg.git $root
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg clone failed" }
+          git -C $root checkout $env:VCPKG_BASELINE
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg baseline checkout failed" }
+          & (Join-Path $root 'bootstrap-vcpkg.bat') -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed" }
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & (Join-Path $root 'vcpkg.exe') version
+          git -C $root rev-parse HEAD
+
+      - name: Configure official Windows preset
+        shell: pwsh
+        run: |
+          cmake --preset windows-release
+          if ($LASTEXITCODE -ne 0) { throw "windows preset configure failed" }
+
+      - name: Build official native test target
+        shell: pwsh
+        run: |
+          cmake --build --preset windows-release --config Release --target arena_installer_tests
+          if ($LASTEXITCODE -ne 0) { throw "native test build failed" }
+
+      - name: Focused ProviderLifecycle native tests
+        shell: pwsh
+        run: |
+          & .\build\windows-release\Release\arena_installer_tests.exe 'ProviderLifecycle*,provider lifecycle serializer*'
+          if ($LASTEXITCODE -ne 0) { throw "focused ProviderLifecycle tests failed" }
+
+      - name: Full applicable Windows native suite
+        shell: pwsh
+        run: |
+          ctest --preset windows-release
+          if ($LASTEXITCODE -ne 0) { throw "full Windows native suite failed" }
+
+      - name: Reprove immutable candidate
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:CANDIDATE_SHA) { throw "candidate SHA changed" }
+          if ((git status --porcelain).Count -ne 0) { throw "candidate workspace is dirty" }
+          git diff --check "$env:BASE_SHA...HEAD"
+          if ($LASTEXITCODE -ne 0) { throw "final diff check failed" }
