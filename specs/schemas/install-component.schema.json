@@ -162,7 +162,33 @@
         }
       }
     },
+    "legacy_startup_action": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}
+    },
+    "legacy_startup_flag": {
+      "type": "string",
+      "pattern": "^--[A-Za-z0-9._-]+$"
+    },
+    "legacy_workspace_argument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flag", "relative_path"],
+      "properties": {
+        "flag": {"$ref": "#/$defs/legacy_startup_flag"},
+        "relative_path": {"type": "string", "minLength": 1}
+      }
+    },
     "startup_control": {
+      "oneOf": [
+        {"$ref": "#/$defs/startup_control_v1"},
+        {"$ref": "#/$defs/startup_control_v2"},
+        {"$ref": "provider-startup-control-v3.schema.json"}
+      ]
+    },
+    "startup_control_v1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -178,28 +204,12 @@
           "additionalProperties": false,
           "required": ["install", "uninstall"],
           "properties": {
-            "install": {
-              "type": "array", "minItems": 1, "maxItems": 8,
-              "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}
-            },
-            "uninstall": {
-              "type": "array", "minItems": 1, "maxItems": 8,
-              "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}
-            }
+            "install": {"$ref": "#/$defs/legacy_startup_action"},
+            "uninstall": {"$ref": "#/$defs/legacy_startup_action"}
           }
         },
-        "workspace_argument": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["flag", "relative_path"],
-          "properties": {
-            "flag": {"type": "string", "pattern": "^--[A-Za-z0-9._-]+$"},
-            "relative_path": {"type": "string", "minLength": 1}
-          }
-        },
-        "configuration_argument": {
-          "type": "string", "pattern": "^--[A-Za-z0-9._-]+$"
-        },
+        "workspace_argument": {"$ref": "#/$defs/legacy_workspace_argument"},
+        "configuration_argument": {"$ref": "#/$defs/legacy_startup_flag"},
         "result": {
           "type": "object",
           "additionalProperties": false,
@@ -212,6 +222,82 @@
             "require_configuration_match_on_install": {"type": "boolean"},
             "require_live_on_install": {"type": "boolean"}
           }
+        }
+      }
+    },
+    "startup_control_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "schema_version", "entrypoint", "actions",
+        "workspace_argument", "configuration_argument",
+        "replacement_arguments", "result"
+      ],
+      "properties": {
+        "schema": {"const": "arena_provider_startup_control_v2"},
+        "schema_version": {"const": 2},
+        "entrypoint": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["install", "uninstall", "pre_replace", "post_replace"],
+          "properties": {
+            "install": {"$ref": "#/$defs/legacy_startup_action"},
+            "uninstall": {"$ref": "#/$defs/legacy_startup_action"},
+            "pre_replace": {"$ref": "#/$defs/legacy_startup_action"},
+            "post_replace": {"$ref": "#/$defs/legacy_startup_action"}
+          }
+        },
+        "workspace_argument": {"$ref": "#/$defs/legacy_workspace_argument"},
+        "configuration_argument": {"$ref": "#/$defs/legacy_startup_flag"},
+        "replacement_arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["previous_root", "replacement_root"],
+          "properties": {
+            "previous_root": {"$ref": "#/$defs/legacy_startup_flag"},
+            "replacement_root": {"$ref": "#/$defs/legacy_startup_flag"}
+          }
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "envelope", "require_configuration_match_on_install",
+            "require_live_on_install", "require_live_on_post_replace"
+          ],
+          "properties": {
+            "envelope": {"enum": ["root", "startup"]},
+            "require_configuration_match_on_install": {"type": "boolean"},
+            "require_live_on_install": {"type": "boolean"},
+            "require_live_on_post_replace": {"type": "boolean"},
+            "allow_deferred_requalification_on_post_replace": {"type": "boolean"}
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"require_live_on_post_replace": {"const": true}},
+                "required": ["require_live_on_post_replace"]
+              },
+              "then": {
+                "properties": {
+                  "allow_deferred_requalification_on_post_replace": {"const": false}
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {"require_live_on_post_replace": {"const": false}},
+                "required": ["require_live_on_post_replace"]
+              },
+              "then": {
+                "required": ["allow_deferred_requalification_on_post_replace"],
+                "properties": {
+                  "allow_deferred_requalification_on_post_replace": {"const": true}
+                }
+              }
+            }
+          ]
         }
       }
     },
