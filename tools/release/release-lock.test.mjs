@@ -201,3 +201,376 @@ test("diagnostic review accepts exact branch provenance without granting release
   assert.equal(substituted.ok, false);
   assert.match(substituted.errors.join("\n"), /certificate_identity/u);
 });
+
+const v3Composition = {
+  schema: "arena_product_composition_v1",
+  product_release: "1.2.3",
+  installer: {
+    repository: "iteathen/uci-arena-installer",
+    minimum_version: "1.2.3",
+  },
+  components: [
+    {
+      role: "engine",
+      component_id: "engine.core",
+      version: "1.2.3",
+      repository: "example/engine",
+      required: true,
+      default_enabled: true,
+      requires: [],
+    },
+    {
+      role: "helper",
+      component_id: "helper.library",
+      version: "1.2.3",
+      repository: "example/engine",
+      required: true,
+      default_enabled: true,
+      requires: [],
+    },
+    {
+      role: "bootstrap",
+      component_id: "bootstrap.runtime",
+      version: "1.2.3",
+      repository: "iteathen/uci-arena-installer",
+      required: true,
+      default_enabled: true,
+      requires: ["engine.core", "helper.library"],
+    },
+  ],
+};
+
+function v3TrustPolicy() {
+  return {
+    schema: "arena_provenance_trust_policy_v1",
+    schema_version: 1,
+    policy_id: "suite-release",
+    policy_version: 1,
+    suite_installer_authority: "iteathen/uci-arena-installer",
+    cosign_version: "3.0.6",
+    producers: [
+      {
+        producer_id: "github-engine",
+        kind: "sigstore_keyless_github",
+        key_epoch: 1,
+        evidence_format: "provider_result_v1",
+        scopes: [{
+          source_repository: "example/engine",
+          ownership: "provider",
+          component_ids: ["engine.core", "helper.library"],
+        }],
+        predicate_type:
+          "https://uci-arena.example/attestations/provider-release-result/v1",
+        oidc_issuer: "https://token.actions.githubusercontent.com",
+        workflow_path: ".github/workflows/component-release.yml",
+        workflow_name: "Engine component candidate",
+        official_ref: "refs/heads/main",
+        trigger: "workflow_dispatch",
+        allow_diagnostic_refs: true,
+        require_transparency_log: true,
+        require_sct: true,
+      },
+      {
+        producer_id: "local-bootstrap",
+        kind: "sigstore_keyed_local",
+        key_epoch: 2,
+        evidence_format: "component_evidence_v1",
+        scopes: [{
+          source_repository: "iteathen/uci-arena-installer",
+          ownership: "installer_managed",
+          component_ids: ["bootstrap.runtime"],
+        }],
+        predicate_type:
+          "https://uci-arena.example/attestations/component-release-evidence/v1",
+        public_key: {
+          path: "keys/release.pub",
+          sha256: "c".repeat(64),
+          spki_sha256: "d".repeat(64),
+        },
+        transparency_log: "none",
+      },
+    ],
+  };
+}
+
+function v3Row(component, target) {
+  const managed = component.repository === "iteathen/uci-arena-installer";
+  const prefix = `${component.component_id}-${target}`;
+  return {
+    component_id: component.component_id,
+    component_version: component.version,
+    target_triple: target,
+    ownership: managed ? "installer_managed" : "provider",
+    source_repository: component.repository,
+    source_commit: commit,
+    artifact: {
+      name: `${prefix}.tar.gz`,
+      sha256: digest,
+      size_bytes: 100,
+      type: "archive",
+    },
+    component_manifest_sha256: digest,
+    dependencies: [...component.requires],
+    evidence: {
+      format: managed ? "component_evidence_v1" : "provider_result_v1",
+      name: `${prefix}.evidence.json`,
+      sha256: digest,
+    },
+    provenance: {
+      producer_id: managed ? "local-bootstrap" : "github-engine",
+      bundle_name: `${prefix}.sigstore.json`,
+      bundle_sha256: digest,
+    },
+  };
+}
+
+function v3Lock(targets = ["windows-x86_64", "linux-x86_64"]) {
+  return {
+    schema: "arena_suite_release_lock_v3",
+    suite_version: v3Composition.product_release,
+    release_ready: true,
+    validation_mode: "official",
+    composition: {
+      manifest_name: "complete-arena-1.2.3.json",
+      sha256: "e".repeat(64),
+    },
+    trust_policy: {
+      name: "release-policy.json",
+      sha256: "f".repeat(64),
+    },
+    components: v3Composition.components.flatMap((component) =>
+      targets.map((target) => v3Row(component, target))),
+  };
+}
+
+function v3Options(overrides = {}) {
+  return {
+    requireReady: true,
+    requireNotReady: false,
+    validationMode: "official",
+    requiredTargets: ["windows-x86_64", "linux-x86_64"],
+    compositionFileName: "complete-arena-1.2.3.json",
+    compositionSha256: "e".repeat(64),
+    trustPolicy: v3TrustPolicy(),
+    trustPolicyFileName: "release-policy.json",
+    trustPolicySha256: "f".repeat(64),
+    ...overrides,
+  };
+}
+
+function invalidV3(lock, options, pattern) {
+  const result = validateReleaseLock(lock, v3Composition, options);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join("\n"), pattern);
+  return result;
+}
+
+test("v3 validates exact official rows and reports format compatibility", () => {
+  const result = validateReleaseLock(v3Lock(), v3Composition, v3Options());
+  assert.deepEqual(result, { ok: true, errors: [] });
+  assert.equal(result.compatibility, "current_v3");
+
+  const legacy = validateReleaseLock(draft, composition, { requireReady: false });
+  assert.equal(legacy.ok, true);
+  assert.equal(legacy.compatibility, "legacy_v2");
+  assert.match(
+    validateReleaseLock({ schema: "arena_suite_release_lock_v1" }, composition).errors[0],
+    /unsupported/u,
+  );
+});
+
+test("v3 portable rows cover both targets without platform special cases", () => {
+  const result = validateReleaseLock(v3Lock(["any"]), v3Composition, v3Options());
+  assert.deepEqual(result, { ok: true, errors: [] });
+});
+
+test("v3 rejects duplicate row identities and portable/platform overlap", () => {
+  const duplicate = v3Lock();
+  duplicate.components.push(structuredClone(duplicate.components[0]));
+  invalidV3(duplicate, v3Options(), /candidate identity is duplicated/u);
+
+  const overlap = v3Lock();
+  overlap.components.push(v3Row(v3Composition.components[0], "any"));
+  invalidV3(overlap, v3Options(), /mixes portable and platform candidates/u);
+});
+
+test("v3 requires every component and target while allowing an intentional superset", () => {
+  const missingTarget = v3Lock();
+  missingTarget.components = missingTarget.components.filter((row) =>
+    !(row.component_id === "engine.core" && row.target_triple === "linux-x86_64"));
+  invalidV3(missingTarget, v3Options(), /engine\.core is missing linux-x86_64/u);
+
+  const missingComponent = v3Lock();
+  missingComponent.components = missingComponent.components.filter(
+    (row) => row.component_id !== "bootstrap.runtime",
+  );
+  invalidV3(missingComponent, v3Options(), /bootstrap\.runtime has no candidate row/u);
+
+  const superset = validateReleaseLock(v3Lock(), v3Composition, v3Options({
+    requiredTargets: ["windows-x86_64"],
+  }));
+  assert.deepEqual(superset, { ok: true, errors: [] });
+});
+
+test("v3 binds every row to composition identity and order-independent dependencies", () => {
+  const reordered = v3Lock();
+  const bootstrap = reordered.components.find(
+    (row) => row.component_id === "bootstrap.runtime",
+  );
+  bootstrap.dependencies = [...bootstrap.dependencies].reverse();
+  assert.equal(validateReleaseLock(reordered, v3Composition, v3Options()).ok, true);
+
+  for (const mutate of [
+    (row) => { row.component_version = "9.9.9"; },
+    (row) => { row.source_repository = "example/substituted"; },
+    (row) => { row.ownership = "installer_managed"; },
+    (row) => { row.dependencies = ["bootstrap.runtime"]; },
+  ]) {
+    const lock = v3Lock();
+    mutate(lock.components[0]);
+    invalidV3(lock, v3Options(), /differ(?:s)? from the product composition/u);
+  }
+
+  const undeclared = v3Lock();
+  undeclared.components.push({
+    ...v3Row(v3Composition.components[0], "any"),
+    component_id: "undeclared.component",
+  });
+  invalidV3(undeclared, v3Options(), /not declared by the product composition/u);
+});
+
+test("v3 enforces exact bounded artifact, evidence, and provenance identity", () => {
+  const mutations = [
+    [(row) => { row.artifact.name = "unsafe/path.tar.gz"; }, /artifact\.name is invalid/u],
+    [(row) => { row.artifact.sha256 = "A".repeat(64); }, /artifact\.sha256 is invalid/u],
+    [(row) => { row.artifact.size_bytes = 1_099_511_627_777; }, /size_bytes is invalid/u],
+    [(row) => { row.artifact.type = "file_set"; }, /file_count is required/u],
+    [(row) => { row.artifact.file_count = 1; }, /must not contain file-set metrics/u],
+    [(row) => { row.evidence.name = row.artifact.name; }, /asset name is duplicated globally/u],
+    [(row) => { row.evidence.name = "unsafe/evidence.json"; }, /evidence\.name is invalid/u],
+    [(row) => { row.evidence.sha256 = "A".repeat(64); }, /evidence\.sha256 is invalid/u],
+    [(row) => { row.provenance.bundle_name = "unsafe/bundle.json"; },
+      /bundle_name is invalid/u],
+    [(row) => { row.provenance.bundle_sha256 = "bad"; }, /bundle_sha256 is invalid/u],
+  ];
+  for (const [mutate, pattern] of mutations) {
+    const lock = v3Lock();
+    mutate(lock.components[0]);
+    invalidV3(lock, v3Options(), pattern);
+  }
+
+  const validFileSet = v3Lock();
+  validFileSet.components[0].artifact = {
+    ...validFileSet.components[0].artifact,
+    type: "file_set",
+    file_count: 3,
+    installed_bytes: 90,
+  };
+  assert.equal(validateReleaseLock(validFileSet, v3Composition, v3Options()).ok, true);
+
+  const crossRowCollision = v3Lock();
+  crossRowCollision.components[1].artifact.name = crossRowCollision.components[0].artifact.name;
+  invalidV3(crossRowCollision, v3Options(), /asset name is duplicated globally/u);
+});
+
+test("v3 requires exact composition and trust-policy bindings", () => {
+  for (const [mutateLock, mutateOptions, pattern] of [
+    [(lock) => { lock.composition.manifest_name = "complete-arena-1.2.4.json"; },
+      () => {}, /manifest_name/u],
+    [(lock) => { lock.composition.sha256 = "0".repeat(64); },
+      () => {}, /composition sha256 differs/u],
+    [(lock) => { lock.trust_policy.name = "other-policy.json"; },
+      () => {}, /trust_policy name differs/u],
+    [(lock) => { lock.trust_policy.sha256 = "0".repeat(64); },
+      () => {}, /trust_policy sha256 differs/u],
+    [() => {}, (options) => { options.compositionFileName = "complete-arena-1.2.4.json"; },
+      /composition manifest_name differs/u],
+    [() => {}, (options) => { options.trustPolicyFileName = "other-policy.json"; },
+      /trust_policy name differs/u],
+  ]) {
+    const lock = v3Lock();
+    const options = v3Options();
+    mutateLock(lock);
+    mutateOptions(options);
+    invalidV3(lock, options, pattern);
+  }
+
+  invalidV3(v3Lock(), v3Options({ trustPolicy: undefined }), /invalid provenance trust policy/u);
+});
+
+test("v3 binds explicit producers to exact scopes, formats, and kinds", () => {
+  const unknown = v3Lock();
+  unknown.components[0].provenance.producer_id = "unknown";
+  invalidV3(unknown, v3Options(), /producer_id is unknown/u);
+
+  const scopeOptions = v3Options();
+  scopeOptions.trustPolicy.producers[0].scopes[0].source_repository = "example/other";
+  invalidV3(v3Lock(), scopeOptions, /outside the selected producer scope/u);
+
+  const format = v3Lock();
+  format.components[0].evidence.format = "component_evidence_v1";
+  invalidV3(format, v3Options(), /differs from the selected producer/u);
+
+  const invalidKindPolicy = v3TrustPolicy();
+  invalidKindPolicy.producers[1].evidence_format = "provider_result_v1";
+  invalidV3(v3Lock(), v3Options({ trustPolicy: invalidKindPolicy }), /local producer/u);
+});
+
+test("v3 exact fields exclude transport and producer-specific authority", () => {
+  const transport = v3Lock();
+  transport.provider_asset_mirror = { repository: "example/mirror" };
+  invalidV3(transport, v3Options(), /root fields are invalid/u);
+
+  const producerSpecific = v3Lock();
+  producerSpecific.components[0].provenance_workflow_ref = "refs/heads/main";
+  invalidV3(producerSpecific, v3Options(), /components\[0\] fields are invalid/u);
+
+  const localKey = v3Lock();
+  localKey.components.find(
+    (row) => row.ownership === "installer_managed",
+  ).provenance.public_key = "keys/release.pub";
+  invalidV3(localKey, v3Options(), /provenance fields are invalid/u);
+});
+
+test("v3 official and diagnostic modes remain contradictory by construction", () => {
+  const diagnostic = v3Lock();
+  diagnostic.release_ready = false;
+  diagnostic.validation_mode = "diagnostic_review";
+  assert.deepEqual(validateReleaseLock(diagnostic, v3Composition, v3Options({
+    requireReady: false,
+    requireNotReady: true,
+    validationMode: "diagnostic_review",
+  })), { ok: true, errors: [] });
+
+  const draftOfficial = v3Lock();
+  draftOfficial.release_ready = false;
+  invalidV3(draftOfficial, v3Options({ requireReady: false }), /official release lock/u);
+
+  const readyDiagnostic = v3Lock();
+  readyDiagnostic.validation_mode = "diagnostic_review";
+  invalidV3(readyDiagnostic, v3Options({
+    validationMode: "diagnostic_review",
+  }), /diagnostic review lock must not be release-ready/u);
+
+  invalidV3(v3Lock(), v3Options({ validationMode: "diagnostic_review" }),
+    /differs from the release lock/u);
+});
+
+test("v3 validates required targets and rejects legacy portable vocabulary", () => {
+  invalidV3(v3Lock(), v3Options({ requiredTargets: [] }), /must be nonempty/u);
+  invalidV3(v3Lock(), v3Options({ requiredTargets: ["any"] }), /supported platform/u);
+  const legacyPortable = v3Lock(["any"]);
+  for (const row of legacyPortable.components) row.target_triple = "any-any";
+  invalidV3(legacyPortable, v3Options(), /target_triple is invalid/u);
+});
+
+test("v3 hostile input diagnostics are bounded and deterministic", () => {
+  const hostile = v3Lock();
+  hostile.components = Array.from({ length: 600 }, () => ({}));
+  const first = validateReleaseLock(hostile, v3Composition, v3Options());
+  const second = validateReleaseLock(hostile, v3Composition, v3Options());
+  assert.equal(first.ok, false);
+  assert(first.errors.length <= 64);
+  assert.equal(first.errors.at(-1), "additional validation errors omitted");
+  assert.deepEqual(first.errors, second.errors);
+});
