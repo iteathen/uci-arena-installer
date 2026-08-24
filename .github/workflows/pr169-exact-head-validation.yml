@@ -16,11 +16,22 @@ jobs:
   linux-official-gate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout immutable candidate
-        uses: actions/checkout@v4
-        with:
-          ref: db2a087d3b8a29277465b8d49e45dc0f32399602
-          fetch-depth: 0
+      - name: Materialize immutable candidate without external actions
+        shell: bash
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          cred="$RUNNER_TEMP/git-credentials"
+          printf 'https://x-access-token:%s@github.com\n' "$GH_JOB_TOKEN" > "$cred"
+          chmod 600 "$cred"
+          git config credential.helper "store --file=$cred"
+          git fetch --no-tags origin "$CANDIDATE_SHA" "$BASE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+          rm -f "$cred"
+          git config --unset credential.helper
 
       - name: Prove exact candidate and four-path diff
         shell: bash
@@ -105,11 +116,22 @@ jobs:
   windows-official-gate:
     runs-on: windows-latest
     steps:
-      - name: Checkout immutable candidate
-        uses: actions/checkout@v4
-        with:
-          ref: db2a087d3b8a29277465b8d49e45dc0f32399602
-          fetch-depth: 0
+      - name: Materialize immutable candidate without external actions
+        shell: pwsh
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+          $cred = Join-Path $env:RUNNER_TEMP 'git-credentials'
+          "https://x-access-token:$env:GH_JOB_TOKEN@github.com" | Set-Content -Path $cred -NoNewline
+          git config credential.helper "store --file=$cred"
+          git fetch --no-tags origin $env:CANDIDATE_SHA $env:BASE_SHA
+          if ($LASTEXITCODE -ne 0) { throw "candidate fetch failed" }
+          git checkout --detach $env:CANDIDATE_SHA
+          if ($LASTEXITCODE -ne 0) { throw "candidate checkout failed" }
+          Remove-Item -Force $cred
+          git config --unset credential.helper
 
       - name: Prove exact candidate and four-path diff
         shell: pwsh
