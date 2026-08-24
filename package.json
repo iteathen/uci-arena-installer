@@ -7,6 +7,7 @@
     "test": "node --test tools/release/*.test.mjs",
     "check": "npm run spec:check && npm test",
     "release:package-update": "node tools/release/build-suite-update-package.mjs",
+    "release:sign-local-component": "node tools/release/sign-local-component-provenance.mjs",
     "release:local-ephemeral": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/release/invoke-local-ephemeral-release.ps1"
   }
 }
