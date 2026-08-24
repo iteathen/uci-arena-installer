@@ -25,10 +25,13 @@
 #include <tuple>
 #include <vector>
 
+#include "arena/adapters/provider_lifecycle.hpp"
 #include "arena/adapters/uci_process.hpp"
+#include "arena/application/installer/provider_lifecycle_contract.hpp"
 #include "arena/application/installer/removal_lifecycle.hpp"
 #include "arena/application/process_supervisor.hpp"
 #include "arena/ports/asset_search_index.hpp"
+#include "arena/ports/provider_lifecycle.hpp"
 #include "arena/platform/filesystem_path.hpp"
 #include "arena/platform/service_control.hpp"
 #include "arena/platform/workspace_permissions.hpp"
@@ -42,6 +45,10 @@ namespace {
 
 using nlohmann::json;
 namespace fs = std::filesystem;
+using arena::ports::ProviderLifecycleDisposition;
+using arena::ports::ProviderLifecycleOperation;
+using arena::ports::ProviderLifecycleResult;
+using arena::ports::provider_lifecycle_result_to_json;
 
 constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t managed_book_max_bytes = 256ULL * 1024ULL * 1024ULL;
@@ -1318,93 +1325,18 @@ void validate_provider_installer_integration(const json& manifest,
     if (!declares_startup) {
         return;
     }
-    const json& startup = integration.at("startup_control");
-    const std::string startup_schema = startup.value("schema", "");
-    const int startup_schema_version = startup.value("schema_version", 0);
-    const bool startup_v1 =
-        startup_schema == "arena_provider_startup_control_v1" &&
-        startup_schema_version == 1;
-    const bool startup_v2 =
-        startup_schema == "arena_provider_startup_control_v2" &&
-        startup_schema_version == 2;
-    if (!startup.is_object() || startup.size() != (startup_v2 ? 8 : 7) ||
-        (!startup_v1 && !startup_v2) ||
-        !startup.contains("entrypoint") || !startup.at("entrypoint").is_string() ||
-        !valid_identifier(startup.at("entrypoint").get<std::string>()) ||
-        !manifest.at("entrypoints").contains(
-            startup.at("entrypoint").get<std::string>()) ||
-        !startup.contains("actions") || !startup.at("actions").is_object() ||
-        startup.at("actions").size() != (startup_v2 ? 4 : 2) ||
-        !startup.contains("workspace_argument") ||
-        !startup.at("workspace_argument").is_object() ||
-        startup.at("workspace_argument").size() != 2 ||
-        !startup.contains("configuration_argument") ||
-        !startup.at("configuration_argument").is_string() ||
-        !startup.contains("result") || !startup.at("result").is_object() ||
-        (startup_v1 && startup.at("result").size() != 3) ||
-        (startup_v2 && startup.at("result").size() != 4 &&
-         startup.at("result").size() != 5) ||
-        (startup_v2 &&
-         (!startup.contains("replacement_arguments") ||
-          !startup.at("replacement_arguments").is_object() ||
-          startup.at("replacement_arguments").size() != 2))) {
-        throw std::runtime_error("provider startup control contract is invalid");
-    }
-    std::vector<std::string_view> startup_actions{"install", "uninstall"};
-    if (startup_v2) {
-        startup_actions.push_back("pre_replace");
-        startup_actions.push_back("post_replace");
-    }
-    for (const std::string_view action : startup_actions) {
-        const std::string action_name(action);
-        if (!startup.at("actions").contains(action_name) ||
-            !startup.at("actions").at(action_name).is_array() ||
-            startup.at("actions").at(action_name).empty() ||
-            startup.at("actions").at(action_name).size() > 8) {
-            throw std::runtime_error("provider startup action is invalid");
+    const ProviderLifecycleControl lifecycle_control = [&]() {
+        try {
+            return parse_provider_lifecycle_control(
+                integration.at("startup_control"));
+        } catch (const std::invalid_argument&) {
+            throw std::runtime_error(
+                "provider lifecycle control contract is invalid");
         }
-        for (const auto& argument : startup.at("actions").at(action_name)) {
-            if (!argument.is_string() ||
-                !valid_identifier(argument.get_ref<const std::string&>())) {
-                throw std::runtime_error("provider startup action argument is invalid");
-            }
-        }
-    }
-    const json& workspace_argument = startup.at("workspace_argument");
-    const std::string workspace_flag = workspace_argument.value("flag", "");
-    const fs::path workspace_relative = fs::path(
-        workspace_argument.value("relative_path", "")).lexically_normal();
-    const std::string configuration_flag =
-        startup.at("configuration_argument").get<std::string>();
-    const auto valid_flag = [](const std::string& flag) {
-        return flag.starts_with("--") && flag.size() > 2 &&
-               valid_identifier(flag.substr(2));
-    };
-    const json& result = startup.at("result");
-    const std::string envelope = result.value("envelope", "");
-    const bool require_live_on_post_replace =
-        result.value("require_live_on_post_replace", true);
-    const bool deferred_requalification =
-        result.value("allow_deferred_requalification_on_post_replace", false);
-    if (!valid_flag(workspace_flag) ||
-        (workspace_relative != fs::path(".") &&
-         !safe_relative_path(workspace_relative)) ||
-        !valid_flag(configuration_flag) ||
-        (envelope != "root" && envelope != "startup") ||
-        !result.contains("require_configuration_match_on_install") ||
-        !result.at("require_configuration_match_on_install").is_boolean() ||
-        !result.contains("require_live_on_install") ||
-         !result.at("require_live_on_install").is_boolean() ||
-         (startup_v2 &&
-          (!valid_flag(startup.at("replacement_arguments").value("previous_root", "")) ||
-           !valid_flag(startup.at("replacement_arguments").value("replacement_root", "")) ||
-           !result.contains("require_live_on_post_replace") ||
-           !result.at("require_live_on_post_replace").is_boolean() ||
-           (result.contains("allow_deferred_requalification_on_post_replace") &&
-            !result.at("allow_deferred_requalification_on_post_replace").is_boolean()) ||
-           (require_live_on_post_replace && deferred_requalification) ||
-           (!require_live_on_post_replace && !deferred_requalification)))) {
-        throw std::runtime_error("provider startup control values are invalid");
+    }();
+    if (!manifest.at("entrypoints").contains(lifecycle_control.entrypoint) ||
+        !manifest.at("entrypoints").at(lifecycle_control.entrypoint).is_string()) {
+        throw std::runtime_error("provider lifecycle entrypoint is unavailable");
     }
 }
 
@@ -4397,8 +4329,61 @@ struct ProviderWorkspaceInvocation {
     fs::path control_workspace;
 };
 
+struct ReceiptLifecycleObservation {
+    bool installed;
+    bool active;
+};
+
+std::optional<ReceiptLifecycleObservation> receipt_lifecycle_observation(
+    const json& receipt) {
+    if (!receipt.contains("startup") || !receipt.at("startup").is_object()) {
+        return std::nullopt;
+    }
+    const json& startup = receipt.at("startup");
+    if (startup.value("schema", "") == "arena_provider_lifecycle_result_v1") {
+        if (startup.value("schema_version", 0) != 1 ||
+            startup.value("component_id", "") !=
+                receipt.value("component_id", "") ||
+            startup.value("component_version", "") !=
+                receipt.value("component_version", "") ||
+            !startup.contains("observed") || !startup.at("observed").is_object() ||
+            !startup.contains("disposition") ||
+            !startup.at("disposition").is_string() ||
+            (startup.at("disposition") != "ready" &&
+             startup.at("disposition") != "safe_inactive")) {
+            return std::nullopt;
+        }
+        const json& observed = startup.at("observed");
+        const std::string operation = startup.value("operation", "");
+        const bool install = operation == "install";
+        const bool post_replace = operation == "post_replace";
+        const bool ready = startup.at("disposition") == "ready";
+        if ((!install && !post_replace) ||
+            observed.value("installation", "") != "installed" ||
+            observed.value("activity", "") !=
+                (ready ? "active" : "inactive") ||
+            observed.value("configuration", "") != "matches" ||
+            observed.value("replacement", "") !=
+                (install ? "not_applicable" : "safe")) {
+            return std::nullopt;
+        }
+        return ReceiptLifecycleObservation{true, ready};
+    }
+    if (!startup.contains("installed") ||
+        !startup.at("installed").is_boolean()) {
+        return std::nullopt;
+    }
+    const bool installed = startup.at("installed").get<bool>();
+    if (startup.contains("active") && !startup.at("active").is_boolean()) {
+        return std::nullopt;
+    }
+    return ReceiptLifecycleObservation{installed,
+                                       startup.value("active", installed)};
+}
+
 ProviderWorkspaceInvocation validated_provider_workspace(
-    const SetupPaths& paths, const json& receipt, const json& workspace_argument,
+    const SetupPaths& paths, const json& receipt,
+    const fs::path& workspace_relative_path,
     const bool trusted_existing_receipt_workspace) {
     const std::string component_id = receipt.at("component_id").get<std::string>();
     const auto data_paths = receipt.value("data_paths", json::array());
@@ -4412,10 +4397,10 @@ ProviderWorkspaceInvocation validated_provider_workspace(
                                  component_id);
     }
     const fs::path workspace = normalized_absolute(recorded_workspace);
-    const bool trusted_receipt_workspace =
-        trusted_existing_receipt_workspace && receipt.contains("startup") &&
-        receipt.at("startup").is_object() &&
-        receipt.at("startup").value("installed", false);
+    const auto lifecycle_observation = receipt_lifecycle_observation(receipt);
+    const bool trusted_receipt_workspace = trusted_existing_receipt_workspace &&
+                                           lifecycle_observation.has_value() &&
+                                           lifecycle_observation->installed;
     const json manifest =
         validate_component_payload(
             receipt.at("active_root").get<std::string>(), component_id,
@@ -4427,11 +4412,10 @@ ProviderWorkspaceInvocation validated_provider_workspace(
         throw std::runtime_error(
             "startup-capable component workspace differs from its declared placement");
     }
-    const fs::path workspace_relative = fs::path(
-        workspace_argument.at("relative_path").get<std::string>()).lexically_normal();
-    const fs::path control_workspace = workspace_relative == fs::path(".")
+    const fs::path control_workspace = workspace_relative_path == fs::path(".")
                                            ? workspace
-                                           : normalized_absolute(workspace / workspace_relative);
+                                           : normalized_absolute(
+                                                 workspace / workspace_relative_path);
     if (!at_or_within(workspace, control_workspace)) {
         throw std::runtime_error(
             "startup control workspace escapes its provider workspace");
@@ -4443,8 +4427,9 @@ ProviderWorkspaceInvocation validated_provider_workspace(
     return {workspace, control_workspace};
 }
 
-json invoke_provider_startup(
-    const SetupPaths& paths, const json& receipt, const std::string& action,
+ProviderLifecycleResult invoke_provider_lifecycle(
+    const SetupPaths& paths, const json& receipt,
+    const ProviderLifecycleOperation operation,
     const bool trusted_existing_receipt_workspace = false,
     const fs::path& staged_control_root = {},
     const std::string& staged_control_version = {},
@@ -4468,11 +4453,20 @@ json invoke_provider_startup(
             "startup-capable component has no Installer startup control contract: " +
             component_id);
     }
-    const json& control = manifest.at("installer_integration").at("startup_control");
-    if ((action != "install" && action != "uninstall" && action != "pre_replace" &&
-         action != "post_replace") ||
-        !control.at("actions").contains(action)) {
-        throw std::runtime_error("provider startup action is unsupported: " + action);
+    const ProviderLifecycleControl control = [&]() {
+        try {
+            return parse_provider_lifecycle_control(
+                manifest.at("installer_integration").at("startup_control"));
+        } catch (const std::invalid_argument&) {
+            throw std::runtime_error(
+                "provider lifecycle control contract is invalid: " +
+                component_id);
+        }
+    }();
+    const auto operation_control = control.operations.find(operation);
+    if (operation_control == control.operations.end()) {
+        throw std::runtime_error("provider lifecycle operation is unsupported: " +
+                                 component_id);
     }
     const fs::path receipts_root = paths.data_root / "receipts";
     const json& integration = manifest.at("installer_integration");
@@ -4480,8 +4474,7 @@ json invoke_provider_startup(
     const fs::path runtime = installed_entrypoint(
         receipts_root, invocation.at("runtime_component_id").get<std::string>(),
         invocation.at("runtime_entrypoint").get<std::string>());
-    const std::string control_entrypoint =
-        control.at("entrypoint").get<std::string>();
+    const std::string& control_entrypoint = control.entrypoint;
     const fs::path cli = staged_control
                              ? active_root /
                                    manifest.at("entrypoints")
@@ -4490,25 +4483,24 @@ json invoke_provider_startup(
                              : installed_entrypoint(receipts_root, component_id,
                                                     control_entrypoint);
     std::vector<std::string> arguments{cli.string()};
-    for (const auto& argument : control.at("actions").at(action)) {
-        arguments.push_back(argument.get<std::string>());
-    }
-    const json& workspace_argument = control.at("workspace_argument");
+    arguments.insert(arguments.end(), operation_control->second.arguments.begin(),
+                     operation_control->second.arguments.end());
     const ProviderWorkspaceInvocation provider_workspace =
-        validated_provider_workspace(paths, receipt, workspace_argument,
+        validated_provider_workspace(paths, receipt, control.workspace_relative_path,
                                      trusted_existing_receipt_workspace);
-    arguments.push_back(workspace_argument.at("flag").get<std::string>());
+    arguments.push_back(control.workspace_flag);
     arguments.push_back(provider_workspace.control_workspace.string());
-    if (action == "pre_replace" || action == "post_replace") {
-        if (control.value("schema", "") != "arena_provider_startup_control_v2" ||
+    if (operation == ProviderLifecycleOperation::pre_replace ||
+        operation == ProviderLifecycleOperation::post_replace) {
+        if (!control.previous_root_flag || !control.replacement_root_flag ||
             previous_root.empty() || replacement_root.empty()) {
             throw std::runtime_error(
-                "provider startup replacement roots are unavailable: " + component_id);
+                "provider lifecycle replacement roots are unavailable: " +
+                component_id);
         }
-        const json& replacement_arguments = control.at("replacement_arguments");
-        arguments.push_back(replacement_arguments.at("previous_root").get<std::string>());
+        arguments.push_back(*control.previous_root_flag);
         arguments.push_back(normalized_absolute(previous_root).string());
-        arguments.push_back(replacement_arguments.at("replacement_root").get<std::string>());
+        arguments.push_back(*control.replacement_root_flag);
         arguments.push_back(normalized_absolute(replacement_root).string());
     }
     const std::string configuration_path = receipt.value("configuration_path", "");
@@ -4517,73 +4509,36 @@ json invoke_provider_startup(
         const bool valid_configuration = within(provider_workspace.workspace, configuration) &&
                                          fs::is_regular_file(configuration) &&
                                          !fs::is_symlink(configuration);
-        if (!valid_configuration && action == "install") {
+        if (!valid_configuration &&
+            operation == ProviderLifecycleOperation::install) {
             throw std::runtime_error("startup-capable component configuration is unavailable");
         }
         if (valid_configuration) {
-            arguments.push_back(
-                control.at("configuration_argument").get<std::string>());
+            arguments.push_back(control.configuration_flag);
             arguments.push_back(configuration.string());
         }
     }
-    arena::application::ProcessSupervisor process;
-    const json response =
-        process.run_json(runtime, active_root, arguments, provider_startup_command_timeout);
-    const json& result_contract = control.at("result");
-    const json status = result_contract.at("envelope") == "startup"
-                            ? response.at("startup")
-                            : response;
-    if (!status.is_object() || !status.contains("installed") ||
-        !status.at("installed").is_boolean()) {
-        throw std::runtime_error("provider startup adapter returned an invalid status: " +
+    arena::application::ProcessSupervisor process_supervisor;
+    auto lifecycle =
+        arena::adapters::make_cli_provider_lifecycle(process_supervisor);
+    const arena::ports::ProviderLifecycleRequest request{
+        component_id,
+        control_version,
+        operation,
+        runtime,
+        active_root,
+        std::move(arguments),
+        {control.wire_protocol,
+         control.legacy_envelope,
+         control.legacy_require_configuration_match,
+         operation_control->second.allow_safe_inactive},
+        arena::ports::provider_lifecycle_timeout_default};
+    auto result = lifecycle->invoke(request);
+    if (result.disposition == ProviderLifecycleDisposition::failed) {
+        throw std::runtime_error("provider lifecycle operation failed: " +
                                  component_id);
     }
-    const bool expected_installed = action != "uninstall";
-    if (status.at("installed").get<bool>() != expected_installed) {
-        throw std::runtime_error("provider startup adapter did not confirm " + action + ": " +
-                                 component_id);
-    }
-    if (action == "install" &&
-        result_contract.at("require_configuration_match_on_install").get<bool>() &&
-        (!status.contains("matchesCurrentConfiguration") ||
-         !status.at("matchesCurrentConfiguration").is_boolean() ||
-         !status.at("matchesCurrentConfiguration").get<bool>())) {
-        throw std::runtime_error("provider startup adapter configuration does not match: " +
-                                 component_id);
-    }
-    if (action == "pre_replace" &&
-        (!status.value("replacementReady", false) || status.value("active", true))) {
-        throw std::runtime_error(
-            "provider startup adapter did not prove replacement quiescence: " +
-            component_id);
-    }
-    if (action == "post_replace") {
-        const bool active = status.contains("active") &&
-                            status.at("active").is_boolean() &&
-                            status.at("active").get<bool>();
-        if (result_contract.at("require_live_on_post_replace").get<bool>() && !active) {
-            throw std::runtime_error(
-                "provider startup adapter did not resume after replacement: " + component_id);
-        }
-        if (!active &&
-            (!result_contract.value(
-                 "allow_deferred_requalification_on_post_replace", false) ||
-             !status.contains("requalificationRequired") ||
-             !status.at("requalificationRequired").is_boolean() ||
-             !status.at("requalificationRequired").get<bool>())) {
-            throw std::runtime_error(
-                "provider startup adapter did not prove deferred requalification: " +
-                component_id);
-        }
-    }
-    if (action == "install" &&
-        result_contract.at("require_live_on_install").get<bool>() &&
-        (!status.contains("active") || !status.at("active").is_boolean() ||
-         !status.at("active").get<bool>())) {
-        throw std::runtime_error("provider startup adapter did not confirm a live daemon: " +
-                                 component_id);
-    }
-    return status;
+    return result;
 }
 
 void verify_provider_service_health(const SetupPaths& paths, const json& receipt,
@@ -4620,13 +4575,14 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
     const fs::path cli = installed_entrypoint(receipts_root, component_id, "cli");
     fs::path executable = cli;
     std::vector<std::string> arguments;
-    const json* startup_control = nullptr;
     const json* installer_integration = nullptr;
+    std::optional<ProviderLifecycleControl> lifecycle_control;
     if (manifest.contains("installer_integration") &&
         manifest.at("installer_integration").is_object()) {
         installer_integration = &manifest.at("installer_integration");
         if (installer_integration->contains("startup_control")) {
-            startup_control = &installer_integration->at("startup_control");
+            lifecycle_control = parse_provider_lifecycle_control(
+                installer_integration->at("startup_control"));
         }
     }
 
@@ -4682,11 +4638,11 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
             service_contract.at("status_schema").get<std::string>();
     }
 
-    if (startup_control != nullptr) {
-        const json& workspace_argument = startup_control->at("workspace_argument");
+    if (lifecycle_control) {
         const ProviderWorkspaceInvocation provider_workspace =
-            validated_provider_workspace(paths, receipt, workspace_argument, true);
-        arguments.push_back(workspace_argument.at("flag").get<std::string>());
+            validated_provider_workspace(
+                paths, receipt, lifecycle_control->workspace_relative_path, true);
+        arguments.push_back(lifecycle_control->workspace_flag);
         arguments.push_back(provider_workspace.control_workspace.string());
         const std::string configuration_path =
             receipt.value("configuration_path", "");
@@ -4700,8 +4656,7 @@ void verify_provider_service_health(const SetupPaths& paths, const json& receipt
                     "provider health configuration is unavailable: " +
                     component_id);
             }
-            arguments.push_back(
-                startup_control->at("configuration_argument").get<std::string>());
+            arguments.push_back(lifecycle_control->configuration_flag);
             arguments.push_back(configuration.string());
         }
     }
@@ -4906,15 +4861,14 @@ json cleanup_superseded_component_roots(
 }
 
 bool requires_uninstall_startup(const json& receipt) {
-    return (receipt.contains("startup") && receipt.at("startup").is_object() &&
-            receipt.at("startup").value("installed", false)) ||
+    const auto lifecycle = receipt_lifecycle_observation(receipt);
+    return (lifecycle && lifecycle->installed) ||
            supports_startup_capability(receipt, "startup_uninstall");
 }
 
 bool requires_replacement_startup_quiescence(const json& receipt) {
-    const bool installer_managed_startup =
-        receipt.contains("startup") && receipt.at("startup").is_object() &&
-        receipt.at("startup").value("installed", false);
+    const auto lifecycle = receipt_lifecycle_observation(receipt);
+    const bool installer_managed_startup = lifecycle && lifecycle->active;
     const bool credential_gated_startup =
         receipt.contains("service_contract") &&
         receipt.at("service_contract").is_object() &&
@@ -6034,19 +5988,26 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                        : previous.at("component_version").get<std::string>();
             const json control_manifest =
                 validate_component_payload(control_root, id, control_version).manifest;
-            const bool startup_control_v2 =
-                control_manifest.contains("installer_integration") &&
-                control_manifest.at("installer_integration").contains("startup_control") &&
+            bool replacement_lifecycle = false;
+            if (control_manifest.contains("installer_integration") &&
                 control_manifest.at("installer_integration")
-                        .at("startup_control")
-                        .value("schema", "") == "arena_provider_startup_control_v2";
+                    .contains("startup_control")) {
+                const auto control = parse_provider_lifecycle_control(
+                    control_manifest.at("installer_integration")
+                        .at("startup_control"));
+                replacement_lifecycle =
+                    control.operations.contains(
+                        ProviderLifecycleOperation::pre_replace) &&
+                    control.operations.contains(
+                        ProviderLifecycleOperation::post_replace);
+            }
             const fs::path replacement_root = staged
                                                   ? components_root / id / control_version
                                                   : previous_root;
             json transition{
                 {"component_id", id},
                 {"state", "transition_started"},
-                {"mode", startup_control_v2 ? "pre_replace" : "uninstall"},
+                {"mode", replacement_lifecycle ? "pre_replace" : "uninstall"},
                 {"previous_receipt", previous},
                 {"previous_root", previous_root.string()},
                 {"replacement_root", replacement_root.string()},
@@ -6055,16 +6016,16 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             if (staged) transition["staged_control_root"] = control_root.string();
             journal["startup_quiescence"].push_back(std::move(transition));
             write_json_atomic(journal_path, journal);
-            if (startup_control_v2) {
-                static_cast<void>(invoke_provider_startup(
-                    paths, previous, "pre_replace", true,
-                    staged ? control_root : fs::path{},
-                    staged ? control_version : std::string{}, previous_root,
-                    replacement_root));
-            } else {
-                static_cast<void>(
-                    invoke_provider_startup(paths, previous, "uninstall", true));
-            }
+            const ProviderLifecycleResult lifecycle_result = replacement_lifecycle
+                ? invoke_provider_lifecycle(
+                      paths, previous, ProviderLifecycleOperation::pre_replace,
+                      true, staged ? control_root : fs::path{},
+                      staged ? control_version : std::string{}, previous_root,
+                      replacement_root)
+                : invoke_provider_lifecycle(
+                      paths, previous, ProviderLifecycleOperation::uninstall, true);
+            journal["startup_quiescence"].back()["lifecycle_result"] =
+                provider_lifecycle_result_to_json(lifecycle_result);
             journal["startup_quiescence"].back()["state"] = "quiesced";
             quiesced_startup_components.insert(id);
             write_json_atomic(journal_path, journal);
@@ -6383,8 +6344,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             if (!quiesced_startup_components.contains(id) &&
                 action.value("enabled", true) && !credential_gated_startup &&
                 supports_startup_capability(receipt, "startup_install")) {
-                const json startup = invoke_provider_startup(paths, receipt, "install");
+                const json startup = provider_lifecycle_result_to_json(
+                    invoke_provider_lifecycle(
+                        paths, receipt, ProviderLifecycleOperation::install));
                 journal["actions"].back()["startup_installed"] = true;
+                journal["actions"].back()["lifecycle_result"] = startup;
                 write_json_atomic(journal_path, journal);
                 receipt["startup"] = startup;
                 write_json_atomic(receipt_path, receipt);
@@ -6426,22 +6390,26 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             json receipt = read_json(receipt_path);
             transition["state"] = "resume_started";
             write_json_atomic(journal_path, journal);
-            json startup;
+            ProviderLifecycleResult lifecycle_result;
             if (transition.at("mode") == "pre_replace") {
-                startup = invoke_provider_startup(
-                    paths, receipt, "post_replace", true, {}, {},
+                lifecycle_result = invoke_provider_lifecycle(
+                    paths, receipt, ProviderLifecycleOperation::post_replace,
+                    true, {}, {},
                     transition.at("previous_root").get<std::string>(),
                     receipt.at("active_root").get<std::string>());
             } else {
-                startup = invoke_provider_startup(paths, receipt, "install", true);
+                lifecycle_result = invoke_provider_lifecycle(
+                    paths, receipt, ProviderLifecycleOperation::install, true);
             }
+            const json startup =
+                provider_lifecycle_result_to_json(lifecycle_result);
             receipt["startup"] = startup;
             write_json_atomic(receipt_path, receipt);
-            const bool active = startup.value("active", false);
-            transition["state"] = active ? "resumed" : "resume_deferred";
-            if (!active) {
-                transition["requalification_required"] = true;
-            }
+            transition["lifecycle_result"] = startup;
+            transition["state"] =
+                lifecycle_result.disposition == ProviderLifecycleDisposition::ready
+                    ? "ready"
+                    : "safe_inactive";
             write_json_atomic(journal_path, journal);
             for (auto& result : results) {
                 if (result.value("component_id", "") == id) result["startup"] = startup;
@@ -6552,7 +6520,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         for (auto& transition : journal["startup_quiescence"]) {
             const std::string transition_state = transition.value("state", "");
             const std::string id = transition.at("component_id").get<std::string>();
-            const bool restart_may_be_live = transition_state == "resumed" ||
+            const bool restart_may_be_live = transition_state == "ready" ||
                                              transition_state == "resume_started";
             const bool staged_v2 = transition.at("mode") == "pre_replace" &&
                                    staged_roots.contains(id);
@@ -6569,12 +6537,15 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     if (transition.at("mode") == "pre_replace") {
                         const fs::path current_root =
                             current.at("active_root").get<std::string>();
-                        static_cast<void>(invoke_provider_startup(
-                            paths, current, "pre_replace", true, {}, {}, current_root,
+                        static_cast<void>(invoke_provider_lifecycle(
+                            paths, current,
+                            ProviderLifecycleOperation::pre_replace, true, {}, {},
+                            current_root,
                             transition.at("previous_root").get<std::string>()));
                     } else {
-                        static_cast<void>(
-                            invoke_provider_startup(paths, current, "uninstall", true));
+                        static_cast<void>(invoke_provider_lifecycle(
+                            paths, current,
+                            ProviderLifecycleOperation::uninstall, true));
                     }
                 }
                 if (activated_staged_controller) {
@@ -6639,8 +6610,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                                                 target / "arena-component.json")
                                                 ? target
                                                 : staged;
-                    static_cast<void>(invoke_provider_startup(
-                        paths, previous, "pre_replace", true, control_root,
+                    static_cast<void>(invoke_provider_lifecycle(
+                        paths, previous, ProviderLifecycleOperation::pre_replace,
+                        true, control_root,
                         action->at("staged_startup_control_version").get<std::string>(),
                         target,
                         previous.at("active_root").get<std::string>()));
@@ -6668,7 +6640,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 try {
                     const fs::path receipt_path = action->at("receipt_path").get<std::string>();
                     if (fs::is_regular_file(receipt_path)) {
-                        invoke_provider_startup(paths, read_json(receipt_path), "uninstall");
+                        static_cast<void>(invoke_provider_lifecycle(
+                            paths, read_json(receipt_path),
+                            ProviderLifecycleOperation::uninstall));
                     }
                     (*action)["startup_installed"] = false;
                 } catch (const std::exception& startup_error) {
@@ -6859,8 +6833,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                         const json& previous = action->at("previous_startup_receipt");
                         const fs::path restored_root =
                             previous.at("active_root").get<std::string>();
-                        static_cast<void>(invoke_provider_startup(
-                            paths, previous, "post_replace", true,
+                        static_cast<void>(invoke_provider_lifecycle(
+                            paths, previous, ProviderLifecycleOperation::post_replace,
+                            true,
                             rollback_startup_control_root,
                             action->at("staged_startup_control_version").get<std::string>(),
                             restored_root, restored_root));
@@ -6870,8 +6845,9 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             rollback_error.clear();
                         }
                     } else {
-                        static_cast<void>(invoke_provider_startup(
-                            paths, action->at("previous_startup_receipt"), "install", true));
+                        static_cast<void>(invoke_provider_lifecycle(
+                            paths, action->at("previous_startup_receipt"),
+                            ProviderLifecycleOperation::install, true));
                     }
                     (*action)["previous_startup_restored"] = true;
                 } catch (const std::exception& startup_error) {
@@ -6890,7 +6866,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             try {
                 const json& previous = transition.at("previous_receipt");
                 const std::string id = transition.at("component_id").get<std::string>();
-                json startup;
+                ProviderLifecycleResult lifecycle_result;
                 if (transition.at("mode") == "pre_replace") {
                     fs::path control_root;
                     if (transition.contains("rollback_control_root")) {
@@ -6902,18 +6878,23 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     }
                     const fs::path restored_root =
                         previous.at("active_root").get<std::string>();
-                    startup = invoke_provider_startup(
-                        paths, previous, "post_replace", true, control_root,
+                    lifecycle_result = invoke_provider_lifecycle(
+                        paths, previous, ProviderLifecycleOperation::post_replace,
+                        true, control_root,
                         control_root.empty()
                             ? std::string{}
                             : transition.at("control_version").get<std::string>(),
                         restored_root, restored_root);
                 } else {
-                    startup = invoke_provider_startup(paths, previous, "install", true);
+                    lifecycle_result = invoke_provider_lifecycle(
+                        paths, previous, ProviderLifecycleOperation::install, true);
                 }
+                const json startup =
+                    provider_lifecycle_result_to_json(lifecycle_result);
                 json restored_receipt = previous;
                 restored_receipt["startup"] = startup;
                 write_json_atomic(receipts_root / (id + ".json"), restored_receipt);
+                transition["lifecycle_result"] = startup;
                 transition["state"] = "restored";
                 if (transition.contains("rollback_control_root")) {
                     fs::remove_all(
@@ -7046,8 +7027,8 @@ json SetupEngine::verify(const SetupPaths& paths) {
                     }
                 }
             }
-            if (receipt.contains("startup") && receipt.at("startup").is_object() &&
-                receipt.at("startup").value("installed", false)) {
+            const auto lifecycle = receipt_lifecycle_observation(receipt);
+            if (lifecycle && lifecycle->active) {
                 verify_provider_service_health(paths, receipt, validated);
             }
             results.push_back(
@@ -7083,7 +7064,8 @@ json SetupEngine::uninstall(const SetupPaths& paths, const json& plan,
         return requires_uninstall_startup(receipt);
     };
     hooks.uninstall_startup = [&paths](const json& receipt) {
-        return invoke_provider_startup(paths, receipt, "uninstall");
+        return provider_lifecycle_result_to_json(invoke_provider_lifecycle(
+            paths, receipt, ProviderLifecycleOperation::uninstall));
     };
     return RemovalLifecycle::uninstall(paths, plan, confirmed, hooks);
 }

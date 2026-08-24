@@ -28,13 +28,13 @@
 #include "arena/domain/uuid.hpp"
 #include "arena/platform/filesystem_path.hpp"
 #include "arena/ports/asset_search_index.hpp"
+#include "arena/ports/provider_lifecycle.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
 using arena::application::installer::SetupEngine;
 using arena::application::installer::SetupPaths;
-using arena::application::installer::provider_startup_command_timeout;
 using arena::application::installer::RemovalLifecycle;
 using arena::application::installer::RemovalLifecycleHooks;
 using arena::application::installer::assess_book_forge_credential_recovery;
@@ -42,7 +42,8 @@ using arena::application::installer::recover_book_forge_credential;
 using nlohmann::json;
 
 TEST_CASE("provider startup lifecycle has a bounded replacement-safe deadline") {
-    STATIC_REQUIRE(provider_startup_command_timeout == std::chrono::seconds(120));
+    STATIC_REQUIRE(arena::ports::provider_lifecycle_timeout_default ==
+                   std::chrono::seconds(120));
 }
 
 class FakeAssetSearchIndex final : public arena::ports::AssetSearchIndex {
@@ -102,6 +103,84 @@ std::string sha256_path(const fs::path& path) {
     const std::string contents{
         std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     return sha256_text(contents);
+}
+
+json typed_lifecycle_arguments(const std::string& command,
+                               const std::string& component_id,
+                               const std::string& variant) {
+    return json::array({"lifecycle",
+                        command,
+                        "--typed-lifecycle",
+                        "--component-id",
+                        component_id,
+                        "--component-version",
+                        "1.0.0",
+                        "--variant",
+                        variant});
+}
+
+json typed_lifecycle_control(const std::string& component_id,
+                             const std::string& install_variant = "ready",
+                             const std::string& post_replace_variant = "ready",
+                             const bool replacement = false) {
+    json operations{
+        {"install",
+         {{"arguments",
+           typed_lifecycle_arguments("enable", component_id, install_variant)},
+          {"success_dispositions",
+           install_variant == "safe_inactive"
+               ? json::array({"ready", "safe_inactive"})
+               : json::array({"ready"})}}},
+        {"uninstall",
+         {{"arguments",
+           typed_lifecycle_arguments("disable", component_id, "ready")},
+          {"success_dispositions", json::array({"ready"})}}},
+    };
+    json control{
+        {"schema", "arena_provider_startup_control_v3"},
+        {"schema_version", 3},
+        {"entrypoint", "installer_integration"},
+        {"operations", std::move(operations)},
+        {"workspace_argument",
+         {{"flag", "--state-root"}, {"relative_path", "runtime"}}},
+        {"configuration_argument", "--settings"},
+    };
+    if (replacement) {
+        control["operations"]["pre_replace"] = {
+            {"arguments",
+             typed_lifecycle_arguments("prepare_replace", component_id,
+                                       "ready")},
+            {"success_dispositions", json::array({"ready"})}};
+        control["operations"]["post_replace"] = {
+            {"arguments",
+             typed_lifecycle_arguments("complete_replace", component_id,
+                                       post_replace_variant)},
+            {"success_dispositions",
+             post_replace_variant == "safe_inactive"
+                 ? json::array({"ready", "safe_inactive"})
+                 : json::array({"ready"})}};
+        control["replacement_arguments"] = {
+            {"previous_root", "--previous-root"},
+            {"replacement_root", "--replacement-root"}};
+    }
+    return control;
+}
+
+json ready_uninstall_lifecycle(const std::string& component_id,
+                               const std::string& component_version = "1.0.0") {
+    return {
+        {"schema", "arena_provider_lifecycle_result_v1"},
+        {"schema_version", 1},
+        {"component_id", component_id},
+        {"component_version", component_version},
+        {"operation", "uninstall"},
+        {"disposition", "ready"},
+        {"observed",
+         {{"installation", "absent"},
+          {"activity", "inactive"},
+          {"configuration", "not_applicable"},
+          {"replacement", "not_applicable"}}},
+    };
 }
 
 void write_component_archive(const fs::path& source_root,
@@ -2454,6 +2533,111 @@ TEST_CASE("disabled providers refresh through declared locator subscriptions") {
     fs::remove_all(root);
 }
 
+TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
+    std::string variant;
+    bool succeeds = true;
+    bool deny_safe_inactive = false;
+    SECTION("ready") { variant = "ready"; }
+    SECTION("safe inactive") { variant = "safe_inactive"; }
+    SECTION("safe inactive without permission") {
+        variant = "safe_inactive";
+        succeeds = false;
+        deny_safe_inactive = true;
+    }
+    SECTION("failed") {
+        variant = "failed";
+        succeeds = false;
+    }
+    SECTION("malformed") {
+        variant = "malformed";
+        succeeds = false;
+    }
+
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string component_id = "replaceable.typed-install.consumer";
+    static_cast<void>(write_mock_renderer_consumer(
+        paths, component_id, "lichess_transport_profile"));
+    const fs::path receipt_path =
+        paths.data_root / "receipts" / (component_id + ".json");
+    const json previous_receipt = json::parse(std::ifstream(receipt_path));
+    const fs::path installed_root =
+        previous_receipt.at("active_root").get<std::string>();
+    json manifest = json::parse(
+        std::ifstream(installed_root / "arena-component.json"));
+    json lifecycle_control = typed_lifecycle_control(component_id, variant);
+    if (deny_safe_inactive) {
+        lifecycle_control["operations"]["install"]["success_dispositions"] =
+            json::array({"ready"});
+    }
+    manifest["installer_integration"]["startup_control"] =
+        std::move(lifecycle_control);
+    std::ofstream(installed_root / "arena-component.json",
+                  std::ios::binary | std::ios::trunc)
+        << manifest.dump(2);
+    const fs::path archive = root / "typed-install.tar.gz";
+    write_component_archive(installed_root, archive);
+    fs::remove_all(paths.install_root / "components" / component_id);
+    fs::remove(receipt_path);
+
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array({{{"action", "install"},
+                       {"component_id", component_id},
+                       {"version", "1.0.0"},
+                       {"dependencies", json::array({"runtime.host"})},
+                       {"enabled", true},
+                       {"artifact",
+                        {{"type", "archive"},
+                         {"source", archive.filename().string()},
+                         {"sha256", sha256_path(archive)},
+                         {"size_bytes", fs::file_size(archive)}}}}})},
+    };
+
+    if (!succeeds) {
+        REQUIRE_THROWS(
+            SetupEngine::apply(json::object(), plan, paths, true, false));
+        REQUIRE_FALSE(fs::exists(receipt_path));
+        REQUIRE_FALSE(fs::exists(
+            paths.install_root / "components" / component_id / "1.0.0"));
+        fs::remove_all(root);
+        return;
+    }
+
+    const json applied =
+        SetupEngine::apply(json::object(), plan, paths, true, false);
+    REQUIRE(applied.at("state") == "committed");
+    const json receipt = json::parse(std::ifstream(receipt_path));
+    const json& lifecycle = receipt.at("startup");
+    REQUIRE(lifecycle.at("schema") ==
+            "arena_provider_lifecycle_result_v1");
+    REQUIRE(lifecycle.at("operation") == "install");
+    REQUIRE(lifecycle.at("disposition") ==
+            (variant == "safe_inactive" ? "safe_inactive" : "ready"));
+    REQUIRE(lifecycle.at("observed").at("activity") ==
+            (variant == "safe_inactive" ? "inactive" : "active"));
+    if (variant == "safe_inactive") {
+        REQUIRE(lifecycle.at("reason").at("id") ==
+                "fixture.safe_inactive");
+        REQUIRE(lifecycle.at("reason").at("message") ==
+                "opaque setup fixture reason");
+    }
+    const json transaction = json::parse(std::ifstream(
+        paths.data_root / "transactions" /
+        (applied.at("transaction_id").get<std::string>() + ".json")));
+    REQUIRE(transaction.at("actions").at(0).at("lifecycle_result") ==
+            lifecycle);
+    const std::string persisted = receipt.dump() + transaction.dump();
+    REQUIRE(persisted.find("requalificationRequired") == std::string::npos);
+    REQUIRE(persisted.find("requalification_required") == std::string::npos);
+    REQUIRE(persisted.find("resume_deferred") == std::string::npos);
+    fs::remove_all(root);
+}
+
 TEST_CASE("provider startup cleanup uses only the declared startup control") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -2467,8 +2651,11 @@ TEST_CASE("provider startup cleanup uses only the declared startup control") {
     REQUIRE(plan.at("components").at(0).at("startup_cleanup_required") == true);
     const json result = SetupEngine::uninstall(paths, plan, true);
 
-    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("installed") ==
-            false);
+    REQUIRE(result.at("components")
+                .at(0)
+                .at("lifecycle_result")
+                .at("observed")
+                .at("installation") == "absent");
     REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id));
     REQUIRE(fs::is_regular_file(workspace / "valuable-state.json"));
     fs::remove_all(root);
@@ -2486,22 +2673,25 @@ TEST_CASE("provider startup control accepts the provider workspace root") {
     const json plan = SetupEngine::plan_uninstall(paths, {component_id});
     const json result = SetupEngine::uninstall(paths, plan, true);
 
-    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("installed") ==
-            false);
+    REQUIRE(result.at("components")
+                .at(0)
+                .at("lifecycle_result")
+                .at("observed")
+                .at("installation") == "absent");
     REQUIRE_FALSE(fs::exists(paths.install_root / "components" / component_id));
     REQUIRE(fs::is_regular_file(workspace / "valuable-state.json"));
     fs::remove_all(root);
 }
 
-TEST_CASE("staged startup control v2 quiesces startup without receipt-owned state") {
-    bool deferred_requalification = false;
+TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence") {
+    bool safe_inactive = false;
     std::string component_id;
     SECTION("live replacement resumes") {
         component_id = "replaceable.staged-lifecycle.consumer";
     }
-    SECTION("exact evidence requalification remains safely deferred") {
-        component_id = "replaceable.requalification-required.consumer";
-        deferred_requalification = true;
+    SECTION("declared safe inactive replacement remains inactive") {
+        component_id = "replaceable.safe-inactive.consumer";
+        safe_inactive = true;
     }
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -2557,23 +2747,10 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
                   package_root / "installer-integration.fixture");
     json replacement_manifest = previous_manifest;
     replacement_manifest["component_version"] = "1.0.0";
-    auto& startup =
-        replacement_manifest["installer_integration"]["startup_control"];
-    startup["schema"] = "arena_provider_startup_control_v2";
-    startup["schema_version"] = 2;
-    startup["actions"]["pre_replace"] =
-        json::array({"lifecycle", "prepare_replace"});
-    startup["actions"]["post_replace"] =
-        json::array({"lifecycle", "complete_replace"});
-    startup["replacement_arguments"] = {
-        {"previous_root", "--previous-root"},
-        {"replacement_root", "--replacement-root"}};
-    startup["result"]["require_live_on_post_replace"] =
-        !deferred_requalification;
-    if (deferred_requalification) {
-        startup["result"]["allow_deferred_requalification_on_post_replace"] =
-            true;
-    }
+    replacement_manifest["installer_integration"]["startup_control"] =
+        typed_lifecycle_control(
+            component_id, "ready",
+            safe_inactive ? "safe_inactive" : "ready", true);
     std::ofstream(package_root / "arena-component.json", std::ios::binary)
         << replacement_manifest.dump(2);
     const fs::path archive = root / "staged-provider-1.0.0.tar.gz";
@@ -2612,13 +2789,14 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
     REQUIRE(applied.at("state") == "committed");
     REQUIRE(json::parse(std::ifstream(receipt_path)).at("component_version") ==
             "1.0.0");
-    REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("installed") ==
-            true);
-    REQUIRE(json::parse(std::ifstream(receipt_path)).at("startup").at("active") ==
-            !deferred_requalification);
-    REQUIRE(json::parse(std::ifstream(receipt_path))
-                .at("startup")
-                .at("requalificationRequired") == deferred_requalification);
+    const json receipt = json::parse(std::ifstream(receipt_path));
+    REQUIRE(receipt.at("startup").at("schema") ==
+            "arena_provider_lifecycle_result_v1");
+    REQUIRE(receipt.at("startup").at("operation") == "post_replace");
+    REQUIRE(receipt.at("startup").at("disposition") ==
+            (safe_inactive ? "safe_inactive" : "ready"));
+    REQUIRE(receipt.at("startup").at("observed").at("activity") ==
+            (safe_inactive ? "inactive" : "active"));
     const json transaction = json::parse(std::ifstream(
         paths.data_root / "transactions" /
         (applied.at("transaction_id").get<std::string>() + ".json")));
@@ -2626,11 +2804,14 @@ TEST_CASE("staged startup control v2 quiesces startup without receipt-owned stat
     REQUIRE(transaction.at("startup_quiescence").at(0).at("component_id") ==
             component_id);
     REQUIRE(transaction.at("startup_quiescence").at(0).at("state") ==
-            (deferred_requalification ? "resume_deferred" : "resumed"));
+            (safe_inactive ? "safe_inactive" : "ready"));
     REQUIRE(transaction.at("startup_quiescence")
                 .at(0)
-                .value("requalification_required", false) ==
-            deferred_requalification);
+                .at("lifecycle_result") == receipt.at("startup"));
+    const std::string persisted = receipt.dump() + transaction.dump();
+    REQUIRE(persisted.find("requalificationRequired") == std::string::npos);
+    REQUIRE(persisted.find("requalification_required") == std::string::npos);
+    REQUIRE(persisted.find("resume_deferred") == std::string::npos);
     REQUIRE(transaction.at("actions").at(0).at("component_id") == "runtime.host");
     REQUIRE(fs::is_directory(paths.install_root / "components" / component_id /
                              "1.0.0"));
@@ -2740,7 +2921,11 @@ TEST_CASE("dependency replacement refreshes exact-current consumers before resum
         const json restored_consumer =
             json::parse(std::ifstream(consumer_receipt_path));
         REQUIRE_FALSE(restored_consumer.contains("refreshed_at"));
-        REQUIRE(restored_consumer.at("startup").at("installed") == true);
+        REQUIRE(restored_consumer.at("startup").at("schema") ==
+                "arena_provider_lifecycle_result_v1");
+        REQUIRE(restored_consumer.at("startup")
+                    .at("observed")
+                    .at("installation") == "installed");
         REQUIRE(fs::is_directory(old_runtime_root));
         const auto transactions = fs::directory_iterator(
             paths.data_root / "transactions");
@@ -2764,7 +2949,7 @@ TEST_CASE("dependency replacement refreshes exact-current consumers before resum
                 json::array({component_id}));
         REQUIRE(transaction.at("refreshed_dependency_consumers").empty());
         REQUIRE(transaction.at("startup_quiescence").at(0).at("state") ==
-                "resumed");
+                "ready");
     }
     fs::remove_all(root);
 }
@@ -3289,6 +3474,9 @@ TEST_CASE("verified release media is retained for later repair and downloads") {
 }
 
 TEST_CASE("removal lifecycle accepts a replaceable startup adapter") {
+    bool valid_evidence = true;
+    SECTION("ready uninstall evidence") {}
+    SECTION("non-ready uninstall evidence") { valid_evidence = false; }
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     const std::string component_id = "replaceable.provider";
@@ -3320,20 +3508,34 @@ TEST_CASE("removal lifecycle accepts a replaceable startup adapter") {
     RemovalLifecycleHooks hooks;
     hooks.startup_cleanup_required =
         [](const json&) { return true; };
-    hooks.uninstall_startup = [&startup_invoked](const json& receipt) {
+    hooks.uninstall_startup = [&startup_invoked, valid_evidence](
+                                  const json& receipt) {
         startup_invoked = true;
-        return json{{"component_id", receipt.at("component_id")},
-                    {"installed", false},
-                    {"adapter", "fake"}};
+        json result = ready_uninstall_lifecycle(
+            receipt.at("component_id").get<std::string>(),
+            receipt.at("component_version").get<std::string>());
+        if (!valid_evidence) {
+            result["observed"]["installation"] = "installed";
+        }
+        return result;
     };
     const json plan =
         RemovalLifecycle::plan_uninstall(paths, {component_id}, false, hooks);
     REQUIRE(plan.at("components").at(0).at("startup_cleanup_required") == true);
-    const json result =
-        RemovalLifecycle::uninstall(paths, plan, true, hooks);
+    if (!valid_evidence) {
+        REQUIRE_THROWS(RemovalLifecycle::uninstall(paths, plan, true, hooks));
+        REQUIRE(startup_invoked);
+        REQUIRE(fs::is_directory(active_root));
+        REQUIRE(fs::is_regular_file(receipts / (component_id + ".json")));
+        fs::remove_all(root);
+        return;
+    }
+    const json result = RemovalLifecycle::uninstall(paths, plan, true, hooks);
     REQUIRE(startup_invoked);
-    REQUIRE(result.at("components").at(0).at("startup_cleanup").at("adapter") ==
-            "fake");
+    REQUIRE(result.at("components")
+                .at(0)
+                .at("lifecycle_result")
+                .at("operation") == "uninstall");
     REQUIRE_FALSE(fs::exists(active_root));
     REQUIRE(fs::is_regular_file(workspace / "state"));
     fs::remove_all(root);

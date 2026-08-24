@@ -300,23 +300,135 @@ ProviderLifecycleResult decode(const nlohmann::json& raw) {
     return result;
 }
 
+std::optional<bool> legacy_boolean(const nlohmann::json& status,
+                                   const std::string_view field) {
+    const auto key = std::string{field};
+    if (!status.contains(key)) return std::nullopt;
+    if (!status.at(key).is_boolean())
+        throw std::invalid_argument("legacy lifecycle field is not boolean");
+    return status.at(key).get<bool>();
+}
+
+bool legacy_required_boolean(const nlohmann::json& status,
+                             const std::string_view field) {
+    const auto value = legacy_boolean(status, field);
+    if (!value) throw std::invalid_argument("legacy lifecycle field is missing");
+    return *value;
+}
+
+void validate_legacy_identity(const nlohmann::json& value,
+                              const ProviderLifecycleRequest& request) {
+    if (value.contains("component_id") &&
+        (!value.at("component_id").is_string() ||
+         value.at("component_id") != request.component_id))
+        throw std::invalid_argument("legacy lifecycle component identity mismatch");
+    if (value.contains("component_version") &&
+        (!value.at("component_version").is_string() ||
+         value.at("component_version") != request.component_version))
+        throw std::invalid_argument("legacy lifecycle component version mismatch");
+    if (value.contains("operation") &&
+        (!value.at("operation").is_string() ||
+         value.at("operation") != std::string{operation_text(request.operation)}))
+        throw std::invalid_argument("legacy lifecycle operation mismatch");
+}
+
+ProviderLifecycleResult decode_legacy(const nlohmann::json& raw,
+                                      const ProviderLifecycleRequest& request) {
+    if (!raw.is_object())
+        throw std::invalid_argument("legacy lifecycle result is not an object");
+    validate_legacy_identity(raw, request);
+    const nlohmann::json* status = &raw;
+    if (request.policy.legacy_envelope == ProviderLegacyResultEnvelope::startup) {
+        if (!raw.contains("startup") || !raw.at("startup").is_object())
+            throw std::invalid_argument("legacy lifecycle envelope is missing");
+        status = &raw.at("startup");
+        validate_legacy_identity(*status, request);
+    }
+
+    const bool installed = legacy_required_boolean(*status, "installed");
+    const auto active = legacy_boolean(*status, "active");
+    const auto configuration =
+        legacy_boolean(*status, "matchesCurrentConfiguration");
+    const auto replacement_ready = legacy_boolean(*status, "replacementReady");
+    const auto deferred = legacy_boolean(*status, "requalificationRequired");
+    const bool configuration_satisfied =
+        !request.policy.require_configuration_match ||
+        (configuration && *configuration);
+
+    ProviderLifecycleDisposition disposition = ProviderLifecycleDisposition::ready;
+    switch (request.operation) {
+    case ProviderLifecycleOperation::install:
+        if (!installed || !active || !configuration_satisfied ||
+            (replacement_ready && *replacement_ready) || (deferred && *deferred))
+            throw std::invalid_argument("legacy install result is not satisfied");
+        if (!*active) {
+            if (!request.policy.allow_safe_inactive)
+                throw std::invalid_argument("legacy install inactivity is forbidden");
+            disposition = ProviderLifecycleDisposition::safe_inactive;
+        }
+        break;
+    case ProviderLifecycleOperation::uninstall:
+        if (installed || (active && *active) ||
+            (replacement_ready && *replacement_ready) || (deferred && *deferred))
+            throw std::invalid_argument("legacy uninstall result is not satisfied");
+        break;
+    case ProviderLifecycleOperation::pre_replace:
+        if (request.policy.wire_protocol != ProviderLifecycleWireProtocol::legacy_v2 ||
+            !installed || !active || *active || !configuration_satisfied ||
+            !replacement_ready || !*replacement_ready || (deferred && *deferred))
+            throw std::invalid_argument("legacy pre-replace result is not satisfied");
+        break;
+    case ProviderLifecycleOperation::post_replace:
+        if (request.policy.wire_protocol != ProviderLifecycleWireProtocol::legacy_v2 ||
+            !installed || !active || !configuration_satisfied ||
+            (replacement_ready && *replacement_ready))
+            throw std::invalid_argument("legacy post-replace result is not satisfied");
+        if (!*active) {
+            if (!request.policy.allow_safe_inactive || !deferred || !*deferred)
+                throw std::invalid_argument(
+                    "legacy post-replace inactivity is not satisfied");
+            disposition = ProviderLifecycleDisposition::safe_inactive;
+        } else if (deferred && *deferred) {
+            throw std::invalid_argument("legacy post-replace result is contradictory");
+        }
+        break;
+    }
+
+    ProviderLifecycleResult result{
+        request.component_id,
+        request.component_version,
+        request.operation,
+        disposition,
+        expected_observed(request.operation, disposition),
+        std::nullopt};
+    if (disposition == ProviderLifecycleDisposition::safe_inactive)
+        result.reason = ProviderLifecycleReason{"legacy.safe_inactive", {}};
+    return result;
+}
+
 } // namespace
 
 ProviderLifecycleResult ProviderLifecycle::invoke(const ProviderLifecycleRequest& request) {
     try {
         if (!valid_request(request)) return failed(request, "invalid_request");
     } catch (const std::bad_alloc&) { throw; }
-    if (request.policy.wire_protocol != ProviderLifecycleWireProtocol::typed_v3)
-        return failed(request, "legacy_contract_not_satisfied");
     const auto deadline = std::chrono::steady_clock::now() + request.timeout;
     nlohmann::json raw;
     try { raw = invoke_raw_validated(request, deadline); }
     catch (const std::bad_alloc&) { throw; }
     catch (const std::exception&) { return failed(request, "adapter_exception"); }
     try {
-        if (raw.dump().size() > provider_lifecycle_raw_result_max_bytes)
-            return failed(request, "malformed_result");
-        auto result = decode(raw);
+        if (raw.dump().size() > provider_lifecycle_raw_result_max_bytes) {
+            return failed(
+                request,
+                request.policy.wire_protocol == ProviderLifecycleWireProtocol::typed_v3
+                    ? "malformed_result"
+                    : "legacy_contract_not_satisfied");
+        }
+        auto result =
+            request.policy.wire_protocol == ProviderLifecycleWireProtocol::typed_v3
+                ? decode(raw)
+                : decode_legacy(raw, request);
         if (result.component_id != request.component_id ||
             result.component_version != request.component_version)
             return failed(request, "identity_mismatch");
@@ -333,7 +445,13 @@ ProviderLifecycleResult ProviderLifecycle::invoke(const ProviderLifecycleRequest
             return failed(request, "observation_mismatch");
         return result;
     } catch (const std::bad_alloc&) { throw; }
-    catch (const std::exception&) { return failed(request, "malformed_result"); }
+    catch (const std::exception&) {
+        return failed(
+            request,
+            request.policy.wire_protocol == ProviderLifecycleWireProtocol::typed_v3
+                ? "malformed_result"
+                : "legacy_contract_not_satisfied");
+    }
 }
 
 nlohmann::json provider_lifecycle_result_to_json(const ProviderLifecycleResult& result) {
