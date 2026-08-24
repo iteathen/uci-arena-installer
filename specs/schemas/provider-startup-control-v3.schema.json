@@ -63,8 +63,8 @@
         "properties": {
           "operations": {
             "anyOf": [
-              {"required": ["pre_replace"]},
-              {"required": ["post_replace"]}
+              {"type": "object", "required": ["pre_replace"]},
+              {"type": "object", "required": ["post_replace"]}
             ]
           }
         }
@@ -102,6 +102,7 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 16,
+      "uniqueItems": true,
       "items": {"$ref": "#/$defs/argument"}
     },
     "ready_only": {
