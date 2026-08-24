@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { validateProductComposition } from "./product-composition.mjs";
+import { validateProvenanceTrustPolicy } from "./provenance-trust-policy.mjs";
 
 const DIGEST = /^[0-9a-f]{64}$/u;
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u;
@@ -14,6 +15,70 @@ const TARGETS = new Set(["windows-x86_64", "linux-x86_64", "any", "any-any"]);
 const PLATFORM_TARGETS = ["windows-x86_64", "linux-x86_64"];
 const INSTALLER_REPOSITORY = "iteathen/uci-arena-installer";
 const HEAD_REF = /^refs\/heads\/(?!.*\.\.)(?!.*\/\/)(?!.*[\/.]$)[A-Za-z0-9._\/-]+$/u;
+const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/u;
+const IDENTIFIER = /^[A-Za-z0-9._-]{1,128}$/u;
+const COMPONENT_VERSION = /^[A-Za-z0-9._-]{1,64}$/u;
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+const V3_SOURCE_COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+const V3_TARGETS = new Set(["windows-x86_64", "linux-x86_64", "any"]);
+const OWNERSHIP = new Set(["provider", "installer_managed"]);
+const EVIDENCE_FORMATS = new Set([
+  "provider_result_v1", "managed_result_v1", "component_evidence_v1",
+]);
+const V3_ROOT_FIELDS = [
+  "schema", "suite_version", "release_ready", "validation_mode",
+  "composition", "trust_policy", "components",
+];
+const V3_ROW_FIELDS = [
+  "component_id", "component_version", "target_triple", "ownership",
+  "source_repository", "source_commit", "artifact", "component_manifest_sha256",
+  "dependencies", "evidence", "provenance",
+];
+const ARTIFACT_FIELDS = [
+  "name", "sha256", "size_bytes", "type", "file_count", "installed_bytes",
+];
+const ARTIFACT_REQUIRED_FIELDS = ["name", "sha256", "size_bytes", "type"];
+const ARTIFACT_BYTES_MAX = 1_099_511_627_776;
+const V3_ROW_LIMIT = 512;
+const VALIDATION_ERROR_LIMIT = 64;
+
+class BoundedErrors {
+  #errors = [];
+
+  #omitted = false;
+
+  push(...messages) {
+    for (const message of messages) {
+      if (this.#errors.length < VALIDATION_ERROR_LIMIT - 1) {
+        this.#errors.push(String(message).slice(0, 2048));
+      } else {
+        this.#omitted = true;
+      }
+    }
+  }
+
+  get length() {
+    return this.#errors.length + (this.#omitted ? 1 : 0);
+  }
+
+  values() {
+    return this.#omitted
+      ? [...this.#errors, "additional validation errors omitted"]
+      : [...this.#errors];
+  }
+}
+
+function validationResult(errors, compatibility = undefined) {
+  const values = errors instanceof BoundedErrors ? errors.values() : errors;
+  const result = { ok: values.length === 0, errors: values };
+  if (compatibility !== undefined) {
+    Object.defineProperty(result, "compatibility", {
+      value: compatibility,
+      enumerable: false,
+    });
+  }
+  return result;
+}
 
 export function sha256File(filename) {
   return createHash("sha256").update(readFileSync(filename)).digest("hex");
@@ -222,7 +287,397 @@ function validateCoverage(composition, identities, errors, requiredTargets) {
   }
 }
 
-export function validateReleaseLock(lock, compositionCandidate, {
+function exactFields(value, allowed, required, context, errors) {
+  if (!isObject(value)) {
+    errors.push(`${context} must be an object`);
+    return false;
+  }
+  const allowedSet = new Set(allowed);
+  const actual = Object.keys(value);
+  if (actual.some((field) => !allowedSet.has(field))
+      || required.some((field) => !Object.hasOwn(value, field))) {
+    errors.push(`${context} fields are invalid`);
+    return false;
+  }
+  return true;
+}
+
+function validText(value, pattern, maximum = Infinity) {
+  return typeof value === "string" && value.length <= maximum && pattern.test(value);
+}
+
+function safeAssetName(value) {
+  return validText(value, SAFE_NAME, 255);
+}
+
+function validateV3Root(lock, errors) {
+  exactFields(lock, V3_ROOT_FIELDS, V3_ROOT_FIELDS, "root", errors);
+  if (lock.schema !== "arena_suite_release_lock_v3") {
+    errors.push("release lock schema is unsupported");
+  }
+  if (!validText(lock.suite_version, SEMVER)) {
+    errors.push("suite_version must be semantic version text");
+  }
+  if (typeof lock.release_ready !== "boolean") {
+    errors.push("release_ready must be boolean");
+  }
+  if (!new Set(["official", "diagnostic_review"]).has(lock.validation_mode)) {
+    errors.push("validation_mode is invalid");
+  }
+  if (!Array.isArray(lock.components)
+      || lock.components.length < 1
+      || lock.components.length > V3_ROW_LIMIT) {
+    errors.push("components must contain 1 to 512 rows");
+  }
+}
+
+function validateRequiredTargets(requiredTargets, releaseReady, validationMode, errors) {
+  if (requiredTargets === undefined) {
+    if (releaseReady === true && validationMode === "official") {
+      errors.push("requiredTargets must be nonempty for an official release-ready lock");
+    }
+    return [];
+  }
+  if (!Array.isArray(requiredTargets)
+      || requiredTargets.length > PLATFORM_TARGETS.length
+      || new Set(requiredTargets).size !== requiredTargets.length
+      || requiredTargets.some((target) => !PLATFORM_TARGETS.includes(target))) {
+    errors.push("requiredTargets must contain unique supported platform targets");
+    return [];
+  }
+  if (requiredTargets.length === 0
+      && releaseReady === true
+      && validationMode === "official") {
+    errors.push("requiredTargets must be nonempty for an official release-ready lock");
+  }
+  return [...requiredTargets];
+}
+
+function validateV3Bindings(lock, composition, options, errors) {
+  if (lock.suite_version !== composition.product_release) {
+    errors.push("suite_version differs from product composition");
+  }
+
+  const compositionFields = ["manifest_name", "sha256"];
+  if (exactFields(
+    lock.composition, compositionFields, compositionFields, "composition", errors,
+  )) {
+    if (!validText(
+      lock.composition.manifest_name,
+      /^complete-arena-[0-9]+\.[0-9]+\.[0-9]+\.json$/u,
+      255,
+    )) {
+      errors.push("composition.manifest_name is invalid");
+    }
+    if (!validText(lock.composition.sha256, DIGEST)) {
+      errors.push("composition.sha256 is invalid");
+    }
+    if (validText(lock.suite_version, SEMVER)
+        && lock.composition.manifest_name !== `complete-arena-${lock.suite_version}.json`) {
+      errors.push("composition manifest_name differs from suite_version");
+    }
+  }
+  if (!safeAssetName(options.compositionFileName)
+      || !/^complete-arena-[0-9]+\.[0-9]+\.[0-9]+\.json$/u.test(options.compositionFileName)) {
+    errors.push("compositionFileName is required and invalid");
+  } else if (lock.composition?.manifest_name !== options.compositionFileName) {
+    errors.push("composition manifest_name differs from the loaded file");
+  }
+  if (!validText(options.compositionSha256, DIGEST)) {
+    errors.push("compositionSha256 is required and invalid");
+  } else if (lock.composition?.sha256 !== options.compositionSha256) {
+    errors.push("composition sha256 differs from the loaded file");
+  }
+
+  const policyFields = ["name", "sha256"];
+  if (exactFields(lock.trust_policy, policyFields, policyFields, "trust_policy", errors)) {
+    if (!safeAssetName(lock.trust_policy.name)) errors.push("trust_policy.name is invalid");
+    if (!validText(lock.trust_policy.sha256, DIGEST)) {
+      errors.push("trust_policy.sha256 is invalid");
+    }
+  }
+  if (!safeAssetName(options.trustPolicyFileName)) {
+    errors.push("trustPolicyFileName is required and invalid");
+  } else if (lock.trust_policy?.name !== options.trustPolicyFileName) {
+    errors.push("trust_policy name differs from the loaded file");
+  }
+  if (!validText(options.trustPolicySha256, DIGEST)) {
+    errors.push("trustPolicySha256 is required and invalid");
+  } else if (lock.trust_policy?.sha256 !== options.trustPolicySha256) {
+    errors.push("trust_policy sha256 differs from the loaded file");
+  }
+
+  try {
+    return validateProvenanceTrustPolicy(options.trustPolicy);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "invalid provenance trust policy");
+    return null;
+  }
+}
+
+function validateV3Artifact(artifact, context, errors, assetNames) {
+  if (!exactFields(
+    artifact, ARTIFACT_FIELDS, ARTIFACT_REQUIRED_FIELDS, context, errors,
+  )) return;
+  if (!safeAssetName(artifact.name)) {
+    errors.push(`${context}.name is invalid`);
+  } else {
+    assetNames.push({ name: artifact.name, context: `${context}.name` });
+  }
+  if (!validText(artifact.sha256, DIGEST)) errors.push(`${context}.sha256 is invalid`);
+  if (!Number.isSafeInteger(artifact.size_bytes)
+      || artifact.size_bytes < 1
+      || artifact.size_bytes > ARTIFACT_BYTES_MAX) {
+    errors.push(`${context}.size_bytes is invalid`);
+  }
+  if (!new Set(["archive", "file_set"]).has(artifact.type)) {
+    errors.push(`${context}.type is invalid`);
+    return;
+  }
+  if (artifact.type === "file_set") {
+    for (const field of ["file_count", "installed_bytes"]) {
+      if (!Number.isSafeInteger(artifact[field])
+          || artifact[field] < 1
+          || (field === "installed_bytes" && artifact[field] > ARTIFACT_BYTES_MAX)) {
+        errors.push(`${context}.${field} is required and invalid for file_set`);
+      }
+    }
+  } else if (Object.hasOwn(artifact, "file_count")
+      || Object.hasOwn(artifact, "installed_bytes")) {
+    errors.push(`${context} archive must not contain file-set metrics`);
+  }
+}
+
+function validateV3Evidence(evidence, context, errors, assetNames) {
+  const fields = ["format", "name", "sha256"];
+  if (!exactFields(evidence, fields, fields, context, errors)) return;
+  if (!EVIDENCE_FORMATS.has(evidence.format)) errors.push(`${context}.format is invalid`);
+  if (!safeAssetName(evidence.name)) {
+    errors.push(`${context}.name is invalid`);
+  } else {
+    assetNames.push({ name: evidence.name, context: `${context}.name` });
+  }
+  if (!validText(evidence.sha256, DIGEST)) errors.push(`${context}.sha256 is invalid`);
+}
+
+function validateV3Provenance(provenance, context, errors, assetNames) {
+  const fields = ["producer_id", "bundle_name", "bundle_sha256"];
+  if (!exactFields(provenance, fields, fields, context, errors)) return;
+  if (!validText(provenance.producer_id, IDENTIFIER)) {
+    errors.push(`${context}.producer_id is invalid`);
+  }
+  if (!safeAssetName(provenance.bundle_name)) {
+    errors.push(`${context}.bundle_name is invalid`);
+  } else {
+    assetNames.push({ name: provenance.bundle_name, context: `${context}.bundle_name` });
+  }
+  if (!validText(provenance.bundle_sha256, DIGEST)) {
+    errors.push(`${context}.bundle_sha256 is invalid`);
+  }
+}
+
+function validateV3ProducerBinding(row, producerById, context, errors) {
+  const producer = producerById.get(row.provenance?.producer_id);
+  if (!producer) {
+    errors.push(`${context}.provenance.producer_id is unknown`);
+    return null;
+  }
+  const authorized = producer.scopes.some((scope) =>
+    scope.source_repository === row.source_repository
+      && scope.ownership === row.ownership
+      && scope.component_ids.includes(row.component_id));
+  if (!authorized) errors.push(`${context} is outside the selected producer scope`);
+  if (producer.evidence_format !== row.evidence?.format) {
+    errors.push(`${context}.evidence.format differs from the selected producer`);
+  }
+  if (producer.kind === "sigstore_keyless_github"
+      && !new Set(["provider_result_v1", "managed_result_v1"]).has(row.evidence?.format)) {
+    errors.push(`${context} GitHub producer evidence format is invalid`);
+  }
+  if (producer.kind === "sigstore_keyed_local"
+      && row.evidence?.format !== "component_evidence_v1") {
+    errors.push(`${context} local producer evidence format is invalid`);
+  }
+  return producer;
+}
+
+function validateV3Row(row, index, compositionById, producerById, errors) {
+  const context = `components[${index}]`;
+  const assetNames = [];
+  if (!exactFields(row, V3_ROW_FIELDS, V3_ROW_FIELDS, context, errors)) {
+    return { identity: null, assetNames, producer: null };
+  }
+  if (!validText(row.component_id, IDENTIFIER)) {
+    errors.push(`${context}.component_id is invalid`);
+  }
+  if (!validText(row.component_version, COMPONENT_VERSION)) {
+    errors.push(`${context}.component_version is invalid`);
+  }
+  if (!V3_TARGETS.has(row.target_triple)) errors.push(`${context}.target_triple is invalid`);
+  if (!OWNERSHIP.has(row.ownership)) errors.push(`${context}.ownership is invalid`);
+  if (!validText(row.source_repository, REPOSITORY, 256)) {
+    errors.push(`${context}.source_repository is invalid`);
+  }
+  if (!validText(row.source_commit, V3_SOURCE_COMMIT)) {
+    errors.push(`${context}.source_commit is invalid`);
+  }
+  if (!validText(row.component_manifest_sha256, DIGEST)) {
+    errors.push(`${context}.component_manifest_sha256 is invalid`);
+  }
+  const dependenciesValid = Array.isArray(row.dependencies)
+    && row.dependencies.length <= 256
+    && new Set(row.dependencies).size === row.dependencies.length
+    && row.dependencies.every((dependency) => validText(dependency, IDENTIFIER));
+  if (!dependenciesValid) errors.push(`${context}.dependencies are invalid`);
+
+  const component = compositionById.get(row.component_id);
+  if (!component) {
+    errors.push(`${context} is not declared by the product composition`);
+  } else {
+    if (row.component_version !== component.version) {
+      errors.push(`${context}.component_version differs from the product composition`);
+    }
+    if (row.source_repository !== component.repository) {
+      errors.push(`${context}.source_repository differs from the product composition`);
+    }
+    const expectedOwnership = component.repository === INSTALLER_REPOSITORY
+      ? "installer_managed"
+      : "provider";
+    if (row.ownership !== expectedOwnership) {
+      errors.push(`${context}.ownership differs from the product composition`);
+    }
+    if (dependenciesValid && !sameStrings(row.dependencies, component.requires)) {
+      errors.push(`${context}.dependencies differ from the product composition`);
+    }
+  }
+
+  validateV3Artifact(row.artifact, `${context}.artifact`, errors, assetNames);
+  validateV3Evidence(row.evidence, `${context}.evidence`, errors, assetNames);
+  validateV3Provenance(row.provenance, `${context}.provenance`, errors, assetNames);
+  const producer = validateV3ProducerBinding(row, producerById, context, errors);
+  const identity = validText(row.component_id, IDENTIFIER) && V3_TARGETS.has(row.target_triple)
+    ? { componentId: row.component_id, target: row.target_triple }
+    : null;
+  return { identity, assetNames, producer };
+}
+
+function validateV3UniquenessAndCoverage(
+  composition, rowResults, requiredTargets, errors,
+) {
+  const pairs = new Set();
+  const targetsByComponent = new Map();
+  const names = new Map();
+  for (const result of rowResults) {
+    if (result.identity) {
+      const pair = `${result.identity.componentId}\0${result.identity.target}`;
+      if (pairs.has(pair)) {
+        errors.push(
+          `candidate identity is duplicated: ${result.identity.componentId}:${result.identity.target}`,
+        );
+      }
+      pairs.add(pair);
+      const targets = targetsByComponent.get(result.identity.componentId) ?? new Set();
+      targets.add(result.identity.target);
+      targetsByComponent.set(result.identity.componentId, targets);
+    }
+    for (const asset of result.assetNames) {
+      if (names.has(asset.name)) {
+        errors.push(`asset name is duplicated globally: ${asset.name}`);
+      } else {
+        names.set(asset.name, asset.context);
+      }
+    }
+  }
+
+  for (const component of composition.components) {
+    const targets = targetsByComponent.get(component.component_id) ?? new Set();
+    if (targets.size === 0) {
+      errors.push(`${component.component_id} has no candidate row`);
+      continue;
+    }
+    if (targets.has("any") && targets.size > 1) {
+      errors.push(`${component.component_id} mixes portable and platform candidates`);
+      continue;
+    }
+    if (!targets.has("any")) {
+      for (const target of requiredTargets) {
+        if (!targets.has(target)) errors.push(`${component.component_id} is missing ${target}`);
+      }
+    }
+  }
+}
+
+function validateV3Mode(lock, options, selectedProducers, errors) {
+  if (typeof options.requireReady !== "boolean") errors.push("requireReady must be boolean");
+  if (typeof options.requireNotReady !== "boolean") {
+    errors.push("requireNotReady must be boolean");
+  }
+  if (!new Set(["official", "diagnostic_review"]).has(options.validationMode)) {
+    errors.push("validationMode option is required and invalid");
+  } else if (lock.validation_mode !== options.validationMode) {
+    errors.push("validationMode option differs from the release lock");
+  }
+  if (options.requireReady && lock.release_ready !== true) {
+    errors.push("release lock is not release-ready");
+  }
+  if (options.requireNotReady && lock.release_ready !== false) {
+    errors.push("diagnostic review lock must not be release-ready");
+  }
+  if (lock.validation_mode === "official" && lock.release_ready !== true) {
+    errors.push("official release lock must be release-ready");
+  }
+  if (lock.validation_mode === "diagnostic_review" && lock.release_ready !== false) {
+    errors.push("diagnostic review lock must not be release-ready");
+  }
+
+  if (lock.validation_mode !== "official") return;
+  for (const producer of selectedProducers) {
+    if (producer.kind === "sigstore_keyless_github"
+        && (producer.official_ref !== "refs/heads/main"
+          || producer.trigger !== "workflow_dispatch"
+          || producer.require_transparency_log !== true
+          || producer.require_sct !== true)) {
+      errors.push(`producer ${producer.producer_id} is not eligible for official release`);
+    }
+    if (producer.kind === "sigstore_keyed_local"
+        && (producer.transparency_log !== "none"
+          || !Number.isSafeInteger(producer.key_epoch)
+          || !isObject(producer.public_key))) {
+      errors.push(`producer ${producer.producer_id} is not eligible for official release`);
+    }
+  }
+}
+
+function validateV3ReleaseLock(lock, composition, options) {
+  const errors = new BoundedErrors();
+  validateV3Root(lock, errors);
+  const requiredTargets = validateRequiredTargets(
+    options.requiredTargets, lock.release_ready, lock.validation_mode, errors,
+  );
+  const trustPolicy = validateV3Bindings(lock, composition, options, errors);
+  const compositionById = new Map(
+    composition.components.map((component) => [component.component_id, component]),
+  );
+  const producerById = new Map(
+    trustPolicy?.producers.map((producer) => [producer.producer_id, producer]) ?? [],
+  );
+  const rows = Array.isArray(lock.components) ? lock.components.slice(0, V3_ROW_LIMIT) : [];
+  const rowResults = rows.map((row, index) =>
+    validateV3Row(row, index, compositionById, producerById, errors));
+  validateV3UniquenessAndCoverage(composition, rowResults, requiredTargets, errors);
+  const selectedProducers = [];
+  const selectedIds = new Set();
+  for (const result of rowResults) {
+    if (result.producer && !selectedIds.has(result.producer.producer_id)) {
+      selectedIds.add(result.producer.producer_id);
+      selectedProducers.push(result.producer);
+    }
+  }
+  validateV3Mode(lock, options, selectedProducers, errors);
+  return validationResult(errors, "current_v3");
+}
+
+function validateLegacyV2ReleaseLock(lock, composition, {
   requireReady = true,
   requireNotReady = false,
   provenanceMode = "official",
@@ -231,15 +686,6 @@ export function validateReleaseLock(lock, compositionCandidate, {
   compositionSha256 = undefined,
 } = {}) {
   const errors = [];
-  let composition;
-  try {
-    composition = validateProductComposition(compositionCandidate);
-  } catch (error) {
-    return { ok: false, errors: [`invalid product composition: ${error.message}`] };
-  }
-  if (!isObject(lock) || lock.schema !== "arena_suite_release_lock_v2") {
-    return { ok: false, errors: ["release lock schema is unsupported"] };
-  }
   if (lock.suite_version !== composition.product_release) {
     errors.push("suite_version differs from product composition");
   }
@@ -306,7 +752,36 @@ export function validateReleaseLock(lock, compositionCandidate, {
   ];
   const coverage = requiredTargets ?? (lock.release_ready === true ? PLATFORM_TARGETS : []);
   if (coverage.length > 0) validateCoverage(composition, identities, errors, coverage);
-  return { ok: errors.length === 0, errors };
+  return validationResult(errors, "legacy_v2");
+}
+
+export function validateReleaseLock(lock, compositionCandidate, options = {}) {
+  let composition;
+  try {
+    composition = validateProductComposition(compositionCandidate);
+  } catch (error) {
+    return validationResult([`invalid product composition: ${error.message}`]);
+  }
+  if (!isObject(lock)) {
+    return validationResult(["release lock schema is unsupported"]);
+  }
+  if (lock.schema === "arena_suite_release_lock_v3") {
+    return validateV3ReleaseLock(lock, composition, {
+      requireReady: options.requireReady === undefined ? true : options.requireReady,
+      requireNotReady: options.requireNotReady === undefined ? false : options.requireNotReady,
+      validationMode: options.validationMode,
+      requiredTargets: options.requiredTargets,
+      compositionFileName: options.compositionFileName,
+      compositionSha256: options.compositionSha256,
+      trustPolicy: options.trustPolicy,
+      trustPolicyFileName: options.trustPolicyFileName,
+      trustPolicySha256: options.trustPolicySha256,
+    });
+  }
+  if (lock.schema === "arena_suite_release_lock_v2") {
+    return validateLegacyV2ReleaseLock(lock, composition, options);
+  }
+  return validationResult(["release lock schema is unsupported"]);
 }
 
 export function loadReleaseInputs(lockFilename, compositionDirectory) {
