@@ -40,6 +40,7 @@ add_library(arena_installer_core
   src/adapters/uci_process.cpp
   src/application/installer/credential_recovery.cpp
   src/application/installer/exact_document.cpp
+  src/application/installer/install_layout.cpp
   src/application/installer/provider_lifecycle_contract.cpp
   src/application/installer/removal_lifecycle.cpp
   src/application/installer/setup.cpp
@@ -221,6 +222,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     tests/unit/durable_state_publisher_tests.cpp
     tests/unit/exact_document_tests.cpp
     tests/unit/filesystem_identity_tests.cpp
+    tests/unit/install_layout_tests.cpp
     tests/unit/provider_lifecycle_tests.cpp
     tests/unit/service_control_tests.cpp
     tests/unit/tuf_trust_tests.cpp
@@ -233,6 +235,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     PRIVATE
       ARENA_MOCK_UCI_PATH="$<TARGET_FILE:arena_mock_uci>"
       ARENA_MOCK_SERVICE_PATH="$<TARGET_FILE:arena_mock_service>"
+      ARENA_INSTALLER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
   )
   target_include_directories(
     arena_installer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
