@@ -10,14 +10,6 @@ namespace arena::ports {
 namespace {
 using namespace std::literals;
 
-constexpr std::size_t kComponentIdBytes = 128;
-constexpr std::size_t kComponentVersionBytes = 64;
-constexpr std::size_t kArguments = 32;
-constexpr std::size_t kArgumentBytes = 1024;
-constexpr std::size_t kRawResultBytes = 65536;
-constexpr std::size_t kReasonIdBytes = 64;
-constexpr std::size_t kReasonMessageBytes = 512;
-
 const ProviderLifecycleObserved kUnknown{
     ProviderInstallationObservation::unknown,
     ProviderActivityObservation::unknown,
@@ -58,7 +50,7 @@ bool valid_identifier(const std::string_view value, const std::size_t maximum) {
 }
 
 bool valid_reason_id(const std::string_view value) {
-    return !value.empty() && value.size() <= kReasonIdBytes &&
+    return !value.empty() && value.size() <= provider_lifecycle_reason_id_max_bytes &&
            std::ranges::all_of(value, [](const unsigned char c) {
                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                       (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == ':';
@@ -66,7 +58,8 @@ bool valid_reason_id(const std::string_view value) {
 }
 
 bool valid_reason(const ProviderLifecycleReason& reason) {
-    return valid_reason_id(reason.id) && reason.message.size() <= kReasonMessageBytes &&
+    return valid_reason_id(reason.id) &&
+           reason.message.size() <= provider_lifecycle_reason_message_max_utf8_bytes &&
            valid_utf8(reason.message) && reason.message.find('\0') == std::string::npos &&
            reason.message.find('\r') == std::string::npos &&
            reason.message.find('\n') == std::string::npos;
@@ -78,12 +71,13 @@ std::string trusted_identity(const std::string& value, const std::size_t maximum
 
 ProviderLifecycleResult failed(const ProviderLifecycleRequest& request,
                                std::string id, std::string message = {}) {
-    if (message.size() > kReasonMessageBytes) message.resize(kReasonMessageBytes);
+    if (message.size() > provider_lifecycle_reason_message_max_utf8_bytes)
+        message.resize(provider_lifecycle_reason_message_max_utf8_bytes);
     message.erase(std::remove(message.begin(), message.end(), '\r'), message.end());
     message.erase(std::remove(message.begin(), message.end(), '\n'), message.end());
     message.erase(std::remove(message.begin(), message.end(), '\0'), message.end());
-    return {trusted_identity(request.component_id, kComponentIdBytes),
-            trusted_identity(request.component_version, kComponentVersionBytes),
+    return {trusted_identity(request.component_id, provider_lifecycle_component_id_max_utf8_bytes),
+            trusted_identity(request.component_version, provider_lifecycle_component_version_max_utf8_bytes),
             request.operation, ProviderLifecycleDisposition::failed, kUnknown,
             ProviderLifecycleReason{std::move(id), std::move(message)}};
 }
@@ -99,14 +93,15 @@ bool valid_path(const std::filesystem::path& path) {
 }
 
 bool valid_request(const ProviderLifecycleRequest& request) {
-    if (!valid_identifier(request.component_id, kComponentIdBytes) ||
-        !valid_identifier(request.component_version, kComponentVersionBytes) ||
+    if (!valid_identifier(request.component_id, provider_lifecycle_component_id_max_utf8_bytes) ||
+        !valid_identifier(request.component_version, provider_lifecycle_component_version_max_utf8_bytes) ||
         !valid_path(request.executable) || !valid_path(request.working_directory) ||
-        request.arguments.size() > kArguments || request.timeout < std::chrono::milliseconds{1} ||
-        request.timeout > std::chrono::seconds{120}) return false;
+        request.arguments.size() > provider_lifecycle_arguments_max_count ||
+        request.timeout < provider_lifecycle_timeout_minimum ||
+        request.timeout > provider_lifecycle_timeout_maximum) return false;
     for (const auto& argument : request.arguments)
-        if (argument.size() > kArgumentBytes || argument.find('\0') != std::string::npos ||
-            !valid_utf8(argument)) return false;
+        if (argument.size() > provider_lifecycle_argument_max_utf8_bytes ||
+            argument.find('\0') != std::string::npos || !valid_utf8(argument)) return false;
     if (request.policy.wire_protocol == ProviderLifecycleWireProtocol::typed_v3 &&
         (request.policy.legacy_envelope != ProviderLegacyResultEnvelope::root ||
          !request.policy.require_configuration_match)) return false;
@@ -217,8 +212,8 @@ ProviderLifecycleObserved expected_observed(const ProviderLifecycleOperation ope
 
 void validate_result(const ProviderLifecycleResult& result,
                      const bool enforce_observations = true) {
-    if (!valid_identifier(result.component_id, kComponentIdBytes) ||
-        !valid_identifier(result.component_version, kComponentVersionBytes))
+    if (!valid_identifier(result.component_id, provider_lifecycle_component_id_max_utf8_bytes) ||
+        !valid_identifier(result.component_version, provider_lifecycle_component_version_max_utf8_bytes))
         throw std::invalid_argument("invalid lifecycle result identity");
     (void)operation_text(result.operation);
     (void)disposition_text(result.disposition);
@@ -319,7 +314,8 @@ ProviderLifecycleResult ProviderLifecycle::invoke(const ProviderLifecycleRequest
     catch (const std::bad_alloc&) { throw; }
     catch (const std::exception&) { return failed(request, "adapter_exception"); }
     try {
-        if (raw.dump().size() > kRawResultBytes) return failed(request, "malformed_result");
+        if (raw.dump().size() > provider_lifecycle_raw_result_max_bytes)
+            return failed(request, "malformed_result");
         auto result = decode(raw);
         if (result.component_id != request.component_id ||
             result.component_version != request.component_version)
