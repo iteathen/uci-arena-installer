@@ -7,10 +7,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr169-exact-head-validation
-  cancel-in-progress: false
-
 env:
   CANDIDATE_SHA: db2a087d3b8a29277465b8d49e45dc0f32399602
   BASE_SHA: a4e2e220abf3b0ce5cc0a97b342d73a0d546d78d
@@ -23,7 +19,7 @@ jobs:
       - name: Checkout immutable candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.CANDIDATE_SHA }}
+          ref: db2a087d3b8a29277465b8d49e45dc0f32399602
           fetch-depth: 0
 
       - name: Prove exact candidate and four-path diff
@@ -112,7 +108,7 @@ jobs:
       - name: Checkout immutable candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.CANDIDATE_SHA }}
+          ref: db2a087d3b8a29277465b8d49e45dc0f32399602
           fetch-depth: 0
 
       - name: Prove exact candidate and four-path diff
