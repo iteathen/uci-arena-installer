@@ -1,8 +1,12 @@
+#include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace {
 
@@ -52,9 +56,123 @@ bool has_dependency_version(const int argc, char** argv,
     return false;
 }
 
+nlohmann::json lifecycle_observed(const std::string_view operation,
+                                  const bool safe_inactive) {
+    if (operation == "install") {
+        return {{"installation", "installed"},
+                {"activity", safe_inactive ? "inactive" : "active"},
+                {"configuration", "matches"},
+                {"replacement", "not_applicable"}};
+    }
+    if (operation == "uninstall") {
+        return {{"installation", "absent"},
+                {"activity", "inactive"},
+                {"configuration", "not_applicable"},
+                {"replacement", "not_applicable"}};
+    }
+    if (operation == "pre_replace") {
+        return {{"installation", "installed"},
+                {"activity", "inactive"},
+                {"configuration", "matches"},
+                {"replacement", "safe"}};
+    }
+    if (operation == "post_replace") {
+        return {{"installation", "installed"},
+                {"activity", safe_inactive ? "inactive" : "active"},
+                {"configuration", "matches"},
+                {"replacement", "safe"}};
+    }
+    throw std::invalid_argument("unsupported lifecycle operation fixture");
+}
+
+int run_provider_lifecycle_fixture(const int argc, char** argv) {
+    constexpr std::string_view literal_argument = "opaque value & | ;";
+    if (argc != 16 || std::string_view(argv[2]) != "--component-id" ||
+        std::string_view(argv[4]) != "--component-version" ||
+        std::string_view(argv[6]) != "--operation" ||
+        std::string_view(argv[8]) != "--variant" ||
+        std::string_view(argv[10]) != "--expected-working-directory" ||
+        std::string_view(argv[12]) != "--literal-argument" ||
+        std::string_view(argv[13]) != literal_argument ||
+        std::string_view(argv[14]) != "--invocation-record") {
+        return 40;
+    }
+    const auto expected_working_directory =
+        std::filesystem::path{argv[11]}.lexically_normal();
+    if (std::filesystem::current_path().lexically_normal() !=
+        expected_working_directory) {
+        return 41;
+    }
+    const std::string component_id = argv[3];
+    const std::string component_version = argv[5];
+    const std::string operation = argv[7];
+    const std::string variant = argv[9];
+    if (operation != "install" && operation != "uninstall" &&
+        operation != "pre_replace" && operation != "post_replace") {
+        return 42;
+    }
+    if (variant != "ready" && variant != "safe_inactive" &&
+        variant != "failed" && variant != "identity_mismatch" &&
+        variant != "operation_mismatch" &&
+        variant != "observation_mismatch" && variant != "malformed" &&
+        variant != "invalid_json" && variant != "nonzero" &&
+        variant != "timeout") {
+        return 42;
+    }
+    std::ofstream record(argv[15], std::ios::binary | std::ios::app);
+    if (!record) return 43;
+    record << "invoked\n";
+    record.close();
+
+    if (variant == "nonzero") return 44;
+    if (variant == "timeout") {
+        std::this_thread::sleep_for(std::chrono::seconds{5});
+    }
+    if (variant == "invalid_json") {
+        std::cout << "{" << '\n';
+        return 0;
+    }
+
+    const bool safe_inactive = variant == "safe_inactive";
+    const bool failed = variant == "failed";
+    nlohmann::json result{
+        {"schema", "arena_provider_lifecycle_result_v1"},
+        {"schema_version", 1},
+        {"component_id",
+         variant == "identity_mismatch" ? "other.provider" : component_id},
+        {"component_version", component_version},
+        {"operation", operation},
+        {"disposition", failed ? "failed" : safe_inactive ? "safe_inactive" : "ready"},
+        {"observed",
+         failed ? nlohmann::json{{"installation", "unknown"},
+                                 {"activity", "unknown"},
+                                 {"configuration", "unknown"},
+                                 {"replacement", "unknown"}}
+                : lifecycle_observed(operation, safe_inactive)},
+    };
+    if (safe_inactive || failed) {
+        result["reason"] = {
+            {"id", failed ? "fixture.failed" : "fixture.safe_inactive"},
+            {"message", "opaque fixture reason"}};
+    }
+    if (variant == "operation_mismatch") {
+        result["operation"] = operation == "install" ? "uninstall" : "install";
+    }
+    if (variant == "observation_mismatch") {
+        result["observed"]["activity"] =
+            result["observed"]["activity"] == "active" ? "inactive" : "active";
+    }
+    if (variant == "malformed") result["provider_field"] = true;
+    std::cout << result.dump() << '\n';
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::string_view(argv[1]) == "provider-lifecycle") {
+        return run_provider_lifecycle_fixture(argc, argv);
+    }
     if (argc >= 3 &&
         std::string_view(argv[1]).find("provider.mjs") != std::string_view::npos &&
         std::string_view(argv[2]) == "status") {

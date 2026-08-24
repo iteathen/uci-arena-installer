@@ -32,6 +32,7 @@ find_package(unofficial-sodium CONFIG REQUIRED)
 
 add_library(arena_installer_core
   src/adapters/asset_search_index.cpp
+  src/adapters/cli_provider_lifecycle.cpp
   src/adapters/durable_state_publisher.cpp
   src/adapters/filesystem_identity.cpp
   src/adapters/provider_lifecycle.cpp
