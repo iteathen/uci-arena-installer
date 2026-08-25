@@ -3902,6 +3902,36 @@ struct ImportWrite {
     json document;
 };
 
+std::set<std::string> provider_dependency_component_ids(
+    const json& receipt, const json& manifest) {
+    std::set<std::string> component_ids;
+    for (const auto& dependency : receipt.value("dependencies", json::array())) {
+        if (dependency.is_string() &&
+            valid_identifier(dependency.get_ref<const std::string&>())) {
+            component_ids.insert(dependency.get<std::string>());
+        }
+    }
+    if (!manifest.contains("installer_integration")) {
+        return component_ids;
+    }
+    for (const auto& binding :
+         manifest.at("installer_integration").at("dependency_bindings")) {
+        component_ids.insert(binding.at("component_id").get<std::string>());
+    }
+    return component_ids;
+}
+
+bool provider_depends_on_any_component(
+    const json& receipt, const json& manifest,
+    const std::set<std::string>& component_ids) {
+    const auto dependencies =
+        provider_dependency_component_ids(receipt, manifest);
+    return std::ranges::any_of(
+        dependencies, [&component_ids](const std::string& dependency) {
+            return component_ids.contains(dependency);
+        });
+}
+
 json refresh_provider_consumers(
     const SetupPaths& paths,
     const std::function<bool(const json&, const json&)>& matches,
@@ -4101,19 +4131,15 @@ json refresh_dependency_consumers(
     return refresh_provider_consumers(
         paths,
         [&replaced_component_ids,
-         &already_refreshed_component_ids](const json& receipt, const json&) {
+         &already_refreshed_component_ids](const json& receipt,
+                                           const json& manifest) {
             const std::string component_id = receipt.at("component_id").get<std::string>();
             if (replaced_component_ids.contains(component_id) ||
                 already_refreshed_component_ids.contains(component_id)) {
                 return false;
             }
-            return std::ranges::any_of(
-                receipt.value("dependencies", json::array()),
-                [&replaced_component_ids](const json& dependency) {
-                    return dependency.is_string() &&
-                           replaced_component_ids.contains(
-                               dependency.get<std::string>());
-                });
+            return provider_depends_on_any_component(
+                receipt, manifest, replaced_component_ids);
         },
         retained_transaction_id, retained_writes, checkpoint);
 }
@@ -5919,6 +5945,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         }
 
         std::map<std::string, json> affected_startup_receipts;
+        std::map<std::string, std::set<std::string>> affected_startup_dependencies;
         for (const auto& receipt_entry : fs::directory_iterator(receipts_root)) {
             if (!receipt_entry.is_regular_file() || receipt_entry.is_symlink() ||
                 receipt_entry.path().extension() != ".json") {
@@ -5932,20 +5959,36 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             const std::string id = receipt.at("component_id").get<std::string>();
             const bool startup_requires_quiescence =
                 requires_replacement_startup_quiescence(receipt);
-            bool affected = replaced_component_ids.contains(id);
-            for (const auto& dependency : receipt.value("dependencies", json::array())) {
-                if (dependency.is_string() &&
-                    replaced_component_ids.contains(dependency.get<std::string>())) {
-                    affected = true;
-                }
+            if (!startup_requires_quiescence) continue;
+            if (!receipt.contains("active_root") ||
+                !receipt.at("active_root").is_string() ||
+                !receipt.contains("component_version") ||
+                !receipt.at("component_version").is_string()) {
+                throw std::runtime_error(
+                    "installed provider receipt cannot resolve dependency bindings: " +
+                    id);
             }
-            if (!startup_requires_quiescence || !affected) continue;
+            const json manifest = validate_component_payload(
+                normalized_absolute(receipt.at("active_root").get<std::string>()),
+                id, receipt.at("component_version").get<std::string>()).manifest;
+            const auto dependencies =
+                provider_dependency_component_ids(receipt, manifest);
+            bool affected = replaced_component_ids.contains(id);
+            if (!affected) {
+                affected = std::ranges::any_of(
+                    dependencies,
+                    [&replaced_component_ids](const std::string& dependency) {
+                        return replaced_component_ids.contains(dependency);
+                    });
+            }
+            if (!affected) continue;
             if (!supports_startup_capability(receipt, "startup_uninstall")) {
                 throw std::runtime_error(
                     "installed provider startup cannot be stopped before dependency replacement: " +
                     id);
             }
             affected_startup_receipts.emplace(id, receipt);
+            affected_startup_dependencies.emplace(id, dependencies);
         }
 
         std::vector<std::string> quiescence_order;
@@ -5955,12 +5998,12 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             for (const auto& [id, receipt] : affected_startup_receipts) {
                 if (ordered_startup_components.contains(id)) continue;
                 bool has_unordered_dependent = false;
-                for (const auto& [other_id, other_receipt] : affected_startup_receipts) {
+                for (const auto& other : affected_startup_receipts) {
+                    const std::string& other_id = other.first;
                     if (id == other_id || ordered_startup_components.contains(other_id)) continue;
-                    const json dependencies =
-                        other_receipt.value("dependencies", json::array());
-                    if (std::find(dependencies.begin(), dependencies.end(), id) !=
-                        dependencies.end()) {
+                    const auto& dependencies =
+                        affected_startup_dependencies.at(other_id);
+                    if (dependencies.contains(id)) {
                         has_unordered_dependent = true;
                         break;
                     }

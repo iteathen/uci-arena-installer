@@ -2954,6 +2954,122 @@ TEST_CASE("dependency replacement refreshes exact-current consumers before resum
     fs::remove_all(root);
 }
 
+TEST_CASE("optional provider binding replacement quiesces and refreshes consumer") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const std::string consumer_id = "optional.binding.consumer";
+    const std::string binding_component_id = "optional.bound.component";
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, consumer_id, "lichess_transport_profile");
+
+    const fs::path consumer_root =
+        paths.install_root / "components" / consumer_id / "1.0.0";
+    const fs::path consumer_manifest_path = consumer_root / "arena-component.json";
+    json consumer_manifest = json::parse(std::ifstream(consumer_manifest_path));
+    consumer_manifest["installer_integration"]["dependency_bindings"] =
+        json::array({{{"name", "optional_runtime"},
+                      {"component_id", binding_component_id},
+                      {"source", "active_root"},
+                      {"required", false}}});
+    std::ofstream(consumer_manifest_path, std::ios::binary | std::ios::trunc)
+        << consumer_manifest.dump(2);
+
+    const fs::path consumer_receipt_path =
+        paths.data_root / "receipts" / (consumer_id + ".json");
+    json consumer_receipt = json::parse(std::ifstream(consumer_receipt_path));
+    consumer_receipt["state"] = "installed_managed";
+    consumer_receipt["startup"] = {{"installed", true}};
+    REQUIRE(consumer_receipt.at("dependencies") == json::array({"runtime.host"}));
+    std::ofstream(consumer_receipt_path, std::ios::binary | std::ios::trunc)
+        << consumer_receipt.dump(2);
+
+    const auto write_bound_component = [&](const fs::path& component_root,
+                                           const std::string& version) {
+        fs::create_directories(component_root);
+        const fs::path payload = component_root / "bound.fixture";
+        std::ofstream(payload, std::ios::binary) << version;
+        std::ofstream(component_root / "arena-component.json", std::ios::binary)
+            << json{
+                   {"schema", "arena_install_component_v1"},
+                   {"schema_version", 1},
+                   {"component_id", binding_component_id},
+                   {"component_version", version},
+                   {"entrypoints", json::object()},
+                   {"dependencies", json::array()},
+                   {"files",
+                    json::array({{{"path", "bound.fixture"},
+                                  {"size_bytes", fs::file_size(payload)},
+                                  {"sha256", sha256_path(payload)}}})},
+               }
+                   .dump(2);
+    };
+
+    const fs::path previous_bound_root =
+        paths.install_root / "components" / binding_component_id / "1.0.0";
+    write_bound_component(previous_bound_root, "1.0.0");
+    std::ofstream(paths.data_root / "receipts" /
+                      (binding_component_id + ".json"),
+                  std::ios::binary)
+        << json{
+               {"schema", "arena_install_receipt_v1"},
+               {"schema_version", 1},
+               {"component_id", binding_component_id},
+               {"component_version", "1.0.0"},
+               {"state", "installed_managed"},
+               {"active_root", previous_bound_root.string()},
+               {"artifact_sha256", std::string(64, 'a')},
+               {"dependencies", json::array()},
+               {"data_paths", json::array()},
+               {"configuration_path", ""},
+               {"activated_files", json::array()},
+           }
+               .dump(2);
+
+    const fs::path replacement_package = root / "optional-bound-component-2.0.0";
+    write_bound_component(replacement_package, "2.0.0");
+    const fs::path replacement_archive = root / "optional.bound.component-2.0.0.tar.gz";
+    write_component_archive(replacement_package, replacement_archive);
+    const json plan{
+        {"schema", "arena_install_plan_v1"},
+        {"blockers", json::array()},
+        {"offline", true},
+        {"catalog_directory", root.string()},
+        {"actions",
+         json::array({{{"action", "install"},
+                       {"component_id", binding_component_id},
+                       {"version", "2.0.0"},
+                       {"dependencies", json::array()},
+                       {"enabled", true},
+                       {"artifact",
+                        {{"type", "archive"},
+                         {"source", replacement_archive.filename().string()},
+                         {"sha256", sha256_path(replacement_archive)},
+                         {"size_bytes", fs::file_size(replacement_archive)}}}}})},
+    };
+
+    const json applied =
+        SetupEngine::apply(json::object(), plan, paths, true, true);
+    INFO(applied.dump(2));
+    REQUIRE(applied.at("state") == "committed");
+    const fs::path replacement_root =
+        paths.install_root / "components" / binding_component_id / "2.0.0";
+    const json refreshed = json::parse(std::ifstream(configuration));
+    REQUIRE(refreshed.at("bindings").at("optional_runtime") ==
+            replacement_root.string());
+    const json transaction = json::parse(std::ifstream(
+        paths.data_root / "transactions" /
+        (applied.at("transaction_id").get<std::string>() + ".json")));
+    REQUIRE(transaction.at("refreshed_current_consumers").empty());
+    REQUIRE(transaction.at("refreshed_dependency_consumers") ==
+            json::array({consumer_id}));
+    REQUIRE(transaction.at("startup_quiescence").size() == 1);
+    REQUIRE(transaction.at("startup_quiescence").at(0).at("component_id") ==
+            consumer_id);
+    REQUIRE(transaction.at("startup_quiescence").at(0).at("state") == "ready");
+
+    fs::remove_all(root);
+}
+
 TEST_CASE("timing profile imports derive only additive permissions from complete gates") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
