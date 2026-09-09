@@ -33,7 +33,7 @@ principles:
     - The installer engine and product composition have independent versions.
     - Composition pins exact component versions, artifacts, manifests,
       provenance, and compatibility.
-    - Automatic CI is disabled; release activity is explicit and private until
+    - Read-only pull-request CI is enabled; release activity is explicit and private until
       approved.
 
 hard_rules:
