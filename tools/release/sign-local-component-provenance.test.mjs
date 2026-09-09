@@ -440,6 +440,7 @@ test("local signer binds canonical evidence to one exact local producer and publ
 
 test("local signer rejects unsafe private-key references without disclosing them", async (t) => {
   const item = fixture();
+  mkdirSync(path.join(repositoryRoot, "build"), { recursive: true });
   const repositoryKeyRoot = mkdtempSync(path.join(repositoryRoot, "build", "rp04-key-test-"));
   t.after(() => rmSync(repositoryKeyRoot, { recursive: true, force: true }));
   const repositoryKey = path.join(repositoryKeyRoot, "canary-repository.key");
