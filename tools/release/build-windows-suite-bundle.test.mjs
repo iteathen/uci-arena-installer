@@ -259,7 +259,7 @@ test("WiX compiles Installer-owned Personal and All users suite bundles", {
   }
 });
 
-test("Personal upgrade executes one removal plan per exact related bundle", {
+test("Personal component upgrade excludes historical suite execute and restore plans", {
   skip: !upgradeCycleEnabled,
   timeout: 180_000,
 }, () => {
@@ -277,7 +277,14 @@ test("Personal upgrade executes one removal plan per exact related bundle", {
 
     const log = readFileSync(upgradeLog, "utf8");
     const removalPlans = log.match(/i207: Planned related bundle: .*execute: Uninstall/gu) ?? [];
-    assert.equal(removalPlans.length, 1, "one exact prior bundle may receive removal authority");
+    assert.equal(removalPlans.length, 0, "the current component transaction owns replacement");
+    const relatedPlans = log.match(/i207: Planned related bundle: .*/gu) ?? [];
+    assert.ok(relatedPlans.length > 0, "the fixture actually detected the prior bundle");
+    for (const plan of relatedPlans) {
+      assert.match(plan, /ba plan type: None/u);
+      assert.match(plan, /execute: None, rollback: None/u);
+      assert.match(plan, /restore: None/u);
+    }
     assert.doesNotMatch(log, /CreateProcessW failed|0x80070003/iu);
   } finally {
     if (secondBundle && existsSync(secondBundle)) {

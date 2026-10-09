@@ -248,6 +248,21 @@ if(ARENA_INSTALLER_BUILD_TESTS)
       unofficial-sodium::sodium
   )
   if(WIN32)
+    # The callback tests consume the same locked public WiX 6.0.2 API headers
+    # restored by the BAFunctions project, never locally copied ABI declarations.
+    set(ARENA_NUGET_PACKAGES "$ENV{NUGET_PACKAGES}")
+    if(NOT ARENA_NUGET_PACKAGES)
+      set(ARENA_NUGET_PACKAGES "$ENV{USERPROFILE}/.nuget/packages")
+    endif()
+    add_executable(arena_bundle_bafunctions_tests
+      tests/unit/related_bundle_callback_tests.cpp)
+    add_dependencies(arena_bundle_bafunctions_tests arena_bundle_bafunctions)
+    target_include_directories(arena_bundle_bafunctions_tests PRIVATE
+      "${ARENA_NUGET_PACKAGES}/wixtoolset.wixstandardbootstrapperapplicationfunctionapi/6.0.2/lib/native/include"
+      "${ARENA_NUGET_PACKAGES}/wixtoolset.bootstrapperapplicationapi/6.0.2/build/native/include")
+    target_compile_definitions(arena_bundle_bafunctions_tests PRIVATE
+      ARENA_BUNDLE_BAFUNCTIONS_PATH="${ARENA_BUNDLE_BAFUNCTIONS_OUTPUT}")
+    target_link_libraries(arena_bundle_bafunctions_tests PRIVATE Catch2::Catch2WithMain)
     add_dependencies(arena_installer_tests arena_bundle_bafunctions)
     target_sources(
       arena_installer_tests
@@ -262,4 +277,7 @@ if(ARENA_INSTALLER_BUILD_TESTS)
   endif()
   include(Catch)
   catch_discover_tests(arena_installer_tests)
+  if(WIN32)
+    catch_discover_tests(arena_bundle_bafunctions_tests)
+  endif()
 endif()
