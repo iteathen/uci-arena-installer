@@ -2168,6 +2168,52 @@ TEST_CASE("locator clear restores saved authority and earlier consumer writes on
     remove_locator_test_directory(root);
 }
 
+TEST_CASE("locator clear reports failed compensation and retains exact recovery bytes") {
+#ifdef _WIN32
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(paths, "locked.consumer", "uci_engine");
+    static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    const json previous = json::parse(std::ifstream(configuration));
+    const fs::path projection = configuration.parent_path() / "generated" / "context-projection.json";
+    const json previous_projection = json::parse(std::ifstream(projection));
+    const fs::path locator = paths.data_root / "locators" / "uci_engine.json";
+    const json previous_locator = json::parse(std::ifstream(locator));
+    // Source bytes remain readable for backup, but the real Windows handle
+    // denies deletion/replacement during both publication and compensation.
+    const HANDLE held = CreateFileW(configuration.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(held != INVALID_HANDLE_VALUE);
+    std::string failure;
+    try {
+        static_cast<void>(SetupEngine::import_path(paths, "uci_engine", {}, false, {}, true));
+    } catch (const std::exception& error) {
+        failure = error.what();
+    } catch (...) {
+        CloseHandle(held);
+        throw;
+    }
+    CloseHandle(held);
+    REQUIRE(failure.find("cannot atomically activate " + configuration.string()) == 0);
+    REQUIRE(failure.find("consumer rollback failed") != std::string::npos);
+    REQUIRE(failure.find("backup retained at") != std::string::npos);
+    fs::path backup;
+    const std::string prefix = configuration.filename().string() + ".import-rollback-";
+    for (const auto& entry : fs::directory_iterator(configuration.parent_path())) {
+        if (entry.path().filename().string().starts_with(prefix)) backup = entry.path();
+    }
+    REQUIRE_FALSE(backup.empty());
+    REQUIRE(failure.find(backup.string()) != std::string::npos);
+    REQUIRE(json::parse(std::ifstream(backup)) == previous);
+    REQUIRE(json::parse(std::ifstream(configuration)) == previous);
+    REQUIRE(json::parse(std::ifstream(projection)) == previous_projection);
+    REQUIRE(json::parse(std::ifstream(locator)) == previous_locator);
+    remove_locator_test_directory(root);
+#else
+    SKIP("native delete-sharing compensation falsifier requires Windows");
+#endif
+}
+
 TEST_CASE("clearing a managed-copy locator preserves its payload and receipt") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);

@@ -45,3 +45,18 @@ backups use the existing UUID generator, refuse a preexisting destination, and
 include the retained backup location in rollback/cleanup failure diagnostics.
 This preserves the distinction between a failed mutation and committed clear
 whose disposable backup could not be cleaned up.
+
+Compensation failures are independent facts, not a successful rollback. The
+original forward failure stays first; each failed consumer restoration names
+its target and recovery backup, retains recoverable prior bytes, and records
+`rollback_failed` rather than `restored` in the existing retained-write ledger.
+Backup and target boundaries validate before destructive recovery. Clear uses
+that existing retained-write route to keep consumer backups until commit, then
+cleans them separately; cleanup failure cannot restore the locator over already
+committed consumer state. Historical path-import success cleanup is unchanged.
+
+A deterministic Windows delete-sharing fixture denies replacement of the
+original config while allowing backup reads. It proves failed compensation is
+reported and exact prior bytes remain available; it does not claim that the
+locked original target was lost. Locator and generated-projection restoration
+are checked separately.
