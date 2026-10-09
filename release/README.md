@@ -58,6 +58,9 @@ Async verification/build failure cannot publish partial output or replace the
 prior completed output. Cleanup checks resolved ownership/containment and rejects
 reparse targets; old PID-named directories are not swept. If publication commits
 but old-output cleanup fails, the error states that commit and retained location.
+If publication fails and restoring the prior output also fails, the owned
+transaction retains the prior bytes for recovery. The reported first cause
+remains the publication failure, with rollback failure recorded separately.
 
 V3 complete output uses `arena_clean_build_result_v2` with normalized verified
 component inputs and exact lock/policy/mode identity. Historical v2 complete

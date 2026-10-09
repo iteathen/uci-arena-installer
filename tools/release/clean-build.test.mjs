@@ -4,6 +4,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -212,4 +214,52 @@ test('owned cleanup rejects outside roots and reparse targets without deleting f
   catch(error){if(error.code==='EPERM'){t.skip('platform does not permit test reparse creation');return;}throw error;}
   assert.throws(()=>removeOwnedTree(owner,link),/linked/);
   assert.equal(readFileSync(path.join(outside,'retain'),'utf8'),'foreign');
+});
+
+test('failed publication and rollback retain previous bytes and first publication failure', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'arena-rollback-retention-'));
+  t.after(() => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    rmSync(root, { recursive: true, force: true });
+  });
+  const output = path.join(root, 'dist');
+  transactionalOutput(output, ({ publishRoot }) => writeFileSync(path.join(publishRoot, 'old'), 'accepted'));
+  const publicationError = Error('publication rename failed');
+  const rollbackError = Error('rollback rename blocked');
+  let failure;
+  try { transactionalOutput(output, ({ publishRoot }) => {
+    writeFileSync(path.join(publishRoot, 'new'), 'candidate');
+  }, { rename: (source, target) => {
+    if (path.basename(source) === 'publish') throw publicationError;
+    if (path.basename(source) === 'previous') throw rollbackError;
+    renameSync(source, target);
+  } }); } catch (error) { failure = error; }
+  assert.equal(existsSync(output), false);
+  const transactions = readdirSync(root).filter(name => name.startsWith('.dist.transaction-'));
+  assert.equal(transactions.length, 1);
+  assert.equal(readFileSync(path.join(root, transactions[0], 'previous', 'old'), 'utf8'), 'accepted');
+  assert.equal(readFileSync(path.join(root, transactions[0], 'publish', 'new'), 'utf8'), 'candidate');
+  assert.ok(failure instanceof AggregateError);
+  assert.equal(failure.cause, publicationError);
+  assert.deepEqual(failure.errors, [publicationError, rollbackError]);
+  assert.match(failure.message, /rollback failed; retained/u);
+});
+
+test('failed publication restores prior output and cleans only its completed transaction', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'arena-restored-output-'));
+  t.after(() => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    rmSync(root, { recursive: true, force: true });
+  });
+  const output = path.join(root, 'dist');
+  transactionalOutput(output, ({ publishRoot }) => writeFileSync(path.join(publishRoot, 'old'), 'accepted'));
+  const publicationError = Error('publication rename failed');
+  assert.throws(() => transactionalOutput(output, ({ publishRoot }) => {
+    writeFileSync(path.join(publishRoot, 'new'), 'candidate');
+  }, { rename: (source, target) => {
+    if (path.basename(source) === 'publish') throw publicationError;
+    renameSync(source, target);
+  } }), error => error === publicationError);
+  assert.equal(readFileSync(path.join(output, 'old'), 'utf8'), 'accepted');
+  assert.deepEqual(readdirSync(root), ['dist']);
 });

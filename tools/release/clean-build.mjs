@@ -677,7 +677,7 @@ export function removeOwnedTree(ownerRoot,target){
   if(existsSync(resolved)){canonicalDirectory(resolved);rmSync(resolved,{recursive:true,force:true});}
 }
 
-export function transactionalOutput(outputRoot, producer) {
+export function transactionalOutput(outputRoot, producer, { rename = renameWithTransientRetry } = {}) {
   const output=path.resolve(outputRoot),parent=path.dirname(output);
   if(output===path.parse(output).root)throw Error('clean build output cannot be a filesystem root');
   mkdirSync(parent,{recursive:true});canonicalDirectory(parent);
@@ -694,18 +694,25 @@ export function transactionalOutput(outputRoot, producer) {
   const commit=result=>{
     const hadPrevious = existsSync(output);
     canonicalDirectory(transaction);canonicalDirectory(publish);canonicalDirectory(parent);
-    if(hadPrevious){canonicalDirectory(output);renameWithTransientRetry(output,previous);}
+    if(hadPrevious){canonicalDirectory(output);rename(output,previous);}
     try {
-      renameWithTransientRetry(publish, output);
+      rename(publish, output);
     } catch (error) {
       if (hadPrevious && existsSync(previous)) {
-        canonicalDirectory(previous);
-        if(existsSync(output)){retain=true;throw Error(`output changed during rollback; retained ${transaction}`);}
-        renameWithTransientRetry(previous, output);
+        // The previous output remains owned but must survive failed restoration.
+        retain = true;
+        try {
+          canonicalDirectory(previous);
+          if (existsSync(output)) throw Error('output changed during rollback');
+          rename(previous, output);
+          retain = false;
+        } catch (rollback) {
+          throw new AggregateError([error, rollback], `${error.message}; rollback failed; retained ${transaction}`, { cause: error });
+        }
       }
       throw error;
     }
-    if(hadPrevious){try{removeOwnedTree(transaction,previous);}catch(error){retain=true;throw Error(`output committed; previous output retained at ${transaction}: ${error.message}`);}}
+    if(hadPrevious){try{removeOwnedTree(transaction,previous);}catch(error){retain=true;throw Error(`output committed; cleanup failed; transaction retained at ${transaction}: ${error.message}`);}}
     return result;
   };
   const failed=error=>{try{cleanup();}catch(disposal){throw new AggregateError([error,disposal],`${error.message}; cleanup failed; retained ${transaction}`,{cause:error});}throw error;};
