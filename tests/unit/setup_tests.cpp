@@ -78,6 +78,41 @@ void remove_locator_test_directory(const fs::path& root) {
     fs::remove_all(arena::platform::filesystem_api_path(root));
 }
 
+#ifdef _WIN32
+std::jthread hold_transaction_journal_after_invocation(
+    const SetupPaths& paths, const fs::path& diagnostic_barrier,
+    bool& journal_locked, std::string& lock_failure) {
+    return std::jthread([paths, diagnostic_barrier, &journal_locked, &lock_failure](std::stop_token stop) {
+        HANDLE held = INVALID_HANDLE_VALUE;
+        try {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!fs::exists(diagnostic_barrier.string() + ".entered") &&
+                   std::chrono::steady_clock::now() < deadline && !stop.stop_requested()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (!fs::exists(diagnostic_barrier.string() + ".entered"))
+                throw std::runtime_error("fixture invocation barrier missing");
+            fs::path journal;
+            for (const auto& entry : fs::directory_iterator(paths.data_root / "transactions")) {
+                if (entry.path().extension() == ".json") {
+                    if (!journal.empty()) throw std::runtime_error("fixture journal selection is ambiguous");
+                    journal = entry.path();
+                }
+            }
+            if (journal.empty()) throw std::runtime_error("fixture journal missing");
+            held = CreateFileW(journal.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (held == INVALID_HANDLE_VALUE) throw std::runtime_error("fixture journal lock failed");
+            journal_locked = true;
+            std::ofstream(diagnostic_barrier.string() + ".release") << "release\n";
+            while (!stop.stop_requested()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } catch (const std::exception& error) { lock_failure = error.what(); }
+        if (held != INVALID_HANDLE_VALUE) CloseHandle(held);
+    });
+}
+#endif
+
 json component(const std::string& id, const std::vector<std::string>& dependencies = {}) {
     return {
         {"id", id},
@@ -2736,6 +2771,7 @@ TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
     std::string variant;
     bool succeeds = true;
     bool deny_safe_inactive = false;
+    bool deny_journal_replacement = false;
     SECTION("ready") { variant = "ready"; }
     SECTION("safe inactive") { variant = "safe_inactive"; }
     SECTION("safe inactive without permission") {
@@ -2755,6 +2791,13 @@ TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
         variant = "invalid_canary";
         succeeds = false;
     }
+#ifdef _WIN32
+    SECTION("persistent journal replacement failure preserves original cause") {
+        variant = "failed";
+        succeeds = false;
+        deny_journal_replacement = true;
+    }
+#endif
 
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -2769,6 +2812,11 @@ TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
     json manifest = json::parse(
         std::ifstream(installed_root / "arena-component.json"));
     json lifecycle_control = typed_lifecycle_control(component_id, variant);
+    const fs::path diagnostic_barrier = root / "diagnostic-barrier";
+    if (deny_journal_replacement) {
+        lifecycle_control["operations"]["install"]["arguments"].push_back("--diagnostic-barrier");
+        lifecycle_control["operations"]["install"]["arguments"].push_back(diagnostic_barrier.string());
+    }
     if (deny_safe_inactive) {
         lifecycle_control["operations"]["install"]["success_dispositions"] =
             json::array({"ready"});
@@ -2803,13 +2851,47 @@ TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
 
     if (!succeeds) {
         std::string failure_message;
+#ifdef _WIN32
+        bool journal_locked = false;
+        std::string lock_failure;
+        std::optional<std::jthread> journal_guard;
+        if (deny_journal_replacement) {
+            journal_guard.emplace(hold_transaction_journal_after_invocation(
+                paths, diagnostic_barrier, journal_locked, lock_failure));
+        }
+#endif
         try { static_cast<void>(SetupEngine::apply(json::object(), plan, paths, true, false)); }
         catch (const std::exception& error) { failure_message = error.what(); }
+#ifdef _WIN32
+        if (journal_guard) { journal_guard->request_stop(); journal_guard->join(); }
+#endif
         REQUIRE_FALSE(failure_message.empty());
-        REQUIRE(std::distance(fs::directory_iterator(paths.data_root / "transactions"),
-                              fs::directory_iterator{}) == 1);
-        const json failed_transaction = json::parse(std::ifstream(
-            fs::directory_iterator(paths.data_root / "transactions")->path()));
+        fs::path failed_journal;
+        for (const auto& entry : fs::directory_iterator(paths.data_root / "transactions")) {
+            if (entry.path().extension() == ".json") {
+                REQUIRE(failed_journal.empty());
+                failed_journal = entry.path();
+            }
+        }
+        REQUIRE_FALSE(failed_journal.empty());
+        const json failed_transaction = json::parse(std::ifstream(failed_journal));
+#ifdef _WIN32
+        if (deny_journal_replacement) {
+            REQUIRE(lock_failure.empty());
+            REQUIRE(journal_locked);
+            INFO(failure_message);
+            REQUIRE(failure_message.find("reason=fixture.failed; opaque setup fixture reason") != std::string::npos);
+            REQUIRE(failure_message.find("diagnostic journal persistence failed") != std::string::npos);
+            REQUIRE(failure_message.find("rollback failed:") == std::string::npos);
+            REQUIRE(failure_message.find("final transaction journal persistence failed") != std::string::npos);
+            REQUIRE(failure_message.find("final journal state not persisted") != std::string::npos);
+            REQUIRE(failed_transaction.at("provider_lifecycle_failures").empty());
+            REQUIRE(failed_transaction.at("state") == "running");
+            REQUIRE_FALSE(fs::exists(receipt_path));
+            remove_locator_test_directory(root);
+            return;
+        }
+#endif
         REQUIRE(failed_transaction.at("provider_lifecycle_failures").size() >= 1);
         const auto& failure = failed_transaction.at("provider_lifecycle_failures").at(0);
         REQUIRE(failure.at("result").at("disposition") == "failed");
@@ -2916,6 +2998,7 @@ TEST_CASE("provider startup control accepts the provider workspace root") {
 TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence") {
     bool safe_inactive = false;
     bool fail_resume = false;
+    bool deny_journal_replacement = false;
     std::string component_id;
     SECTION("live replacement resumes") {
         component_id = "replaceable.staged-lifecycle.consumer";
@@ -2928,6 +3011,13 @@ TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence"
         component_id = "replaceable.failed-resume.consumer";
         fail_resume = true;
     }
+#ifdef _WIN32
+    SECTION("journal failure retains original and real compensation failure") {
+        component_id = "replaceable.failed-resume.consumer";
+        fail_resume = true;
+        deny_journal_replacement = true;
+    }
+#endif
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
     static_cast<void>(write_mock_renderer_consumer(
@@ -2986,6 +3076,12 @@ TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence"
         typed_lifecycle_control(
             component_id, "ready",
             fail_resume ? "failed" : safe_inactive ? "safe_inactive" : "ready", true);
+    const fs::path diagnostic_barrier = root / "diagnostic-barrier";
+    if (deny_journal_replacement) {
+        auto& args = replacement_manifest["installer_integration"]["startup_control"]["operations"]["post_replace"]["arguments"];
+        args.push_back("--diagnostic-barrier");
+        args.push_back(diagnostic_barrier.string());
+    }
     std::ofstream(package_root / "arena-component.json", std::ios::binary)
         << replacement_manifest.dump(2);
     const fs::path archive = root / "staged-provider-1.0.0.tar.gz";
@@ -3020,8 +3116,31 @@ TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence"
     };
     if (fail_resume) {
         std::string failure_message;
+#ifdef _WIN32
+        bool journal_locked = false;
+        std::string lock_failure;
+        std::optional<std::jthread> journal_guard;
+        if (deny_journal_replacement) journal_guard.emplace(hold_transaction_journal_after_invocation(
+            paths, diagnostic_barrier, journal_locked, lock_failure));
+#endif
         try { static_cast<void>(SetupEngine::apply(json::object(), plan, paths, true, true)); }
         catch (const std::exception& error) { failure_message = error.what(); }
+#ifdef _WIN32
+        if (journal_guard) { journal_guard->request_stop(); journal_guard->join(); }
+        if (deny_journal_replacement) {
+            REQUIRE(lock_failure.empty());
+            REQUIRE(journal_locked);
+            INFO(failure_message);
+            REQUIRE(failure_message.starts_with("provider lifecycle operation failed: " + component_id +
+                                               "; reason=fixture.failed; opaque setup fixture reason"));
+            REQUIRE(failure_message.find("diagnostic journal persistence failed") != std::string::npos);
+            REQUIRE(failure_message.find("rollback failed: startup:") != std::string::npos);
+            REQUIRE(failure_message.find("final transaction journal persistence failed") != std::string::npos);
+            REQUIRE(failure_message.find("final journal state not persisted") != std::string::npos);
+            remove_locator_test_directory(root);
+            return;
+        }
+#endif
         REQUIRE(failure_message.find("fixture.failed") != std::string::npos);
         const auto transaction = json::parse(std::ifstream(
             fs::directory_iterator(paths.data_root / "transactions")->path()));

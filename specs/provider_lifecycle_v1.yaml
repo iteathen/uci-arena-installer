@@ -406,6 +406,10 @@ receipt_and_journal_projection:
       forward cause remains separate from compensation failures. Failure to
       persist this observation adds a controlled persistence failure notice to
       the original neutral cause rather than pretending it was retained.
+      If final transaction-journal activation also fails, its controlled notice
+      is appended to the already-composed forward/compensation error; neither
+      that first cause nor rollback failure is replaced by a write exception,
+      and final durable state is explicitly not claimed.
   new_receipt_startup: >
     On successful install or post_replace, receipt.startup is the serialized
     neutral arena_provider_lifecycle_result_v1. A committed receipt never stores

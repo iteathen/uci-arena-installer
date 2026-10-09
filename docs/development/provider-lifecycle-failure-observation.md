@@ -27,3 +27,10 @@ oversized tail, no-newline, nonzero exit, and forward/compensation tests qualify
 the repair. These are isolated synthetic providers. They do not establish the
 underlying cause of the retained failed .53 installation or perform an installed
 provider operation.
+
+A deterministic Windows fixture holds the actual transaction journal without
+DELETE sharing after the provider invocation starts. Both diagnostic and final
+journal activation then fail. The returned error preserves the original neutral
+cause and compensation failures, adds controlled persistence notices, and says
+the final journal state was not persisted. The prior journal remains unchanged;
+this result does not claim a durable rollback record.

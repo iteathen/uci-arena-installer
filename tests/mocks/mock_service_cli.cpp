@@ -277,6 +277,16 @@ int main(int argc, char** argv) {
                 : operation == "disable"       ? "uninstall"
                 : operation == "prepare_replace" ? "pre_replace"
                                                    : "post_replace";
+            const std::string diagnostic_barrier = option_value(argc, argv, "--diagnostic-barrier");
+            if (!diagnostic_barrier.empty()) {
+                std::ofstream(diagnostic_barrier + ".entered") << "entered\n";
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                while (!std::filesystem::exists(diagnostic_barrier + ".release") &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                if (!std::filesystem::exists(diagnostic_barrier + ".release")) return 25;
+            }
             const bool safe_inactive = variant == "safe_inactive";
             if (variant == "invalid_canary") {
                 std::cerr << "CANARY_STDERR_PRIVATE_TOKEN=secret\n";

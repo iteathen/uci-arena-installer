@@ -7139,7 +7139,17 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                                ? error.what()
                                : std::string(error.what()) + "; rollback failed: " +
                                      rollback_failure;
-        write_json_atomic(journal_path, journal);
+        try {
+            write_json_atomic(journal_path, journal);
+        } catch (const std::bad_alloc&) { throw; }
+        catch (const std::exception&) {
+            // The journal error already contains the authoritative forward cause
+            // and any compensation failures. Never replace it with a write error
+            // or imply that this final state reached durable journal authority.
+            throw std::runtime_error(journal.at("error").get<std::string>() +
+                                     "; final transaction journal persistence failed; "
+                                     "final journal state not persisted");
+        }
         if (!rollback_failure.empty()) {
             throw std::runtime_error(journal.at("error").get<std::string>());
         }
