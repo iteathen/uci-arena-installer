@@ -1,4 +1,5 @@
 #include "arena/application/installer/setup.hpp"
+#include "arena/domain/uuid.hpp"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -4040,6 +4041,10 @@ json refresh_provider_consumers(
                 throw std::runtime_error(
                     "generated import consumer path contains a symbolic-link boundary");
             }
+            if (fs::exists(write.path) && !fs::is_regular_file(write.path)) {
+                throw std::runtime_error(
+                    "generated import consumer target must be a regular file");
+            }
             fs::create_directories(write.path.parent_path());
             const bool existed = fs::is_regular_file(write.path);
             const fs::path backup = write.path.string() + ".import-rollback-" + transaction_id;
@@ -5410,7 +5415,59 @@ json SetupEngine::inventory(const SetupPaths& paths,
 
 json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
                               const fs::path& path, const bool managed_copy,
-                              const std::string& authority_mode) {
+                              const std::string& authority_mode, const bool clear) {
+    if (clear) {
+        if (!path.empty() || managed_copy || !authority_mode.empty()) {
+            throw std::runtime_error("locator clear excludes path, managed copy, and authority mode");
+        }
+        if (!valid_discovery_kind(kind) || kind == "restaurant") {
+            throw std::runtime_error("unsupported locator clear kind " + kind);
+        }
+        const fs::path locator = normalized_absolute(paths.data_root) /
+                                 "locators" / (kind + ".json");
+        if (contains_symbolic_link(locator) || fs::is_symlink(locator) ||
+            (fs::exists(locator) && !fs::is_regular_file(locator))) {
+            throw std::runtime_error("locator clear requires an unlinked regular saved locator");
+        }
+        const bool existed = fs::is_regular_file(locator);
+        const fs::path backup = locator.string() + ".clear-rollback-" + arena::domain::uuid_v7();
+        if (fs::exists(backup) || fs::is_symlink(backup)) {
+            throw std::runtime_error("locator clear backup already exists: " + backup.string());
+        }
+        if (existed) fs::rename(locator, backup);
+        json refreshed;
+        try {
+            refreshed = refresh_import_consumers(paths, kind);
+        } catch (const std::exception& failure) {
+            const std::string first_failure = failure.what();
+            if (existed) {
+                try {
+                    if (fs::exists(locator) || contains_symbolic_link(locator)) {
+                        throw std::runtime_error("locator changed during clear rollback");
+                    }
+                    fs::rename(backup, locator);
+                } catch (const std::exception& rollback) {
+                    throw std::runtime_error(first_failure + "; locator rollback failed: " +
+                                             rollback.what() + "; backup retained at " + backup.string());
+                }
+            }
+            throw;
+        }
+        if (existed) {
+            std::error_code cleanup;
+            fs::remove(backup, cleanup);
+            if (cleanup) {
+                throw std::runtime_error("locator clear committed; backup cleanup failed: " +
+                                         cleanup.message() + "; backup retained at " + backup.string());
+            }
+        }
+        return {{"schema", "arena_setup_import_result_v1"}, {"schema_version", 1},
+                {"kind", kind}, {"mode", "clear_saved_locator"}, {"state", "cleared"},
+                {"removed", existed}, {"refreshed_consumers", refreshed}};
+    }
+    if (path.empty()) {
+        throw std::runtime_error("import requires a path or explicit clear");
+    }
     const fs::path normalized = normalized_absolute(path);
     if (kind != "opening_book" && !authority_mode.empty()) {
         throw std::runtime_error("authority mode is supported only for opening_book");
