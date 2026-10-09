@@ -28,7 +28,8 @@ class CliProviderLifecycle final : public arena::ports::ProviderLifecycle {
             throw std::runtime_error("provider lifecycle deadline expired");
         }
         return process_supervisor_.run_json(
-            request.executable, request.working_directory, request.arguments, remaining);
+            request.executable, request.working_directory, request.arguments, remaining,
+            arena::ports::provider_lifecycle_raw_result_max_bytes);
     }
 
     arena::application::ProcessSupervisor& process_supervisor_;

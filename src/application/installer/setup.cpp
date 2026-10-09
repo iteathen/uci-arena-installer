@@ -4501,7 +4501,8 @@ ProviderLifecycleResult invoke_provider_lifecycle(
     const fs::path& staged_control_root = {},
     const std::string& staged_control_version = {},
     const fs::path& previous_root = {},
-    const fs::path& replacement_root = {}) {
+    const fs::path& replacement_root = {},
+    const std::function<void(const json&)>& retain_failure = {}) {
     const std::string component_id = receipt.at("component_id").get<std::string>();
     const bool staged_control = !staged_control_root.empty();
     const fs::path active_root = staged_control
@@ -4571,6 +4572,7 @@ ProviderLifecycleResult invoke_provider_lifecycle(
         arguments.push_back(normalized_absolute(replacement_root).string());
     }
     const std::string configuration_path = receipt.value("configuration_path", "");
+    bool configuration_argument_present = false;
     if (!configuration_path.empty()) {
         const fs::path configuration = normalized_absolute(configuration_path);
         const bool valid_configuration = within(provider_workspace.workspace, configuration) &&
@@ -4583,6 +4585,7 @@ ProviderLifecycleResult invoke_provider_lifecycle(
         if (valid_configuration) {
             arguments.push_back(control.configuration_flag);
             arguments.push_back(configuration.string());
+            configuration_argument_present = true;
         }
     }
     arena::application::ProcessSupervisor process_supervisor;
@@ -4602,8 +4605,29 @@ ProviderLifecycleResult invoke_provider_lifecycle(
         arena::ports::provider_lifecycle_timeout_default};
     auto result = lifecycle->invoke(request);
     if (result.disposition == ProviderLifecycleDisposition::failed) {
-        throw std::runtime_error("provider lifecycle operation failed: " +
-                                 component_id);
+        const auto bounded_path = [](const fs::path& path) {
+            const std::string value = path.string();
+            return value.size() <= 2048 ? value : std::string("path_omitted_over_bound");
+        };
+        const json observation{
+            {"request", {{"runtime", bounded_path(runtime)},
+                         {"controller_root", bounded_path(active_root)},
+                         {"staged_controller", staged_control},
+                         {"previous_root", bounded_path(previous_root)},
+                         {"replacement_root", bounded_path(replacement_root)},
+                         {"replacement_arguments_present", !previous_root.empty() && !replacement_root.empty()},
+                         {"configuration_argument_present", configuration_argument_present}}},
+            {"result", provider_lifecycle_result_to_json(result)}};
+        const std::string first_cause = "provider lifecycle operation failed: " + component_id +
+            "; reason=" + result.reason->id + "; " + result.reason->message;
+        if (retain_failure) {
+            try { retain_failure(observation); }
+            catch (const std::bad_alloc&) { throw; }
+            catch (const std::exception&) {
+                throw std::runtime_error(first_cause + "; diagnostic journal persistence failed");
+            }
+        }
+        throw std::runtime_error(first_cause);
     }
     return result;
 }
@@ -6007,6 +6031,30 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     std::set<std::string> migrated_locator_kinds;
     journal["consumer_refresh_writes"] = json::array();
     journal["startup_quiescence"] = json::array();
+    journal["provider_lifecycle_failures"] = json::array();
+    journal["provider_lifecycle_failures_omitted"] = 0;
+    bool compensating_lifecycle = false;
+    const auto retain_lifecycle_failure = [&](const json& observation) {
+        if (journal["provider_lifecycle_failures"].size() < 128) {
+            json retained = observation;
+            retained["phase"] = compensating_lifecycle ? "compensation" : "forward";
+            journal["provider_lifecycle_failures"].push_back(std::move(retained));
+        } else {
+            journal["provider_lifecycle_failures_omitted"] =
+                journal["provider_lifecycle_failures_omitted"].get<std::uint64_t>() + 1;
+        }
+        write_json_atomic(journal_path, journal);
+    };
+    const auto invoke_lifecycle = [&](const SetupPaths& call_paths, const json& receipt,
+                                     ProviderLifecycleOperation operation,
+                                     bool trusted = false, const fs::path& staged_root = fs::path{},
+                                     const std::string& staged_version = std::string{},
+                                     const fs::path& previous = fs::path{},
+                                     const fs::path& replacement = fs::path{}) {
+        return invoke_provider_lifecycle(call_paths, receipt, operation, trusted,
+                                         staged_root, staged_version, previous, replacement,
+                                         retain_lifecycle_failure);
+    };
     std::map<std::string, fs::path> staged_roots;
     std::map<std::string, std::string> staged_versions;
     std::set<std::string> quiesced_startup_components;
@@ -6173,12 +6221,12 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             journal["startup_quiescence"].push_back(std::move(transition));
             write_json_atomic(journal_path, journal);
             const ProviderLifecycleResult lifecycle_result = replacement_lifecycle
-                ? invoke_provider_lifecycle(
+                ? invoke_lifecycle(
                       paths, previous, ProviderLifecycleOperation::pre_replace,
                       true, staged ? control_root : fs::path{},
                       staged ? control_version : std::string{}, previous_root,
                       replacement_root)
-                : invoke_provider_lifecycle(
+                : invoke_lifecycle(
                       paths, previous, ProviderLifecycleOperation::uninstall, true);
             journal["startup_quiescence"].back()["lifecycle_result"] =
                 provider_lifecycle_result_to_json(lifecycle_result);
@@ -6501,7 +6549,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 action.value("enabled", true) && !credential_gated_startup &&
                 supports_startup_capability(receipt, "startup_install")) {
                 const json startup = provider_lifecycle_result_to_json(
-                    invoke_provider_lifecycle(
+                    invoke_lifecycle(
                         paths, receipt, ProviderLifecycleOperation::install));
                 journal["actions"].back()["startup_installed"] = true;
                 journal["actions"].back()["lifecycle_result"] = startup;
@@ -6548,13 +6596,13 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
             write_json_atomic(journal_path, journal);
             ProviderLifecycleResult lifecycle_result;
             if (transition.at("mode") == "pre_replace") {
-                lifecycle_result = invoke_provider_lifecycle(
+                lifecycle_result = invoke_lifecycle(
                     paths, receipt, ProviderLifecycleOperation::post_replace,
                     true, {}, {},
                     transition.at("previous_root").get<std::string>(),
                     receipt.at("active_root").get<std::string>());
             } else {
-                lifecycle_result = invoke_provider_lifecycle(
+                lifecycle_result = invoke_lifecycle(
                     paths, receipt, ProviderLifecycleOperation::install, true);
             }
             const json startup =
@@ -6661,6 +6709,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         }
         fs::remove_all(staging_root / transaction_id, ignored);
     } catch (const std::exception& error) {
+        compensating_lifecycle = true;
         std::error_code rollback_error;
         std::string startup_rollback_failure;
         std::string knowledge_rollback_failure;
@@ -6693,13 +6742,13 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     if (transition.at("mode") == "pre_replace") {
                         const fs::path current_root =
                             current.at("active_root").get<std::string>();
-                        static_cast<void>(invoke_provider_lifecycle(
+                        static_cast<void>(invoke_lifecycle(
                             paths, current,
                             ProviderLifecycleOperation::pre_replace, true, {}, {},
                             current_root,
                             transition.at("previous_root").get<std::string>()));
                     } else {
-                        static_cast<void>(invoke_provider_lifecycle(
+                        static_cast<void>(invoke_lifecycle(
                             paths, current,
                             ProviderLifecycleOperation::uninstall, true));
                     }
@@ -6766,7 +6815,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                                                 target / "arena-component.json")
                                                 ? target
                                                 : staged;
-                    static_cast<void>(invoke_provider_lifecycle(
+                    static_cast<void>(invoke_lifecycle(
                         paths, previous, ProviderLifecycleOperation::pre_replace,
                         true, control_root,
                         action->at("staged_startup_control_version").get<std::string>(),
@@ -6796,7 +6845,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                 try {
                     const fs::path receipt_path = action->at("receipt_path").get<std::string>();
                     if (fs::is_regular_file(receipt_path)) {
-                        static_cast<void>(invoke_provider_lifecycle(
+                        static_cast<void>(invoke_lifecycle(
                             paths, read_json(receipt_path),
                             ProviderLifecycleOperation::uninstall));
                     }
@@ -6989,7 +7038,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                         const json& previous = action->at("previous_startup_receipt");
                         const fs::path restored_root =
                             previous.at("active_root").get<std::string>();
-                        static_cast<void>(invoke_provider_lifecycle(
+                        static_cast<void>(invoke_lifecycle(
                             paths, previous, ProviderLifecycleOperation::post_replace,
                             true,
                             rollback_startup_control_root,
@@ -7001,7 +7050,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             rollback_error.clear();
                         }
                     } else {
-                        static_cast<void>(invoke_provider_lifecycle(
+                        static_cast<void>(invoke_lifecycle(
                             paths, action->at("previous_startup_receipt"),
                             ProviderLifecycleOperation::install, true));
                     }
@@ -7034,7 +7083,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                     }
                     const fs::path restored_root =
                         previous.at("active_root").get<std::string>();
-                    lifecycle_result = invoke_provider_lifecycle(
+                    lifecycle_result = invoke_lifecycle(
                         paths, previous, ProviderLifecycleOperation::post_replace,
                         true, control_root,
                         control_root.empty()
@@ -7042,7 +7091,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                             : transition.at("control_version").get<std::string>(),
                         restored_root, restored_root);
                 } else {
-                    lifecycle_result = invoke_provider_lifecycle(
+                    lifecycle_result = invoke_lifecycle(
                         paths, previous, ProviderLifecycleOperation::install, true);
                 }
                 const json startup =
@@ -7090,7 +7139,17 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                                ? error.what()
                                : std::string(error.what()) + "; rollback failed: " +
                                      rollback_failure;
-        write_json_atomic(journal_path, journal);
+        try {
+            write_json_atomic(journal_path, journal);
+        } catch (const std::bad_alloc&) { throw; }
+        catch (const std::exception&) {
+            // The journal error already contains the authoritative forward cause
+            // and any compensation failures. Never replace it with a write error
+            // or imply that this final state reached durable journal authority.
+            throw std::runtime_error(journal.at("error").get<std::string>() +
+                                     "; final transaction journal persistence failed; "
+                                     "final journal state not persisted");
+        }
         if (!rollback_failure.empty()) {
             throw std::runtime_error(journal.at("error").get<std::string>());
         }

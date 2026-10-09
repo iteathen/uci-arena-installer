@@ -1,4 +1,5 @@
 #include "arena/ports/native_process.hpp"
+#include "arena/ports/process_command_failure.hpp"
 
 #define NOMINMAX
 #include <windows.h>
@@ -7,6 +8,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -84,6 +86,11 @@ struct NativeProcess::Impl {
     std::uint64_t process_id{};
     std::uint64_t dropped{};
     bool reader_finished{true};
+    NativeProcessOutputMode output_mode{NativeProcessOutputMode::merged};
+    std::optional<std::uint64_t> maximum_stdout_bytes;
+    std::uint64_t stdout_bytes{};
+    bool output_limit{};
+    std::optional<std::uint32_t> final_exit_code;
 
     ~Impl() {
         if (reader.joinable()) {
@@ -128,6 +135,15 @@ struct NativeProcess::Impl {
         char buffer[4096];
         DWORD read = 0;
         while (ReadFile(stdout_read, buffer, sizeof(buffer), &read, nullptr) && read != 0) {
+            {
+                std::scoped_lock lock(mutex);
+                stdout_bytes = std::min(std::numeric_limits<std::uint64_t>::max() - read,
+                                        stdout_bytes) + read;
+                if (maximum_stdout_bytes && stdout_bytes > *maximum_stdout_bytes) {
+                    output_limit = true;
+                    continue; // Drain without retaining any more untrusted bytes.
+                }
+            }
             pending.append(buffer, read);
             std::size_t newline = 0;
             while ((newline = pending.find('\n')) != std::string::npos) {
@@ -158,7 +174,9 @@ NativeProcess::~NativeProcess() {
 void NativeProcess::start(
     const std::filesystem::path& executable,
     const std::filesystem::path& working_directory,
-    const std::vector<std::string>& arguments) {
+    const std::vector<std::string>& arguments,
+    NativeProcessOutputMode output_mode,
+    std::optional<std::uint64_t> maximum_stdout_bytes) {
     if (running()) {
         throw std::runtime_error("process is already running");
     }
@@ -170,11 +188,14 @@ void NativeProcess::start(
     };
     HANDLE stdin_read = nullptr;
     HANDLE stdout_write = nullptr;
+    HANDLE stderr_sink = nullptr;
     if (!CreatePipe(&stdin_read, &impl_->stdin_write, &security, 0) ||
         !CreatePipe(&impl_->stdout_read, &stdout_write, &security, 0)) {
+        const DWORD error = GetLastError();
         close_handle(stdin_read);
         close_handle(stdout_write);
-        throw std::runtime_error("failed to create process pipes");
+        throw ProcessCommandFailure(ProcessCommandFailureKind::start_failed, 0,
+                                    std::nullopt, error);
     }
     SetHandleInformation(impl_->stdin_write, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(impl_->stdout_read, HANDLE_FLAG_INHERIT, 0);
@@ -191,7 +212,18 @@ void NativeProcess::start(
     startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdInput = stdin_read;
     startup.hStdOutput = stdout_write;
-    startup.hStdError = stdout_write;
+    if (output_mode == NativeProcessOutputMode::machine_stdout) {
+        stderr_sink = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (stderr_sink == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            close_handle(stdin_read);
+            close_handle(stdout_write);
+            throw ProcessCommandFailure(ProcessCommandFailureKind::start_failed, 0,
+                                        std::nullopt, error);
+        }
+    }
+    startup.hStdError = stderr_sink != nullptr ? stderr_sink : stdout_write;
     PROCESS_INFORMATION process_info{};
     std::wstring working_directory_wide = working_directory.wstring();
 
@@ -206,13 +238,15 @@ void NativeProcess::start(
         working_directory_wide.c_str(),
         &startup,
         &process_info);
+    const DWORD create_error = created ? 0 : GetLastError();
     close_handle(stdin_read);
     close_handle(stdout_write);
+    close_handle(stderr_sink);
     if (!created) {
         close_handle(impl_->stdin_write);
         close_handle(impl_->stdout_read);
-        throw std::runtime_error("failed to launch process, Windows error " +
-                                 std::to_string(GetLastError()));
+        throw ProcessCommandFailure(ProcessCommandFailureKind::start_failed, 0,
+                                    std::nullopt, create_error);
     }
 
     impl_->job = CreateJobObjectW(nullptr, nullptr);
@@ -245,6 +279,11 @@ void NativeProcess::start(
         impl_->lines.clear();
         impl_->dropped = 0;
         impl_->reader_finished = false;
+        impl_->output_mode = output_mode;
+        impl_->maximum_stdout_bytes = maximum_stdout_bytes;
+        impl_->stdout_bytes = 0;
+        impl_->output_limit = false;
+        impl_->final_exit_code.reset();
     }
     ResumeThread(impl_->thread);
     impl_->reader = std::thread([this] { impl_->read_output(); });
@@ -295,6 +334,24 @@ std::uint64_t NativeProcess::dropped_observational_lines() const {
     return impl_->dropped;
 }
 
+std::uint64_t NativeProcess::captured_stdout_bytes() const {
+    std::scoped_lock lock(impl_->mutex);
+    return impl_->stdout_bytes;
+}
+
+bool NativeProcess::stdout_limit_exceeded() const {
+    std::scoped_lock lock(impl_->mutex);
+    return impl_->output_limit;
+}
+
+std::optional<std::uint32_t> NativeProcess::exit_code() const {
+    if (impl_->process != nullptr) {
+        DWORD code = 0;
+        if (GetExitCodeProcess(impl_->process, &code) && code != STILL_ACTIVE) return code;
+    }
+    return impl_->final_exit_code;
+}
+
 void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
     if (impl_->process == nullptr) {
         return;
@@ -310,6 +367,7 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
             WaitForSingleObject(impl_->process, 2000);
         }
     }
+    impl_->final_exit_code = exit_code();
     close_handle(impl_->stdin_write);
     if (impl_->reader.joinable()) {
         impl_->reader.join();

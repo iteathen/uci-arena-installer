@@ -4,6 +4,7 @@
 #include "arena/ports/provider_lifecycle.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include "arena/domain/uuid.hpp"
 
 #include <array>
 #include <chrono>
@@ -92,7 +93,7 @@ class FakeLifecycle final : public ProviderLifecycle {
         ++calls;
         deadline = supplied_deadline;
         if (throw_allocation) throw std::bad_alloc{};
-        if (throw_runtime) throw std::runtime_error("adapter failed");
+        if (throw_runtime) throw std::runtime_error("CANARY_EXCEPTION_PRIVATE_TOKEN=secret");
         return raw;
     }
 };
@@ -204,11 +205,9 @@ nlohmann::json typed_v3_control(const bool replacement = false) {
 class TemporaryDirectory final {
   public:
     TemporaryDirectory() {
-        root_ = std::filesystem::temp_directory_path() /
-                ("arena-provider-lifecycle-" +
-                 std::to_string(std::chrono::steady_clock::now()
-                                    .time_since_epoch()
-                                    .count()));
+        parent_ = std::filesystem::canonical(std::filesystem::temp_directory_path());
+        owned_name_ = "arena-provider-lifecycle-" + arena::domain::uuid_v7();
+        root_ = parent_ / owned_name_;
         if (!std::filesystem::create_directory(root_)) {
             throw std::runtime_error("failed to create provider lifecycle test directory");
         }
@@ -216,6 +215,12 @@ class TemporaryDirectory final {
 
     ~TemporaryDirectory() {
         std::error_code ignored;
+        const auto status = std::filesystem::symlink_status(root_, ignored);
+        if (ignored || std::filesystem::is_symlink(status) ||
+            !std::filesystem::is_directory(status) || !root_.is_absolute() ||
+            root_.filename() != owned_name_ || root_.parent_path() != parent_) return;
+        const auto resolved = std::filesystem::canonical(root_, ignored);
+        if (ignored || resolved != root_ || resolved.parent_path() != parent_) return;
         std::filesystem::remove_all(root_, ignored);
     }
 
@@ -223,6 +228,8 @@ class TemporaryDirectory final {
 
   private:
     std::filesystem::path root_;
+    std::filesystem::path parent_;
+    std::string owned_name_;
 };
 
 std::string operation_argument(const ProviderLifecycleOperation operation) {
@@ -318,6 +325,25 @@ TEST_CASE("CLI ProviderLifecycle transports safe-inactive and failed typed resul
     REQUIRE(failed.reason);
     CHECK(failed.reason->id == "fixture.failed");
     CHECK(invocation_count(directory) == 3);
+}
+
+TEST_CASE("CLI ProviderLifecycle separates untrusted stderr and retains safe parse cause") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor supervisor;
+    auto lifecycle = arena::adapters::make_cli_provider_lifecycle(supervisor);
+    SECTION("stderr warning cannot corrupt exact stdout JSON") {
+        const auto actual = lifecycle->invoke(cli_request(
+            directory, ProviderLifecycleOperation::install, "stderr_warning"));
+        REQUIRE(actual.disposition == ProviderLifecycleDisposition::ready);
+    }
+    SECTION("malformed stdout stays failed without copying canaries") {
+        const auto actual = lifecycle->invoke(cli_request(
+            directory, ProviderLifecycleOperation::install, "invalid_canary"));
+        require_failure(actual, "adapter_exception");
+        REQUIRE(actual.reason->message.find("category=invalid_json") != std::string::npos);
+        REQUIRE(actual.reason->message.find("CANARY") == std::string::npos);
+        REQUIRE(actual.reason->message.find("stderr=discarded") != std::string::npos);
+    }
 }
 
 TEST_CASE("CLI ProviderLifecycle leaves raw semantic failures to the neutral base") {
@@ -596,10 +622,80 @@ TEST_CASE("ProviderLifecycle maps ordinary adapter exceptions and propagates all
     FakeLifecycle lifecycle;
     lifecycle.throw_runtime = true;
     require_failure(lifecycle.invoke(request()), "adapter_exception");
-    CHECK(lifecycle.calls == 1);
+    REQUIRE(lifecycle.invoke(request()).reason->message ==
+            "category=adapter_exception; detail=untrusted_exception_redacted");
+    CHECK(lifecycle.calls == 2);
     lifecycle.throw_runtime = false;
     lifecycle.throw_allocation = true;
     CHECK_THROWS_AS(lifecycle.invoke(request()), std::bad_alloc);
+}
+
+TEST_CASE("CLI ProviderLifecycle rejects mixed stdout and overflow without raw bytes") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor supervisor;
+    auto lifecycle = arena::adapters::make_cli_provider_lifecycle(supervisor);
+    std::string variant;
+    std::string category;
+    SECTION("stdout warning") { variant = "stdout_warning"; category = "invalid_json"; }
+    SECTION("single oversized frame") { variant = "oversized"; category = "output_limit"; }
+    SECTION("valid JSON prefix before oversized tail") { variant = "oversized_tail"; category = "output_limit"; }
+    const auto actual = lifecycle->invoke(cli_request(directory, ProviderLifecycleOperation::install, variant));
+    require_failure(actual, "adapter_exception");
+    REQUIRE(actual.reason->message.find("category=" + category) != std::string::npos);
+    REQUIRE(actual.reason->message.find("stdout_bytes=") != std::string::npos);
+    REQUIRE(provider_lifecycle_result_to_json(actual).dump().find("CANARY") == std::string::npos);
+}
+
+TEST_CASE("CLI ProviderLifecycle preserves declared neutral result rather than adding an exit gate") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor supervisor;
+    auto lifecycle = arena::adapters::make_cli_provider_lifecycle(supervisor);
+    SECTION("declared ready frame") {
+        REQUIRE(lifecycle->invoke(cli_request(directory, ProviderLifecycleOperation::install,
+                                             "nonzero_json")).disposition == ProviderLifecycleDisposition::ready);
+    }
+    SECTION("declared failed frame retains original reason") {
+        const auto actual = lifecycle->invoke(cli_request(directory, ProviderLifecycleOperation::install,
+                                                         "failed_nonzero"));
+        require_failure(actual, "fixture.failed");
+        REQUIRE(actual.reason->message == "opaque fixture reason");
+    }
+    SECTION("nonzero exit without frame retains numeric cause") {
+        const auto actual = lifecycle->invoke(cli_request(directory, ProviderLifecycleOperation::install,
+                                                         "nonzero"));
+        require_failure(actual, "adapter_exception");
+        REQUIRE(actual.reason->message.find("exit_code=44") != std::string::npos);
+        REQUIRE(actual.reason->message.find("category=nonzero_exit") != std::string::npos);
+    }
+}
+
+TEST_CASE("CLI ProviderLifecycle admits exact maximum and final no-newline JSON") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor supervisor;
+    auto lifecycle = arena::adapters::make_cli_provider_lifecycle(supervisor);
+    std::string variant;
+    SECTION("maximum exact bytes") { variant = "exact_maximum"; }
+    SECTION("no newline") { variant = "no_newline"; }
+    const auto actual = lifecycle->invoke(cli_request(directory, ProviderLifecycleOperation::install, variant));
+    REQUIRE(actual.disposition == ProviderLifecycleDisposition::ready);
+}
+
+TEST_CASE("CLI ProviderLifecycle exposes only safe numeric launch failure context") {
+    TemporaryDirectory directory;
+    arena::application::ProcessSupervisor supervisor;
+    auto lifecycle = arena::adapters::make_cli_provider_lifecycle(supervisor);
+    auto candidate = cli_request(directory, ProviderLifecycleOperation::install, "ready");
+    candidate.executable = directory.path() / "CANARY_PRIVATE_PATH_missing.exe";
+    const auto actual = lifecycle->invoke(candidate);
+    require_failure(actual, "adapter_exception");
+    REQUIRE(actual.reason->message.find("CANARY") == std::string::npos);
+#ifdef _WIN32
+    REQUIRE(actual.reason->message.find("category=start_failed") != std::string::npos);
+    REQUIRE(actual.reason->message.find("os_code=2;") != std::string::npos);
+#else
+    REQUIRE(actual.reason->message.find("category=nonzero_exit") != std::string::npos);
+    REQUIRE(actual.reason->message.find("exit_code=127;") != std::string::npos);
+#endif
 }
 
 TEST_CASE("ProviderLifecycle accepts exact ready results for all operations") {

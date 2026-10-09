@@ -30,7 +30,8 @@ class ProcessSupervisor final {
         const std::filesystem::path& executable,
         const std::filesystem::path& working_directory,
         const std::vector<std::string>& arguments,
-        std::chrono::milliseconds timeout = std::chrono::seconds(15)) const;
+        std::chrono::milliseconds timeout = std::chrono::seconds(15),
+        std::optional<std::uint64_t> maximum_stdout_bytes = std::nullopt) const;
 
   private:
     mutable std::mutex mutex_;
