@@ -1,4 +1,5 @@
 #include "arena/ports/native_process.hpp"
+#include "arena/ports/process_command_failure.hpp"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -12,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 
@@ -29,6 +31,12 @@ struct NativeProcess::Impl {
     std::deque<std::string> lines;
     std::uint64_t dropped{};
     bool reader_finished{true};
+    NativeProcessOutputMode output_mode{NativeProcessOutputMode::merged};
+    std::optional<std::uint64_t> maximum_stdout_bytes;
+    std::uint64_t stdout_bytes{};
+    bool output_limit{};
+    mutable bool reaped{};
+    mutable std::optional<std::uint32_t> final_exit_code;
 
     void close_descriptors() {
         if (stdin_fd >= 0) {
@@ -71,6 +79,16 @@ struct NativeProcess::Impl {
         char buffer[4096];
         ssize_t count = 0;
         while ((count = read(stdout_fd, buffer, sizeof(buffer))) > 0) {
+            {
+                std::scoped_lock lock(mutex);
+                const auto bytes = static_cast<std::uint64_t>(count);
+                stdout_bytes = std::min(std::numeric_limits<std::uint64_t>::max() - bytes,
+                                        stdout_bytes) + bytes;
+                if (maximum_stdout_bytes && stdout_bytes > *maximum_stdout_bytes) {
+                    output_limit = true;
+                    continue;
+                }
+            }
             pending.append(buffer, static_cast<std::size_t>(count));
             std::size_t newline = 0;
             while ((newline = pending.find('\n')) != std::string::npos) {
@@ -101,7 +119,9 @@ NativeProcess::~NativeProcess() {
 void NativeProcess::start(
     const std::filesystem::path& executable,
     const std::filesystem::path& working_directory,
-    const std::vector<std::string>& arguments) {
+    const std::vector<std::string>& arguments,
+    NativeProcessOutputMode output_mode,
+    std::optional<std::uint64_t> maximum_stdout_bytes) {
     if (running()) {
         throw std::runtime_error("process is already running");
     }
@@ -124,10 +144,14 @@ void NativeProcess::start(
         setpgid(0, 0);
         if (chdir(working_directory.c_str()) != 0 ||
             dup2(stdin_pipe[0], STDIN_FILENO) < 0 ||
-            dup2(stdout_pipe[1], STDOUT_FILENO) < 0 ||
-            dup2(stdout_pipe[1], STDERR_FILENO) < 0) {
+            dup2(stdout_pipe[1], STDOUT_FILENO) < 0) {
             _exit(126);
         }
+        const int stderr_fd = output_mode == NativeProcessOutputMode::machine_stdout
+                                  ? open("/dev/null", O_WRONLY | O_CLOEXEC)
+                                  : stdout_pipe[1];
+        if (stderr_fd < 0 || dup2(stderr_fd, STDERR_FILENO) < 0) _exit(126);
+        if (stderr_fd != stdout_pipe[1]) close(stderr_fd);
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
@@ -157,6 +181,12 @@ void NativeProcess::start(
         impl_->lines.clear();
         impl_->dropped = 0;
         impl_->reader_finished = false;
+        impl_->output_mode = output_mode;
+        impl_->maximum_stdout_bytes = maximum_stdout_bytes;
+        impl_->stdout_bytes = 0;
+        impl_->output_limit = false;
+        impl_->reaped = false;
+        impl_->final_exit_code.reset();
     }
     impl_->reader = std::thread([this] { impl_->read_output(); });
 }
@@ -191,11 +221,15 @@ std::optional<std::string> NativeProcess::read_line(std::chrono::milliseconds ti
 }
 
 bool NativeProcess::running() const {
-    if (impl_->process_id <= 0) {
+    if (impl_->process_id <= 0 || impl_->reaped) {
         return false;
     }
     int status = 0;
     const pid_t result = waitpid(impl_->process_id, &status, WNOHANG);
+    if (result == impl_->process_id) {
+        impl_->reaped = true;
+        if (WIFEXITED(status)) impl_->final_exit_code = WEXITSTATUS(status);
+    }
     return result == 0;
 }
 
@@ -206,6 +240,21 @@ std::uint64_t NativeProcess::pid() const {
 std::uint64_t NativeProcess::dropped_observational_lines() const {
     std::scoped_lock lock(impl_->mutex);
     return impl_->dropped;
+}
+
+std::uint64_t NativeProcess::captured_stdout_bytes() const {
+    std::scoped_lock lock(impl_->mutex);
+    return impl_->stdout_bytes;
+}
+
+bool NativeProcess::stdout_limit_exceeded() const {
+    std::scoped_lock lock(impl_->mutex);
+    return impl_->output_limit;
+}
+
+std::optional<std::uint32_t> NativeProcess::exit_code() const {
+    static_cast<void>(running());
+    return impl_->final_exit_code;
 }
 
 void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
@@ -223,7 +272,11 @@ void NativeProcess::stop(std::chrono::milliseconds graceful_timeout) {
         }
         if (running()) {
             kill(-impl_->process_id, SIGKILL);
-            waitpid(impl_->process_id, nullptr, 0);
+            int status = 0;
+            if (waitpid(impl_->process_id, &status, 0) == impl_->process_id) {
+                impl_->reaped = true;
+                if (WIFEXITED(status)) impl_->final_exit_code = WEXITSTATUS(status);
+            }
         }
     }
     if (impl_->stdin_fd >= 0) {

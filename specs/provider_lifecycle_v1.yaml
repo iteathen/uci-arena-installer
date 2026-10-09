@@ -221,6 +221,12 @@ neutral_enforcement:
     expected_operational_failure: failed_result
     std_exception_from_adapter_or_parser: failed_result
     allocation_or_process_fatal_failure: may_propagate
+  transport_diagnostics:
+    - The CLI adapter captures stdout only and rejects anything other than one complete JSON document.
+    - Lifecycle stdout capture is bounded by raw_result_bytes before parsing, including a single frame without a newline; overflow or dropped bytes cannot be parsed as a valid prefix.
+    - Stderr is directed to the operating-system discard sink; its contents, counts, and absence are not diagnostic authority.
+    - adapter_exception retains only closed transport category and numeric stdout-byte, exit-code, or OS-code facts when actually available.
+    - Arbitrary adapter exception text is replaced with an explicit untrusted_exception_redacted notice; child bytes and their hashes never enter reasons or journals.
   rule: >
     Callers branch only on disposition and operation. They may present a bounded
     reason but never interpret its id to choose Installer behavior.
@@ -385,6 +391,21 @@ cli_adapter:
     - retry or provider remediation
 
 receipt_and_journal_projection:
+  failed_invocation_observation:
+    field: provider_lifecycle_failures
+    maximum_records: 128
+    omitted_count: provider_lifecycle_failures_omitted
+    rule: >
+      Before a failed lifecycle result is thrown, Apply atomically retains its
+      existing neutral serialized result and a forward/compensation phase. The
+      request projection contains runtime/controller/previous/replacement roots
+      (each at most 2048 bytes, otherwise an explicit omission marker), staged
+      controller and replacement/configuration-argument presence flags only.
+      Ordered argv, configuration contents/paths, raw output, private stores,
+      credentials and arbitrary exception text are not retained. The first
+      forward cause remains separate from compensation failures. Failure to
+      persist this observation adds a controlled persistence failure notice to
+      the original neutral cause rather than pretending it was retained.
   new_receipt_startup: >
     On successful install or post_replace, receipt.startup is the serialized
     neutral arena_provider_lifecycle_result_v1. A committed receipt never stores

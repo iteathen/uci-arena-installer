@@ -2751,6 +2751,10 @@ TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
         variant = "malformed";
         succeeds = false;
     }
+    SECTION("untrusted parse failure") {
+        variant = "invalid_canary";
+        succeeds = false;
+    }
 
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -2798,12 +2802,39 @@ TEST_CASE("typed v3 install stores only neutral lifecycle evidence") {
     };
 
     if (!succeeds) {
-        REQUIRE_THROWS(
-            SetupEngine::apply(json::object(), plan, paths, true, false));
+        std::string failure_message;
+        try { static_cast<void>(SetupEngine::apply(json::object(), plan, paths, true, false)); }
+        catch (const std::exception& error) { failure_message = error.what(); }
+        REQUIRE_FALSE(failure_message.empty());
+        REQUIRE(std::distance(fs::directory_iterator(paths.data_root / "transactions"),
+                              fs::directory_iterator{}) == 1);
+        const json failed_transaction = json::parse(std::ifstream(
+            fs::directory_iterator(paths.data_root / "transactions")->path()));
+        REQUIRE(failed_transaction.at("provider_lifecycle_failures").size() >= 1);
+        const auto& failure = failed_transaction.at("provider_lifecycle_failures").at(0);
+        REQUIRE(failure.at("result").at("disposition") == "failed");
+        REQUIRE(failure.at("result").at("component_id") == component_id);
+        REQUIRE(failure.at("request").at("runtime").is_string());
+        REQUIRE(failure.at("request").at("controller_root").is_string());
+        REQUIRE_FALSE(failure.at("request").contains("arguments"));
+        REQUIRE(failure.at("phase") == "forward");
+        REQUIRE(failure.at("request").at("configuration_argument_present") == true);
+        REQUIRE(failed_transaction.dump().find("CANARY") == std::string::npos);
+        REQUIRE(failure_message.find("CANARY") == std::string::npos);
+        if (variant == "invalid_canary") {
+            REQUIRE(failure.at("result").at("reason").at("message").get<std::string>().find(
+                        "category=invalid_json") != std::string::npos);
+            REQUIRE(failure_message.find("category=invalid_json") != std::string::npos);
+        }
+        if (variant == "failed") {
+            REQUIRE(failure.at("result").at("reason").at("id") == "fixture.failed");
+            REQUIRE(failure.at("result").at("reason").at("message") ==
+                    "opaque setup fixture reason");
+        }
         REQUIRE_FALSE(fs::exists(receipt_path));
         REQUIRE_FALSE(fs::exists(
             paths.install_root / "components" / component_id / "1.0.0"));
-        fs::remove_all(root);
+        remove_locator_test_directory(root);
         return;
     }
 
@@ -2884,6 +2915,7 @@ TEST_CASE("provider startup control accepts the provider workspace root") {
 
 TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence") {
     bool safe_inactive = false;
+    bool fail_resume = false;
     std::string component_id;
     SECTION("live replacement resumes") {
         component_id = "replaceable.staged-lifecycle.consumer";
@@ -2891,6 +2923,10 @@ TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence"
     SECTION("declared safe inactive replacement remains inactive") {
         component_id = "replaceable.safe-inactive.consumer";
         safe_inactive = true;
+    }
+    SECTION("forward and compensation failures retain distinct neutral causes") {
+        component_id = "replaceable.failed-resume.consumer";
+        fail_resume = true;
     }
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
@@ -2949,7 +2985,7 @@ TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence"
     replacement_manifest["installer_integration"]["startup_control"] =
         typed_lifecycle_control(
             component_id, "ready",
-            safe_inactive ? "safe_inactive" : "ready", true);
+            fail_resume ? "failed" : safe_inactive ? "safe_inactive" : "ready", true);
     std::ofstream(package_root / "arena-component.json", std::ios::binary)
         << replacement_manifest.dump(2);
     const fs::path archive = root / "staged-provider-1.0.0.tar.gz";
@@ -2982,6 +3018,29 @@ TEST_CASE("staged typed v3 lifecycle quiesces and resumes with neutral evidence"
                          {"sha256", sha256_path(archive)},
                          {"size_bytes", fs::file_size(archive)}}}}})},
     };
+    if (fail_resume) {
+        std::string failure_message;
+        try { static_cast<void>(SetupEngine::apply(json::object(), plan, paths, true, true)); }
+        catch (const std::exception& error) { failure_message = error.what(); }
+        REQUIRE(failure_message.find("fixture.failed") != std::string::npos);
+        const auto transaction = json::parse(std::ifstream(
+            fs::directory_iterator(paths.data_root / "transactions")->path()));
+        const auto& failures = transaction.at("provider_lifecycle_failures");
+        REQUIRE(failures.size() >= 2);
+        REQUIRE(failures.at(0).at("phase") == "forward");
+        REQUIRE(failures.at(0).at("result").at("operation") == "post_replace");
+        REQUIRE(failures.at(0).at("result").at("reason").at("id") == "fixture.failed");
+        REQUIRE(failures.back().at("phase") == "compensation");
+        for (const auto& failure : failures) {
+            REQUIRE(failure.at("result").at("disposition") == "failed");
+            REQUIRE(failure.at("result").at("reason").at("id").is_string());
+            REQUIRE(failure.at("request").at("replacement_arguments_present") == true);
+            REQUIRE_FALSE(failure.at("request").at("previous_root").get<std::string>().empty());
+            REQUIRE_FALSE(failure.at("request").contains("arguments"));
+        }
+        remove_locator_test_directory(root);
+        return;
+    }
     const json applied =
         SetupEngine::apply(json::object(), plan, paths, true, true);
     INFO(applied.dump(2));

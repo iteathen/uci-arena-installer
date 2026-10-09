@@ -124,7 +124,11 @@ int run_provider_lifecycle_fixture(const int argc, char** argv) {
         variant != "operation_mismatch" &&
         variant != "observation_mismatch" && variant != "malformed" &&
         variant != "invalid_json" && variant != "nonzero" &&
-        variant != "timeout") {
+        variant != "timeout" && variant != "stderr_warning" &&
+        variant != "invalid_canary" && variant != "stdout_warning" &&
+        variant != "oversized" && variant != "oversized_tail" &&
+        variant != "nonzero_json" && variant != "exact_maximum" &&
+        variant != "no_newline" && variant != "failed_nonzero") {
         return 42;
     }
     std::ofstream record(argv[15], std::ios::binary | std::ios::app);
@@ -140,9 +144,26 @@ int run_provider_lifecycle_fixture(const int argc, char** argv) {
         std::cout << "{" << '\n';
         return 0;
     }
+    if (variant == "invalid_canary") {
+        std::cerr << "CANARY_STDERR_PRIVATE_TOKEN=secret" << '\n';
+        std::cout << "CANARY_STDOUT_PRIVATE_TOKEN=secret" << '\n';
+        return 0;
+    }
+    if (variant == "stderr_warning") {
+        std::cerr << "CANARY_STDERR_PRIVATE_TOKEN=secret" << '\n';
+    }
+    if (variant == "oversized") {
+        std::cout << std::string(65537, 'x');
+        return 0;
+    }
+    if (variant == "oversized_tail") {
+        std::cout << "{}\n" << std::string(65537, ' ');
+        return 0;
+    }
+    if (variant == "stdout_warning") std::cout << "CANARY_STDOUT_PRIVATE_TOKEN=secret\n";
 
     const bool safe_inactive = variant == "safe_inactive";
-    const bool failed = variant == "failed";
+    const bool failed = variant == "failed" || variant == "failed_nonzero";
     nlohmann::json result{
         {"schema", "arena_provider_lifecycle_result_v1"},
         {"schema_version", 1},
@@ -171,8 +192,11 @@ int run_provider_lifecycle_fixture(const int argc, char** argv) {
             result["observed"]["activity"] == "active" ? "inactive" : "active";
     }
     if (variant == "malformed") result["provider_field"] = true;
-    std::cout << result.dump() << '\n';
-    return 0;
+    const auto bytes = result.dump();
+    std::cout << bytes;
+    if (variant == "exact_maximum") std::cout << std::string(65536 - bytes.size(), ' ');
+    else if (variant != "no_newline") std::cout << '\n';
+    return variant == "nonzero_json" || variant == "failed_nonzero" ? 44 : 0;
 }
 
 }  // namespace
@@ -244,7 +268,8 @@ int main(int argc, char** argv) {
             const std::string variant = option_value(argc, argv, "--variant");
             if (component_id.empty() || component_version.empty() ||
                 (variant != "ready" && variant != "safe_inactive" &&
-                 variant != "failed" && variant != "malformed")) {
+                 variant != "failed" && variant != "malformed" &&
+                 variant != "invalid_canary")) {
                 return 24;
             }
             const std::string lifecycle_operation =
@@ -253,6 +278,11 @@ int main(int argc, char** argv) {
                 : operation == "prepare_replace" ? "pre_replace"
                                                    : "post_replace";
             const bool safe_inactive = variant == "safe_inactive";
+            if (variant == "invalid_canary") {
+                std::cerr << "CANARY_STDERR_PRIVATE_TOKEN=secret\n";
+                std::cout << "CANARY_STDOUT_PRIVATE_TOKEN=secret\n";
+                return 0;
+            }
             const bool failed = variant == "failed";
             nlohmann::json result{
                 {"schema", "arena_provider_lifecycle_result_v1"},

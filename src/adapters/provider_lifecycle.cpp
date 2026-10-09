@@ -1,4 +1,5 @@
 #include "arena/ports/provider_lifecycle.hpp"
+#include "arena/ports/process_command_failure.hpp"
 
 #include <algorithm>
 #include <array>
@@ -416,7 +417,13 @@ ProviderLifecycleResult ProviderLifecycle::invoke(const ProviderLifecycleRequest
     nlohmann::json raw;
     try { raw = invoke_raw_validated(request, deadline); }
     catch (const std::bad_alloc&) { throw; }
-    catch (const std::exception&) { return failed(request, "adapter_exception"); }
+    catch (const ProcessCommandFailure& error) {
+        return failed(request, "adapter_exception", error.what());
+    }
+    catch (const std::exception&) {
+        return failed(request, "adapter_exception",
+                      "category=adapter_exception; detail=untrusted_exception_redacted");
+    }
     try {
         if (raw.dump().size() > provider_lifecycle_raw_result_max_bytes) {
             return failed(
