@@ -13,9 +13,17 @@ public:
   void begin_detect() noexcept {
     claimed_bundle_codes_.clear();
     missing_cache_bundle_codes_.clear();
+    excluded_upgrade_bundle_codes_.clear();
   }
 
-  void begin_plan() noexcept { claimed_bundle_codes_.clear(); }
+  void begin_plan() noexcept {
+    claimed_bundle_codes_.clear();
+    excluded_upgrade_bundle_codes_.clear();
+  }
+
+  void exclude_upgrade(std::wstring_view bundle_code) {
+    excluded_upgrade_bundle_codes_.insert(normalize(bundle_code));
+  }
 
   void observe(std::wstring_view bundle_code, bool missing_from_cache) {
     if (missing_from_cache) {
@@ -25,14 +33,17 @@ public:
 
   [[nodiscard]] bool claim(std::wstring_view bundle_code) {
     std::wstring normalized = normalize(bundle_code);
-    if (missing_cache_bundle_codes_.contains(normalized)) {
+    if (missing_cache_bundle_codes_.contains(normalized) ||
+        excluded_upgrade_bundle_codes_.contains(normalized)) {
       return false;
     }
     return claimed_bundle_codes_.insert(std::move(normalized)).second;
   }
 
   [[nodiscard]] bool allow_restore(std::wstring_view bundle_code) const {
-    return !missing_cache_bundle_codes_.contains(normalize(bundle_code));
+    const auto normalized = normalize(bundle_code);
+    return !missing_cache_bundle_codes_.contains(normalized) &&
+           !excluded_upgrade_bundle_codes_.contains(normalized);
   }
 
 private:
@@ -46,6 +57,7 @@ private:
 
   std::unordered_set<std::wstring> claimed_bundle_codes_;
   std::unordered_set<std::wstring> missing_cache_bundle_codes_;
+  std::unordered_set<std::wstring> excluded_upgrade_bundle_codes_;
 };
 
 }  // namespace arena::installer::windows

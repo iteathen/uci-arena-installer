@@ -842,7 +842,8 @@ packaging:
         managed workspace access, and adopts its receipt without renaming the
         immutable root or quiescing its startup authority. Explicit repair
         still restages every selected component. All selected receipts are
-        adopted before the related older bundle is removed.
+        adopted by the current component transaction. Historical related
+        Upgrade bundle executors receive no execute or restore authority.
       - When that bootstrapper's initial elevated transaction explicitly
         accepts an unsigned development catalog, retained release media records
         the exact catalog digest in the same administrator-protected release
@@ -1015,13 +1016,20 @@ packaging:
         separate artifacts. A configurable-scope bundle is forbidden until a
         separately reviewed toolchain upgrade supports it without weakening
         licensing, provenance, or reproducibility requirements.
-      - Fixed-scope bundle planning is exact-identity idempotent. If the
-        platform reports one related bundle registration more than once, the
-        bootstrapper adapter retains one execute/rollback plan and requests no
-        action for later occurrences of that same bundle code. Detection
-        duplication remains observable in the Burn log; it must never produce
-        duplicate removal authority, a missing-cache launch, or a success-path
-        error dialog.
+      - The current complete-suite component transaction owns replacement and
+        rollback. Fixed-scope bundle planning requests relation type None and
+        no execute or rollback-restore action for every historical related
+        Upgrade bundle occurrence, including the first cached occurrence.
+        WiX plans restore independently of requested execute state, so execute
+        suppression alone is insufficient. Historical Burn registrations remain
+        retained and explicitly unretired; their removal is not claimed or
+        inferred. No registry cleanup or old cached executor is used to retire
+        them. Genuine Downgrade detection and independent addon/patch relations
+        remain intact. Exact-identity duplicate suppression continues for the
+        independently actionable relations.
+      - The BAFunctions adapter accepts the mandatory theme-loaded notification
+        without customization. Optional unsupported callbacks retain WiX's
+        ordinary fallback behavior rather than changing UI ownership.
       - When Burn explicitly reports a related bundle missing from its package
         cache, the bootstrapper records that exact bundle code and requests no
         execute or rollback-restore action for it. A proven uncached stale
@@ -1897,7 +1905,7 @@ transaction:
         while preserving workspaces, locators, imported in-place assets, and
         retained release media.
       - A Windows bundle stamps its immutable Burn provider key as bundle_owner
-        on every selected component receipt before related-bundle removal.
+        on every selected component receipt during the current transaction.
       - Bundle-driven uninstall removes only receipts whose bundle_owner exactly
         matches the calling bundle. A related older bundle treats an empty
         owner-scoped selection as a successful no-op and cannot remove receipts
@@ -2104,8 +2112,9 @@ transaction:
         generated configuration, managed workspace access, dependency
         projection, and bundle ownership are refreshed transactionally. Only
         roots that will actually be renamed, or consumers of those roots, enter
-        startup quiescence. All selected receipts are adopted before Burn
-        removes a related older bundle.
+        startup quiescence. All selected receipts are adopted by the current
+        transaction; historical related Upgrade executors remain excluded from
+        execution and restoration, with their Burn registrations unretired.
       - A prior immutable component root remains available until the replacement
         receipt, generated configuration, startup state, and Manager restart
         have committed. Post-commit maintenance then considers only sibling

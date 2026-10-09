@@ -48,6 +48,28 @@ HRESULT WINAPI ArenaBAFunctionsProc(
     case BA_FUNCTIONS_MESSAGE_ONPLANBEGIN:
       context->related_bundles.begin_plan();
       return S_OK;
+    case BA_FUNCTIONS_MESSAGE_ONPLANRELATEDBUNDLETYPE: {
+      const auto* plan_arguments =
+          static_cast<BA_ONPLANRELATEDBUNDLETYPE_ARGS*>(arguments);
+      auto* plan_results =
+          static_cast<BA_ONPLANRELATEDBUNDLETYPE_RESULTS*>(results);
+      if (plan_arguments == nullptr || plan_arguments->wzBundleCode == nullptr ||
+          plan_results == nullptr) {
+        return E_INVALIDARG;
+      }
+      if (plan_arguments->recommendedType ==
+              BOOTSTRAPPER_RELATED_BUNDLE_PLAN_TYPE_UPGRADE ||
+          plan_results->requestedType ==
+              BOOTSTRAPPER_RELATED_BUNDLE_PLAN_TYPE_UPGRADE) {
+        // The current component transaction owns replacement and rollback.
+        // Historical suite executors are not compensation authorities. WiX
+        // schedules restore independently of requested execute state, so
+        // suppress the Upgrade relation and both later callback states.
+        context->related_bundles.exclude_upgrade(plan_arguments->wzBundleCode);
+        plan_results->requestedType = BOOTSTRAPPER_RELATED_BUNDLE_PLAN_TYPE_NONE;
+      }
+      return S_OK;
+    }
     case BA_FUNCTIONS_MESSAGE_ONPLANRELATEDBUNDLE: {
       const auto* plan_arguments =
           static_cast<BA_ONPLANRELATEDBUNDLE_ARGS*>(arguments);
@@ -77,6 +99,10 @@ HRESULT WINAPI ArenaBAFunctionsProc(
       }
       return S_OK;
     }
+    case BA_FUNCTIONS_MESSAGE_ONTHEMELOADED:
+      // This adapter has no theme customization. Unlike optional control
+      // callbacks, WiX logs E_NOTIMPL as a theme initialization error here.
+      return S_OK;
     default:
       return E_NOTIMPL;
   }

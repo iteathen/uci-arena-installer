@@ -52,3 +52,18 @@ TEST_CASE("a new detection pass clears stale missing-cache observations") {
   CHECK(guard.claim(identity));
   CHECK(guard.allow_restore(identity));
 }
+
+TEST_CASE("historical upgrade identity has no execute or restore authority") {
+  RelatedBundlePlanGuard guard;
+  constexpr auto identity = L"{F0C731FA-6AD6-4D36-AE12-9B645D9945F8}";
+  guard.exclude_upgrade(identity);
+  CHECK_FALSE(guard.claim(identity));
+  CHECK_FALSE(guard.claim(identity));
+  CHECK_FALSE(guard.allow_restore(L"{f0c731fa-6ad6-4d36-ae12-9b645d9945f8}"));
+  guard.begin_plan();
+  CHECK(guard.claim(identity));
+  CHECK(guard.allow_restore(identity));
+  guard.exclude_upgrade(identity);
+  guard.begin_detect();
+  CHECK(guard.allow_restore(identity));
+}
