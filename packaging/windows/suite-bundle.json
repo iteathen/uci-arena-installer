@@ -4,9 +4,9 @@
   "manufacturer": "UCI Arena contributors",
   "features": [
     {
-      "component_id": "uci_arena.engine",
-      "variable": "InstallUciArenaEngine",
-      "label": "UCI Arena Engine (LatticeKnight default)"
+      "component_id": "uci_arena.vector",
+      "variable": "InstallVectorEngine",
+      "label": "Vector GPU engine"
     },
     {
       "component_id": "book_forge.service",
@@ -14,9 +14,9 @@
       "label": "Book Forge service"
     },
     {
-      "component_id": "opening_book.standard",
-      "variable": "InstallStandardOpeningBook",
-      "label": "Standard opening book (small starter set)"
+      "component_id": "syzygy.root-provider",
+      "variable": "InstallRootTablebaseProvider",
+      "label": "Root tablebase provider (optional local data)"
     },
     {
       "component_id": "uci_arena_evidence.service",

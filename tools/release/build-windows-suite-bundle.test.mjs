@@ -38,9 +38,9 @@ const upgradeCycleEnabled = wixAvailable
   && existsSync(builtBAFunctionsPath);
 
 const features = [
-  "uci_arena.engine",
+  "uci_arena.vector",
   "book_forge.service",
-  "opening_book.standard",
+  "syzygy.root-provider",
   "uci_arena_evidence.service",
   "lichess.adapter",
 ];
@@ -205,7 +205,9 @@ test("suite bundle derives default-on Modify features and lifecycle commands fro
     assert.doesNotMatch(source, /purge/u);
     assert.match(source, /PerMachine="no"/u);
     assert.doesNotMatch(source, /restart-manager-service/u);
-    assert.match(theme, /LatticeKnight default/u);
+    assert.match(theme, /Vector GPU engine/u);
+    assert.match(theme, /Root tablebase provider \(optional local data\)/u);
+    assert.match(theme, /installed disabled until account setup/u);
     assert.match(theme, /Everything is selected by default/u);
 
     const offline = buildWindowsSuiteBundleSource({
