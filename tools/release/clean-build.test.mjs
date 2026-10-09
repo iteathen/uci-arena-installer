@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {ownedTestTemp} from './test-support/owned-temp.mjs';
 
 import {
   cleanBuildArtifactNames,
@@ -16,6 +22,7 @@ import {
   resolveNpmInvocation,
   selectLockedComponents,
   transactionalOutput,
+  removeOwnedTree,
   validateWindowsLauncherEnvelope,
 } from "./clean-build.mjs";
 
@@ -165,4 +172,102 @@ test("clean build transaction preserves previous complete output on failure", (t
   }), /synthetic package failure/u);
   assert.equal(readFileSync(path.join(output, "accepted.exe"), "utf8"), "accepted");
   assert.equal(existsSync(path.join(output, "partial.exe")), false);
+});
+
+test("v3 selection uses unified ownership rows without a legacy managed split", () => {
+  const composition={components:[{component_id:'node.private',repository:'iteathen/uci-arena-installer'},
+    {component_id:'arbitrary.provider',repository:'owner/arbitrary'}]};
+  const lock={schema:'arena_suite_release_lock_v3',components:[
+    {component_id:'node.private',target_triple:'windows-x86_64',ownership:'installer_managed'},
+    {component_id:'arbitrary.provider',target_triple:'any',ownership:'provider'},
+  ]};
+  const selected=selectLockedComponents(lock,composition,'windows-x86_64');
+  assert.deepEqual(selected.map(row=>[row.lockRow.component_id,row.managed]),
+    [['node.private',true],['arbitrary.provider',false]]);
+});
+
+test("output publication waits for asynchronous verification and preserves previous output on late failure", async (t) => {
+  const root=ownedTestTemp(t,'arena-awaited-output-');
+  const output=path.join(root,'dist');
+  transactionalOutput(output,({publishRoot})=>writeFileSync(path.join(publishRoot,'old'),'accepted'));
+  let release;
+  const pending=new Promise(resolve=>{release=resolve;});
+  const operation=transactionalOutput(output,async({publishRoot})=>{
+    writeFileSync(path.join(publishRoot,'new'),'candidate');await pending;throw Error('late verifier failure');
+  });
+  // Attach rejection immediately; it must not turn into an unhandled rejection.
+  const failure=assert.rejects(Promise.resolve(operation),/late verifier failure/);
+  try {assert.equal(readFileSync(path.join(output,'old'),'utf8'),'accepted');
+    assert.equal(existsSync(path.join(output,'new')),false);} finally {release();}
+  await failure;
+  assert.equal(readFileSync(path.join(output,'old'),'utf8'),'accepted');
+});
+
+test('owned cleanup rejects outside roots and reparse targets without deleting foreign content',t=>{
+  const root=ownedTestTemp(t,'arena-contained-cleanup-');
+  const owner=path.join(root,'owner'),outside=path.join(root,'outside');mkdirSync(owner);mkdirSync(outside);
+  writeFileSync(path.join(outside,'retain'),'foreign');
+  assert.throws(()=>removeOwnedTree(owner,outside),/escapes/);
+  assert.throws(()=>removeOwnedTree(owner,owner),/escapes/);
+  const link=path.join(owner,'alias');
+  try{symlinkSync(outside,link,process.platform==='win32'?'junction':'dir');}
+  catch(error){if(error.code==='EPERM'){t.skip('platform does not permit test reparse creation');return;}throw error;}
+  assert.throws(()=>removeOwnedTree(owner,link),/linked/);
+  assert.equal(readFileSync(path.join(outside,'retain'),'utf8'),'foreign');
+});
+
+test('failed publication and rollback retain previous bytes and first publication failure', t => {
+  const root = ownedTestTemp(t, 'arena-rollback-retention-');
+  const output = path.join(root, 'dist');
+  transactionalOutput(output, ({ publishRoot }) => writeFileSync(path.join(publishRoot, 'old'), 'accepted'));
+  const publicationError = Error('publication rename failed');
+  const rollbackError = Error('rollback rename blocked');
+  let failure;
+  try { transactionalOutput(output, ({ publishRoot }) => {
+    writeFileSync(path.join(publishRoot, 'new'), 'candidate');
+  }, { rename: (source, target) => {
+    if (path.basename(source) === 'publish') throw publicationError;
+    if (path.basename(source) === 'previous') throw rollbackError;
+    renameSync(source, target);
+  } }); } catch (error) { failure = error; }
+  assert.equal(existsSync(output), false);
+  const transactions = readdirSync(root).filter(name => name.startsWith('.dist.transaction-'));
+  assert.equal(transactions.length, 1);
+  assert.equal(readFileSync(path.join(root, transactions[0], 'previous', 'old'), 'utf8'), 'accepted');
+  assert.equal(readFileSync(path.join(root, transactions[0], 'publish', 'new'), 'utf8'), 'candidate');
+  assert.ok(failure instanceof AggregateError);
+  assert.equal(failure.cause, publicationError);
+  assert.deepEqual(failure.errors, [publicationError, rollbackError]);
+  assert.match(failure.message, /rollback failed; retained/u);
+});
+
+test('failed publication restores prior output and cleans only its completed transaction', t => {
+  const root = ownedTestTemp(t, 'arena-restored-output-');
+  const output = path.join(root, 'dist');
+  transactionalOutput(output, ({ publishRoot }) => writeFileSync(path.join(publishRoot, 'old'), 'accepted'));
+  const publicationError = Error('publication rename failed');
+  assert.throws(() => transactionalOutput(output, ({ publishRoot }) => {
+    writeFileSync(path.join(publishRoot, 'new'), 'candidate');
+  }, { rename: (source, target) => {
+    if (path.basename(source) === 'publish') throw publicationError;
+    renameSync(source, target);
+  } }), error => error === publicationError);
+  assert.equal(readFileSync(path.join(output, 'old'), 'utf8'), 'accepted');
+  assert.deepEqual(readdirSync(root), ['dist']);
+});
+
+test('test cleanup rejects a replaced root without following its foreign target', t => {
+  const outside = ownedTestTemp(t, 'arena-test-cleanup-foreign-');
+  writeFileSync(path.join(outside, 'retain'), 'foreign');
+  let cleanup;
+  const root = ownedTestTemp({after: callback => { cleanup = callback; }}, 'arena-test-cleanup-owned-');
+  cleanup(); // Delete only the original, verified test-owned incarnation.
+  try { symlinkSync(outside, root, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (error) {
+    if (error.code === 'EPERM') { t.skip('platform does not permit test reparse creation'); return; }
+    throw error;
+  }
+  t.after(() => unlinkSync(root)); // Unlink the test-created alias, never recurse.
+  assert.throws(cleanup, /Expected values to be strictly equal/u);
+  assert.equal(readFileSync(path.join(outside, 'retain'), 'utf8'), 'foreign');
 });

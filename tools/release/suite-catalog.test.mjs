@@ -104,6 +104,22 @@ test("catalog refuses composition that omits a provider manifest dependency", ()
   }), /composition omits manifest dependencies/u);
 });
 
+test("catalog consumes normalized artifact facts without provider-specific release records", () => {
+  // Logical consumer projection fixture only; this test establishes no signing
+  // or release authority. The optional real-data integration exercises crypto.
+  const candidates=composition.components.map(component=>{
+    const entry=candidate(component);
+    entry.verified={schema:'arena_verified_component_provenance_v1',component_id:component.component_id,
+      artifact:{type:'archive',name:`${component.component_id}.tar.gz`,sha256:'c'.repeat(64),size_bytes:7}};
+    delete entry.providerResult;delete entry.lockRow.artifact_name;delete entry.lockRow.artifact_sha256;
+    return entry;
+  });
+  const catalog=buildSuiteCatalog({composition,target:'windows-x86_64',candidates,featureComponentIds:['example.book']});
+  assert.deepEqual(catalog.components[1].artifacts['windows-x86_64'],{
+    type:'archive',source:'payloads/example.book.tar.gz',sha256:'c'.repeat(64),size_bytes:7,
+  });
+});
+
 test("current Windows feature policy composes the JS suite with optional root knowledge", () => {
   // Synthetic inventories test projection only; these are not release candidates.
   const selected = JSON.parse(readFileSync(new URL(

@@ -16,10 +16,12 @@ import {
   sourceIdentity,
   transactionalOutput,
   verifyAndExtractCandidates,
+  removeOwnedTree,
 } from "./clean-build.mjs";
 import { deterministicTarGz } from "./deterministic-tar.mjs";
 import {
   loadReleaseInputs,
+  loadReleaseValidationOptions,
   sha256File,
   validateReleaseLock,
 } from "./release-lock.mjs";
@@ -144,7 +146,7 @@ export function assembleSuiteUpdatePackage({
       (id) => Object.values(catalogById.get(id).artifacts).map((artifact) => artifact.source),
     ).sort();
     const packageSources = packageCandidates.map(
-      (candidate) => `payloads/${candidate.lockRow.artifact_name}`,
+      (candidate) => `payloads/${candidate.verified?.artifact.name??candidate.lockRow.artifact_name}`,
     ).sort();
     if (JSON.stringify(catalogSources) !== JSON.stringify(packageSources)) {
       throw new Error("update package closure artifacts do not equal packaged payloads");
@@ -152,7 +154,7 @@ export function assembleSuiteUpdatePackage({
     for (const candidate of packageCandidates) {
       copyFileSync(
         candidate.artifactPath,
-        path.join(payloadRoot, candidate.lockRow.artifact_name),
+        path.join(payloadRoot, candidate.verified?.artifact.name??candidate.lockRow.artifact_name),
       );
     }
     if (trusted) copyMetadataTree(metadataRoot, path.join(releaseRoot, "tuf"));
@@ -216,7 +218,7 @@ export function assembleSuiteUpdatePackage({
   });
 }
 
-export function buildSuiteUpdatePackage({
+export async function buildSuiteUpdatePackage({
   lockFilename,
   compositionDirectory,
   assetsRoot,
@@ -225,37 +227,42 @@ export function buildSuiteUpdatePackage({
   selectedComponents,
   diagnosticReview = false,
   metadataRoot = "",
+  validationMode,trustPolicyFilename,candidateDirectoriesFilename,
 }) {
   if (platform !== supportedPlatform) {
     throw new Error(`package-only updates currently require ${supportedPlatform}`);
   }
   const source = sourceIdentity();
   const inputs = loadReleaseInputs(lockFilename, compositionDirectory);
-  const validation = validateReleaseLock(inputs.lock, inputs.composition, {
+  const validationOptions=loadReleaseValidationOptions(inputs,{
     requireReady: !diagnosticReview,
     requireNotReady: diagnosticReview,
-    provenanceMode: diagnosticReview ? "diagnostic_review" : "official",
+    validationMode:validationMode??(inputs.lock.schema==='arena_suite_release_lock_v3'?undefined:(diagnosticReview?'diagnostic_review':'official')),
+    trustPolicyFilename,
     requiredTargets: [platform],
     compositionFileName: inputs.compositionFileName,
     compositionSha256: inputs.compositionSha256,
   });
+  const validation=validateReleaseLock(inputs.lock,inputs.composition,validationOptions);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
-  const transactionRoot = `${path.resolve(outputRoot)}.candidate-inputs-${process.pid}`;
-  mkdirSync(transactionRoot, { recursive: true });
-  try {
-    const candidates = verifyAndExtractCandidates({
+  const candidateDirectories=candidateDirectoriesFilename?JSON.parse(readFileSync(candidateDirectoriesFilename,'utf8')):undefined;
+  // The complete output transaction owns extraction until all awaited work is done.
+  return transactionalOutput(outputRoot,async({workRoot,publishRoot})=>{
+    const candidates = await verifyAndExtractCandidates({
       lock: inputs.lock,
       composition: inputs.composition,
       target: platform,
       assetsRoot,
-      workRoot: transactionRoot,
+      workRoot,
+      candidateDirectories,validationOptions,trustPolicyFilename,
       cosignExecutable: resolveCosignExecutable({ repositoryRoot }),
     });
-    return assembleSuiteUpdatePackage({
+    // Assemble into its own fresh child transaction; publish only after it joins.
+    const result=await assembleSuiteUpdatePackage({
       composition: inputs.composition,
       candidates,
       selectedComponents,
-      outputRoot,
+      outputRoot:path.join(workRoot,'assembled'),
       sourceCommit: source.commit,
       sourceEpoch: source.epoch,
       compositionSha256: inputs.compositionSha256,
@@ -263,10 +270,10 @@ export function buildSuiteUpdatePackage({
       inputAuthority: diagnosticReview ? "diagnostic_review_lock" : "release_ready_lock",
       metadataRoot,
     });
-  } finally {
-    // Candidate extraction is temporary and never release evidence.
-    rmSync(transactionRoot, { recursive: true, force: true });
-  }
+    for(const entry of readdirSync(path.join(workRoot,'assembled'))){copyFileSync(path.join(workRoot,'assembled',entry),path.join(publishRoot,entry));}
+    removeOwnedTree(workRoot,path.join(workRoot,'assembled'));
+    return result;
+  });
 }
 
 function parse(argv) {
@@ -296,12 +303,15 @@ function parse(argv) {
     selectedComponents: values.component,
     diagnosticReview: Boolean(values.diagnosticReview),
     metadataRoot: values["metadata-root"] ?? "",
+    validationMode:values['validation-mode'],
+    trustPolicyFilename:values['trust-policy']?path.resolve(values['trust-policy']):undefined,
+    candidateDirectoriesFilename:values['candidate-directories']?path.resolve(values['candidate-directories']):undefined,
   };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   try {
-    const result = buildSuiteUpdatePackage(parse(process.argv.slice(2)));
+    const result = await buildSuiteUpdatePackage(parse(process.argv.slice(2)));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } catch (error) {
     process.stderr.write(`build-suite-update-package: ${error.message}\n`);
