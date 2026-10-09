@@ -8,11 +8,13 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {ownedTestTemp} from './test-support/owned-temp.mjs';
 
 import {
   cleanBuildArtifactNames,
@@ -185,8 +187,7 @@ test("v3 selection uses unified ownership rows without a legacy managed split", 
 });
 
 test("output publication waits for asynchronous verification and preserves previous output on late failure", async (t) => {
-  const root=mkdtempSync(path.join(os.tmpdir(),'arena-awaited-output-'));
-  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const root=ownedTestTemp(t,'arena-awaited-output-');
   const output=path.join(root,'dist');
   transactionalOutput(output,({publishRoot})=>writeFileSync(path.join(publishRoot,'old'),'accepted'));
   let release;
@@ -203,8 +204,7 @@ test("output publication waits for asynchronous verification and preserves previ
 });
 
 test('owned cleanup rejects outside roots and reparse targets without deleting foreign content',t=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'arena-contained-cleanup-'));
-  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const root=ownedTestTemp(t,'arena-contained-cleanup-');
   const owner=path.join(root,'owner'),outside=path.join(root,'outside');mkdirSync(owner);mkdirSync(outside);
   writeFileSync(path.join(outside,'retain'),'foreign');
   assert.throws(()=>removeOwnedTree(owner,outside),/escapes/);
@@ -217,11 +217,7 @@ test('owned cleanup rejects outside roots and reparse targets without deleting f
 });
 
 test('failed publication and rollback retain previous bytes and first publication failure', t => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'arena-rollback-retention-'));
-  t.after(() => {
-    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
-    rmSync(root, { recursive: true, force: true });
-  });
+  const root = ownedTestTemp(t, 'arena-rollback-retention-');
   const output = path.join(root, 'dist');
   transactionalOutput(output, ({ publishRoot }) => writeFileSync(path.join(publishRoot, 'old'), 'accepted'));
   const publicationError = Error('publication rename failed');
@@ -246,11 +242,7 @@ test('failed publication and rollback retain previous bytes and first publicatio
 });
 
 test('failed publication restores prior output and cleans only its completed transaction', t => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'arena-restored-output-'));
-  t.after(() => {
-    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
-    rmSync(root, { recursive: true, force: true });
-  });
+  const root = ownedTestTemp(t, 'arena-restored-output-');
   const output = path.join(root, 'dist');
   transactionalOutput(output, ({ publishRoot }) => writeFileSync(path.join(publishRoot, 'old'), 'accepted'));
   const publicationError = Error('publication rename failed');
@@ -262,4 +254,20 @@ test('failed publication restores prior output and cleans only its completed tra
   } }), error => error === publicationError);
   assert.equal(readFileSync(path.join(output, 'old'), 'utf8'), 'accepted');
   assert.deepEqual(readdirSync(root), ['dist']);
+});
+
+test('test cleanup rejects a replaced root without following its foreign target', t => {
+  const outside = ownedTestTemp(t, 'arena-test-cleanup-foreign-');
+  writeFileSync(path.join(outside, 'retain'), 'foreign');
+  let cleanup;
+  const root = ownedTestTemp({after: callback => { cleanup = callback; }}, 'arena-test-cleanup-owned-');
+  cleanup(); // Delete only the original, verified test-owned incarnation.
+  try { symlinkSync(outside, root, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (error) {
+    if (error.code === 'EPERM') { t.skip('platform does not permit test reparse creation'); return; }
+    throw error;
+  }
+  t.after(() => unlinkSync(root)); // Unlink the test-created alias, never recurse.
+  assert.throws(cleanup, /Expected values to be strictly equal/u);
+  assert.equal(readFileSync(path.join(outside, 'retain'), 'utf8'), 'foreign');
 });

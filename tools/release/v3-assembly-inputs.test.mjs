@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {copyFileSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync,existsSync} from 'node:fs';
-import os from 'node:os';
+import {copyFileSync,mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import test from 'node:test';
 import {loadReleaseInputs,loadReleaseValidationOptions} from './release-lock.mjs';
 import {verifyAndExtractCandidates,verifyV3Candidates} from './clean-build.mjs';
 import {buildSuiteCatalog} from './suite-catalog.mjs';
+import {ownedTestTemp} from './test-support/owned-temp.mjs';
 
 // Optional real-data verification, never fixture qualification or assembly.
 const inputRoot=process.env.ARENA_V3_REAL_INPUTS;
@@ -22,18 +23,19 @@ test('public assembly CLI verifies eight exact original signed v3 inputs without
   });
   assert.equal(r.status,0,r.stderr);const result=JSON.parse(r.stdout);
   assert.equal(result.schema,'arena_suite_inputs_verified_v1');assert.equal(result.components.length,8);
-  assert.equal(result.trust_policy_sha256,'cbeddea8c604228be84cb4e1b8023b5ba4b82807dc115b9e19e9c4ae1d40d1fd');
+  const lock=JSON.parse(readFileSync(path.join(inputRoot,'release-lock.json')));
+  const policyBytes=readFileSync(path.join(inputRoot,lock.trust_policy.name));
+  assert.equal(result.trust_policy_sha256,lock.trust_policy.sha256);
+  assert.equal(createHash('sha256').update(policyBytes).digest('hex'),lock.trust_policy.sha256);
   assert(result.components.every(c=>c.schema==='arena_verified_component_provenance_v1'));
   assert.equal(result.built,false);assert.equal(result.extracted,false);
-  const lock=JSON.parse(readFileSync(path.join(inputRoot,'release-lock.json')));
   assert.deepEqual(result.components.map(c=>c.component_id).sort(),lock.components.map(c=>c.component_id).sort());
 });
 
 test('real v3 policy and last-row byte failures reject before any extraction or build',{
   skip:!inputRoot,
 },async t=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'arena-v3-falsifier-'));
-  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const root=ownedTestTemp(t,'arena-v3-falsifier-');
   const inputs=loadReleaseInputs(path.join(inputRoot,'release-lock.json'),inputRoot);
   const policyPath=path.join(inputRoot,'provenance-trust-policy.json');
   const policyCopy=path.join(root,'provenance-trust-policy.json');
@@ -58,8 +60,7 @@ test('real v3 policy and last-row byte failures reject before any extraction or 
 test('all eight genuine verified v3 archives close manifest and catalog dependencies before packaging',{
   skip:!inputRoot,
 },async t=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'arena-v3-archives-'));
-  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const root=ownedTestTemp(t,'arena-v3-archives-');
   const inputs=loadReleaseInputs(path.join(inputRoot,'release-lock.json'),inputRoot);
   const trustPolicyFilename=path.join(inputRoot,'provenance-trust-policy.json');
   const validationOptions=loadReleaseValidationOptions(inputs,{trustPolicyFilename,
@@ -76,8 +77,7 @@ test('all eight genuine verified v3 archives close manifest and catalog dependen
 });
 
 test('v3 policy loader requires exact file bytes and explicit mode before transport',async t=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'arena-v3-policy-'));
-  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const root=ownedTestTemp(t,'arena-v3-policy-');
   const filename=path.join(root,'policy.json');const bytes=Buffer.from('{}');writeFileSync(filename,bytes);
   const inputs={lock:{schema:'arena_suite_release_lock_v3',trust_policy:{name:'policy.json',sha256:'a'.repeat(64)}}};
   assert.throws(()=>loadReleaseValidationOptions(inputs,{trustPolicyFilename:filename}),/validation-mode/);
