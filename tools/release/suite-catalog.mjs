@@ -9,8 +9,8 @@ function positiveOrComputed(value, computed, label) {
 }
 
 function artifactType(candidate) {
-  const declared = candidate.lockRow.artifact_type
-    ?? candidate.providerResult.artifact_type;
+  const declared = candidate.verified?.artifact.type??candidate.lockRow.artifact_type
+    ?? candidate.providerResult?.artifact_type;
   if (declared) return declared;
   return candidate.lockRow.artifact_name.endsWith(".file-set.json")
     ? "file_set" : "archive";
@@ -20,15 +20,15 @@ function buildArtifact(candidate) {
   const type = artifactType(candidate);
   const artifact = {
     type,
-    source: `payloads/${candidate.lockRow.artifact_name}`,
-    sha256: candidate.lockRow.artifact_sha256,
-    size_bytes: candidate.artifactSizeBytes,
+    source: `payloads/${candidate.verified?.artifact.name??candidate.lockRow.artifact_name}`,
+    sha256: candidate.verified?.artifact.sha256??candidate.lockRow.artifact_sha256,
+    size_bytes: candidate.verified?.artifact.size_bytes??candidate.artifactSizeBytes,
   };
   if (type === "file_set") {
-    artifact.file_count = candidate.lockRow.file_count
-      ?? candidate.providerResult.file_set_file_count;
-    artifact.total_size_bytes = candidate.lockRow.installed_bytes
-      ?? candidate.providerResult.file_set_total_size_bytes;
+    artifact.file_count = candidate.verified?.artifact.file_count??candidate.lockRow.file_count
+      ?? candidate.providerResult?.file_set_file_count;
+    artifact.total_size_bytes = candidate.verified?.artifact.installed_bytes??candidate.lockRow.installed_bytes
+      ?? candidate.providerResult?.file_set_total_size_bytes;
     if (!Number.isSafeInteger(artifact.file_count) || artifact.file_count < 1
         || !Number.isSafeInteger(artifact.total_size_bytes)
         || artifact.total_size_bytes < 1) {

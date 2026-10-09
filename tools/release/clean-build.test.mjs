@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -16,6 +18,7 @@ import {
   resolveNpmInvocation,
   selectLockedComponents,
   transactionalOutput,
+  removeOwnedTree,
   validateWindowsLauncherEnvelope,
 } from "./clean-build.mjs";
 
@@ -165,4 +168,48 @@ test("clean build transaction preserves previous complete output on failure", (t
   }), /synthetic package failure/u);
   assert.equal(readFileSync(path.join(output, "accepted.exe"), "utf8"), "accepted");
   assert.equal(existsSync(path.join(output, "partial.exe")), false);
+});
+
+test("v3 selection uses unified ownership rows without a legacy managed split", () => {
+  const composition={components:[{component_id:'node.private',repository:'iteathen/uci-arena-installer'},
+    {component_id:'arbitrary.provider',repository:'owner/arbitrary'}]};
+  const lock={schema:'arena_suite_release_lock_v3',components:[
+    {component_id:'node.private',target_triple:'windows-x86_64',ownership:'installer_managed'},
+    {component_id:'arbitrary.provider',target_triple:'any',ownership:'provider'},
+  ]};
+  const selected=selectLockedComponents(lock,composition,'windows-x86_64');
+  assert.deepEqual(selected.map(row=>[row.lockRow.component_id,row.managed]),
+    [['node.private',true],['arbitrary.provider',false]]);
+});
+
+test("output publication waits for asynchronous verification and preserves previous output on late failure", async (t) => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'arena-awaited-output-'));
+  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const output=path.join(root,'dist');
+  transactionalOutput(output,({publishRoot})=>writeFileSync(path.join(publishRoot,'old'),'accepted'));
+  let release;
+  const pending=new Promise(resolve=>{release=resolve;});
+  const operation=transactionalOutput(output,async({publishRoot})=>{
+    writeFileSync(path.join(publishRoot,'new'),'candidate');await pending;throw Error('late verifier failure');
+  });
+  // Attach rejection immediately; it must not turn into an unhandled rejection.
+  const failure=assert.rejects(Promise.resolve(operation),/late verifier failure/);
+  try {assert.equal(readFileSync(path.join(output,'old'),'utf8'),'accepted');
+    assert.equal(existsSync(path.join(output,'new')),false);} finally {release();}
+  await failure;
+  assert.equal(readFileSync(path.join(output,'old'),'utf8'),'accepted');
+});
+
+test('owned cleanup rejects outside roots and reparse targets without deleting foreign content',t=>{
+  const root=mkdtempSync(path.join(os.tmpdir(),'arena-contained-cleanup-'));
+  t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));rmSync(root,{recursive:true,force:true});});
+  const owner=path.join(root,'owner'),outside=path.join(root,'outside');mkdirSync(owner);mkdirSync(outside);
+  writeFileSync(path.join(outside,'retain'),'foreign');
+  assert.throws(()=>removeOwnedTree(owner,outside),/escapes/);
+  assert.throws(()=>removeOwnedTree(owner,owner),/escapes/);
+  const link=path.join(owner,'alias');
+  try{symlinkSync(outside,link,process.platform==='win32'?'junction':'dir');}
+  catch(error){if(error.code==='EPERM'){t.skip('platform does not permit test reparse creation');return;}throw error;}
+  assert.throws(()=>removeOwnedTree(owner,link),/linked/);
+  assert.equal(readFileSync(path.join(outside,'retain'),'utf8'),'foreign');
 });

@@ -7,8 +7,10 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -25,6 +27,9 @@ import { buildManagerLinuxPackage } from "./build-manager-linux-package.mjs";
 import { buildManagerMsi } from "./build-manager-msi.mjs";
 import { buildWindowsSuiteBundle } from "./build-windows-suite-bundle.mjs";
 import { validateExtractedComponent } from "./component-artifact.mjs";
+import { canonicalTargetTriple, verifyComponentCandidate } from "./component-provenance.mjs";
+import { admitCandidateAssets } from "./candidate-assets.mjs";
+import { validateCompositionManifests } from "./product-composition.mjs";
 import { verifyManagedCandidate } from "./managed-provenance.mjs";
 import {
   resolveCosignExecutable,
@@ -32,6 +37,7 @@ import {
 } from "./provider-provenance.mjs";
 import {
   loadReleaseInputs,
+  loadReleaseValidationOptions,
   sha256File,
   validateReleaseLock,
 } from "./release-lock.mjs";
@@ -64,6 +70,8 @@ export function renameWithTransientRetry(source, destination, {
 
 function readJson(filename, label) {
   try {
+    const status=lstatSync(filename);
+    if(!status.isFile()||status.isSymbolicLink()||status.size<1||status.size>16777216)throw Error('bounded regular JSON required');
     return JSON.parse(readFileSync(filename, "utf8"));
   } catch (error) {
     throw new Error(`${label} is not valid JSON: ${error.message}`);
@@ -189,14 +197,87 @@ function selectRow(rows, componentId, target) {
 
 export function selectLockedComponents(lock, composition, target) {
   return composition.components.map((component) => {
+    const current=lock.schema==='arena_suite_release_lock_v3';
     const managed = component.repository === REPOSITORY;
     const row = selectRow(
-      managed ? lock.managed_components : lock.components,
+      current?lock.components:(managed ? lock.managed_components : lock.components),
       component.component_id,
       target,
     );
-    return { component, lockRow: row, managed };
+    return { component, lockRow: row, managed:current?row.ownership==='installer_managed':managed };
   });
+}
+
+function candidateDirectoryMap(candidateDirectories, selected) {
+  if(!candidateDirectories||typeof candidateDirectories!=='object'||Array.isArray(candidateDirectories)
+    ||Object.keys(candidateDirectories).length!==selected.length
+    ||selected.some(({component})=>!Object.hasOwn(candidateDirectories,component.component_id)))throw Error('exact per-row candidate directories are required');
+  for(const value of Object.values(candidateDirectories))if(typeof value!=='string'||!path.isAbsolute(value))throw Error('candidate directories must be explicit absolute paths');
+  return candidateDirectories;
+}
+
+function v3Validation(options){
+  const {lock,composition,validationOptions,trustPolicyFilename}=options;
+  const bound=loadReleaseValidationOptions({lock,compositionFileName:validationOptions?.compositionFileName,
+    compositionSha256:validationOptions?.compositionSha256},{...validationOptions,trustPolicyFilename});
+  const checked=validateReleaseLock(lock,composition,bound);
+  if(!checked.ok)throw Error(checked.errors.join('\n'));
+  return bound;
+}
+
+export async function verifyV3Candidates({lock,composition,target,candidateDirectories,
+  validationOptions,trustPolicyFilename,cosignExecutable}) {
+  validationOptions=v3Validation({lock,composition,validationOptions,trustPolicyFilename});
+  const selected=selectLockedComponents(lock,composition,target),directories=candidateDirectoryMap(candidateDirectories,selected);
+  const result=[];
+  for(const selection of selected){
+    const verified=await verifyComponentCandidate({row:selection.lockRow,component:selection.component,
+      candidateDirectory:directories[selection.component.component_id],trustPolicy:validationOptions.trustPolicy,
+      // The existing common port's parameter is named Directory, but its keyed
+      // adapter consumes the actual policy FILE path to resolve public keys.
+      trustPolicyDirectory:trustPolicyFilename,cosignPath:cosignExecutable,validationMode:validationOptions.validationMode});
+    if(verified.artifact.type!=='archive')throw Error('current complete-suite assembly requires archive candidates');
+    result.push({...selection,verified,artifactPath:path.join(directories[verified.component_id],verified.artifact.name)});
+  }
+  return result;
+}
+
+async function snapshotV3Directories({lock,composition,target,candidateDirectories,workRoot}){
+  const selected=selectLockedComponents(lock,composition,target),directories=candidateDirectoryMap(candidateDirectories,selected),snapshots={};
+  for(const {component,lockRow} of selected){
+    const assets=await admitCandidateAssets({row:lockRow,candidateDirectory:directories[component.component_id]});
+    const output=path.join(workRoot,'candidate-bytes',component.component_id);mkdirSync(output,{recursive:true});
+    copyFileSync(assets.artifact.path,path.join(output,lockRow.artifact.name));
+    writeFileSync(path.join(output,lockRow.evidence.name),assets.evidence.bytes,{flag:'wx'});
+    writeFileSync(path.join(output,lockRow.provenance.bundle_name),assets.bundle.bytes,{flag:'wx'});
+    snapshots[component.component_id]=output;
+  }
+  return snapshots;
+}
+
+async function verifyAndExtractV3Candidates(options){
+  // Identity, ownership, target, dependencies and trust fail before even staging.
+  options={...options,validationOptions:v3Validation(options)};
+  const snapshots=await snapshotV3Directories(options);
+  // Verify EVERY immutable staged row before extracting any archive.
+  const admitted=await verifyV3Candidates({...options,candidateDirectories:snapshots});
+  const candidates=[];
+  for(const {component,lockRow,verified,artifactPath} of admitted){
+    const extractedRoot=path.join(options.workRoot,'extracted',component.component_id);
+    mkdirSync(path.dirname(extractedRoot),{recursive:true});extractArchive(artifactPath,extractedRoot);
+    const manifestPath=path.join(extractedRoot,'arena-component.json');
+    if(sha256File(manifestPath)!==verified.component_manifest_sha256)throw Error('component manifest digest differs from verified provenance');
+    const manifest=readJson(manifestPath,'component manifest');
+    if(canonicalTargetTriple(manifest.target_triple)!==verified.target_triple)throw Error('component manifest canonical target differs');
+    const extracted=validateExtractedComponent({root:extractedRoot,componentId:component.component_id,
+      version:component.version,target:manifest.target_triple});
+    candidates.push({repository:verified.source_repository,lockRow,verified,artifactPath,
+      artifactSizeBytes:verified.artifact.size_bytes,manifest:extracted.manifest,
+      manifestSizeBytes:statSync(extracted.manifestPath).size,extractedRoot});
+  }
+  validateCompositionManifests(options.composition,candidates.map(c=>({component_id:c.verified.component_id,
+    version:c.verified.component_version,repository:c.repository,manifest:c.manifest})));
+  return candidates;
 }
 
 function extractArchive(archive, destination) {
@@ -214,7 +295,10 @@ export function verifyAndExtractCandidates({
   assetsRoot,
   workRoot,
   cosignExecutable,
+  candidateDirectories,validationOptions,trustPolicyFilename,
 }) {
+  if(lock.schema==='arena_suite_release_lock_v3')return verifyAndExtractV3Candidates({lock,composition,target,
+    candidateDirectories,validationOptions,trustPolicyFilename,workRoot,cosignExecutable});
   const assets = assetIndex(assetsRoot);
   const selected = selectLockedComponents(lock, composition, target);
   return selected.map(({ component, lockRow, managed }) => {
@@ -390,7 +474,7 @@ function buildSuiteMedia({
   for (const candidate of candidates) {
     copyFileSync(
       candidate.artifactPath,
-      path.join(payloadRoot, candidate.lockRow.artifact_name),
+      path.join(payloadRoot, candidate.verified?.artifact.name??candidate.lockRow.artifact_name),
     );
   }
   const catalog = buildSuiteCatalog({
@@ -581,37 +665,53 @@ function buildLinuxOutputs({
     .map((name) => artifactRecord(path.join(publishRoot, name)));
 }
 
+function canonicalDirectory(filename){
+  const fold=value=>process.platform==='win32'?value.toLowerCase():value;
+  if(lstatSync(filename).isSymbolicLink()||fold(realpathSync(filename))!==fold(path.resolve(filename)))throw Error('output ownership path is linked');
+}
+
+export function removeOwnedTree(ownerRoot,target){
+  const root=path.resolve(ownerRoot),resolved=path.resolve(target),relative=path.relative(root,resolved);
+  if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw Error('cleanup target escapes task-owned root');
+  canonicalDirectory(root);
+  if(existsSync(resolved)){canonicalDirectory(resolved);rmSync(resolved,{recursive:true,force:true});}
+}
+
 export function transactionalOutput(outputRoot, producer) {
-  const output = path.resolve(outputRoot);
-  if (output === path.parse(output).root) throw new Error("clean build output cannot be a filesystem root");
-  const transaction = `${output}.transaction-${process.pid}`;
-  const previous = `${output}.previous-${process.pid}`;
-  rmSync(transaction, { recursive: true, force: true });
-  rmSync(previous, { recursive: true, force: true });
-  mkdirSync(path.dirname(output), { recursive: true });
-  mkdirSync(transaction, { recursive: false });
+  const output=path.resolve(outputRoot),parent=path.dirname(output);
+  if(output===path.parse(output).root)throw Error('clean build output cannot be a filesystem root');
+  mkdirSync(parent,{recursive:true});canonicalDirectory(parent);
+  if(existsSync(output)){canonicalDirectory(output);if(!lstatSync(output).isDirectory())throw Error('output must be a directory');}
+  const transaction=mkdtempSync(path.join(parent,`.${path.basename(output)}.transaction-`));
+  canonicalDirectory(transaction);
+  const previous=path.join(transaction,'previous');
   const publish = path.join(transaction, "publish");
   const work = path.join(transaction, "work");
   mkdirSync(publish);
   mkdirSync(work);
-  try {
-    const result = producer({ transactionRoot: transaction, publishRoot: publish, workRoot: work });
+  let retain=false;
+  const cleanup=()=>{if(!retain)removeOwnedTree(parent,transaction);};
+  const commit=result=>{
     const hadPrevious = existsSync(output);
-    if (hadPrevious) renameWithTransientRetry(output, previous);
+    canonicalDirectory(transaction);canonicalDirectory(publish);canonicalDirectory(parent);
+    if(hadPrevious){canonicalDirectory(output);renameWithTransientRetry(output,previous);}
     try {
       renameWithTransientRetry(publish, output);
-      if (hadPrevious) rmSync(previous, { recursive: true, force: true });
     } catch (error) {
-      if (existsSync(output)) rmSync(output, { recursive: true, force: true });
       if (hadPrevious && existsSync(previous)) {
+        canonicalDirectory(previous);
+        if(existsSync(output)){retain=true;throw Error(`output changed during rollback; retained ${transaction}`);}
         renameWithTransientRetry(previous, output);
       }
       throw error;
     }
+    if(hadPrevious){try{removeOwnedTree(transaction,previous);}catch(error){retain=true;throw Error(`output committed; previous output retained at ${transaction}: ${error.message}`);}}
     return result;
-  } finally {
-    rmSync(transaction, { recursive: true, force: true });
-  }
+  };
+  const failed=error=>{try{cleanup();}catch(disposal){throw new AggregateError([error,disposal],`${error.message}; cleanup failed; retained ${transaction}`,{cause:error});}throw error;};
+  const finished=result=>{let committed;try{committed=commit(result);}catch(error){return failed(error);}cleanup();return committed;};
+  let result;try{result=producer({transactionRoot:transaction,publishRoot:publish,workRoot:work});}catch(error){return failed(error);}
+  return result&&typeof result.then==='function'?Promise.resolve(result).then(finished,failed):finished(result);
 }
 
 function componentInputRows(lock, composition, target) {
@@ -622,7 +722,7 @@ function componentInputRows(lock, composition, target) {
       repository: component.repository,
       target_triple: lockRow.target_triple,
       source_commit: lockRow.source_commit,
-      workflow_ref: lockRow.provenance_workflow_ref,
+      workflow_ref:lockRow.provenance_workflow_ref,
       artifact_name: lockRow.artifact_name,
       artifact_sha256: lockRow.artifact_sha256,
       result_sha256: managed
@@ -632,13 +732,14 @@ function componentInputRows(lock, composition, target) {
   );
 }
 
-export function cleanBuild({
+export async function cleanBuild({
   lockFilename,
   compositionDirectory,
   assetsRoot,
   outputRoot,
   platform,
   diagnosticReview = false,
+  validationMode,trustPolicyFilename,candidateDirectoriesFilename,validateOnly=false,
 }) {
   if (!["windows-x86_64", "linux-x86_64"].includes(platform)) {
     throw new Error("--platform must be windows-x86_64 or linux-x86_64");
@@ -646,27 +747,39 @@ export function cleanBuild({
   if (platform === "linux-x86_64" && process.platform !== "linux") {
     throw new Error("Linux clean-build execution requires a Linux host");
   }
-  const source = sourceIdentity();
   const inputs = loadReleaseInputs(lockFilename, compositionDirectory);
-  const validation = validateReleaseLock(inputs.lock, inputs.composition, {
+  const validationOptions=loadReleaseValidationOptions(inputs,{
     requireReady: !diagnosticReview,
     requireNotReady: diagnosticReview,
-    provenanceMode: diagnosticReview ? "diagnostic_review" : "official",
+    validationMode:validationMode??(inputs.lock.schema==='arena_suite_release_lock_v3'?undefined:(diagnosticReview?'diagnostic_review':'official')),
+    trustPolicyFilename,
     requiredTargets: [platform],
     compositionFileName: inputs.compositionFileName,
     compositionSha256: inputs.compositionSha256,
   });
+  const validation = validateReleaseLock(inputs.lock,inputs.composition,validationOptions);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
   const lockSha256 = sha256File(path.resolve(lockFilename));
   const cosignExecutable = resolveCosignExecutable({ repositoryRoot });
-  return transactionalOutput(outputRoot, ({ publishRoot, workRoot }) => {
-    const candidates = verifyAndExtractCandidates({
+  const candidateDirectories=candidateDirectoriesFilename?readJson(candidateDirectoriesFilename,'candidate directory map'):undefined;
+  if(validateOnly){
+    if(inputs.lock.schema!=='arena_suite_release_lock_v3')throw Error('read-only input verification requires v3');
+    const verified=await verifyV3Candidates({lock:inputs.lock,composition:inputs.composition,target:platform,
+      candidateDirectories,validationOptions,trustPolicyFilename,cosignExecutable});
+    return {schema:'arena_suite_inputs_verified_v1',release_lock_sha256:lockSha256,
+      trust_policy_sha256:validationOptions.trustPolicySha256,validation_mode:validationOptions.validationMode,
+      components:verified.map(row=>row.verified),built:false,extracted:false};
+  }
+  const source=sourceIdentity();
+  return transactionalOutput(outputRoot, async ({ publishRoot, workRoot }) => {
+    const candidates = await verifyAndExtractCandidates({
       lock: inputs.lock,
       composition: inputs.composition,
       target: platform,
       assetsRoot,
       workRoot,
       cosignExecutable,
+      candidateDirectories,validationOptions,trustPolicyFilename,
     });
     const installTree = path.join(workRoot, "installer-install-tree");
     const nativeBuild = buildInstallerSource({ platform, installTree });
@@ -682,8 +795,8 @@ export function cleanBuild({
       publishRoot,
     });
     const result = {
-      schema: "arena_clean_build_result_v1",
-      schema_version: 1,
+      schema: inputs.lock.schema==='arena_suite_release_lock_v3'?"arena_clean_build_result_v2":"arena_clean_build_result_v1",
+      schema_version: inputs.lock.schema==='arena_suite_release_lock_v3'?2:1,
       suite_version: inputs.composition.product_release,
       target_platform: platform,
       source_repository: REPOSITORY,
@@ -694,7 +807,9 @@ export function cleanBuild({
         ? "diagnostic_review_lock" : "release_ready_lock",
       composition_sha256: inputs.compositionSha256,
       release_lock_sha256: lockSha256,
-      component_inputs: componentInputRows(inputs.lock, inputs.composition, platform),
+      ...(inputs.lock.schema==='arena_suite_release_lock_v3'?{release_lock_schema:inputs.lock.schema,
+        trust_policy_sha256:validationOptions.trustPolicySha256,validation_mode:validationOptions.validationMode}:{}),
+      component_inputs: inputs.lock.schema==='arena_suite_release_lock_v3'?candidates.map(candidate=>candidate.verified):componentInputRows(inputs.lock, inputs.composition, platform),
       installer_authority: REPOSITORY,
       release_scope: "complete_development",
       release_classification: "unsigned_suite_candidate",
@@ -717,9 +832,13 @@ function parse(argv) {
       completeDevelopment = true;
       continue;
     }
+    if(flag==='--validate-inputs'){if(values.validateOnly)throw Error('duplicate validate-inputs');values.validateOnly=true;continue;}
     if (!flag?.startsWith("--") || argv[index + 1] === undefined) {
       throw new Error(`invalid argument near ${flag ?? "<end>"}`);
     }
+    if(!['platform','lock','composition-directory','asset-root','output-root','diagnostic-review-lock',
+      'validation-mode','trust-policy','candidate-directories'].includes(flag.slice(2))
+      ||Object.hasOwn(values,flag.slice(2)))throw Error(`unknown or duplicate clean-build option ${flag}`);
     values[flag.slice(2)] = argv[++index];
   }
   if (!completeDevelopment) throw new Error("--complete-development is required");
@@ -743,12 +862,16 @@ function parse(argv) {
       ?? path.join(repositoryRoot, "dist", values.platform),
     platform: values.platform,
     diagnosticReview,
+    validationMode:values['validation-mode'],
+    trustPolicyFilename:values['trust-policy']?path.resolve(values['trust-policy']):undefined,
+    candidateDirectoriesFilename:values['candidate-directories']?path.resolve(values['candidate-directories']):undefined,
+    validateOnly:Boolean(values.validateOnly),
   };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   try {
-    const result = cleanBuild(parse(process.argv.slice(2)));
+    const result = await cleanBuild(parse(process.argv.slice(2)));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } catch (error) {
     process.stderr.write(`clean-build: ${error.message}\n`);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -804,20 +804,50 @@ export function loadReleaseInputs(lockFilename, compositionDirectory) {
   };
 }
 
+export function loadReleaseValidationOptions(inputs, {
+  trustPolicyFilename, validationMode, requiredTargets, requireReady = true,
+  requireNotReady = false,
+} = {}) {
+  const bindings={requireReady,requireNotReady,requiredTargets,
+    compositionFileName:inputs.compositionFileName,compositionSha256:inputs.compositionSha256};
+  if(inputs.lock.schema!=='arena_suite_release_lock_v3') {
+    return {...bindings,provenanceMode:validationMode??'official'};
+  }
+  if(!['official','diagnostic_review'].includes(validationMode))throw Error('explicit v3 validation-mode is required');
+  if(typeof trustPolicyFilename!=='string'||!path.isAbsolute(trustPolicyFilename))throw Error('explicit absolute v3 trust-policy is required');
+  const filename=path.resolve(trustPolicyFilename),status=lstatSync(filename);
+  const fold=value=>process.platform==='win32'?value.toLowerCase():value;
+  if(!status.isFile()||status.isSymbolicLink()||status.size<1||status.size>16777216
+    ||fold(realpathSync(filename))!==fold(filename))throw Error('trust policy must be a bounded regular non-link file');
+  const bytes=readFileSync(filename),digest=createHash('sha256').update(bytes).digest('hex');
+  if(path.basename(filename)!==inputs.lock.trust_policy?.name||digest!==inputs.lock.trust_policy?.sha256)throw Error('exact trust policy filename/digest differs from lock');
+  const trustPolicy=validateProvenanceTrustPolicy(JSON.parse(bytes.toString('utf8')));
+  return {...bindings,validationMode,trustPolicy,trustPolicyFileName:path.basename(filename),trustPolicySha256:digest};
+}
+
 function main(argv) {
-  const allowDraft = argv.includes("--allow-draft");
-  const positional = argv.filter((argument) => argument !== "--allow-draft");
+  let allowDraft=false;const positional=[],flags={};
+  for(let index=0;index<argv.length;index++){
+    const value=argv[index];if(value==='--allow-draft'){allowDraft=true;continue;}
+    if(value.startsWith('--')){
+      if(!['--validation-mode','--trust-policy','--required-targets'].includes(value)||Object.hasOwn(flags,value)||!argv[index+1])throw Error('invalid release-lock option');
+      flags[value]=argv[++index];
+    }else positional.push(value);
+  }
   if (positional.length > 2) {
     throw new Error("usage: release-lock.mjs [--allow-draft] [lock.json] [composition-directory]");
   }
   const lockPath = path.resolve(positional[0] ?? "release/catalog.lock.json");
   const compositionDirectory = path.resolve(positional[1] ?? "compositions");
   const inputs = loadReleaseInputs(lockPath, compositionDirectory);
-  const result = validateReleaseLock(inputs.lock, inputs.composition, {
+  const options=loadReleaseValidationOptions(inputs,{
     requireReady: !allowDraft,
-    compositionFileName: inputs.compositionFileName,
-    compositionSha256: inputs.compositionSha256,
+    requireNotReady:flags['--validation-mode']==='diagnostic_review',
+    validationMode:flags['--validation-mode'],
+    trustPolicyFilename:flags['--trust-policy']?path.resolve(flags['--trust-policy']):undefined,
+    requiredTargets:flags['--required-targets']?.split(','),
   });
+  const result = validateReleaseLock(inputs.lock, inputs.composition, options);
   if (!result.ok) throw new Error(result.errors.join("\n"));
   process.stdout.write(
     `${inputs.lock.suite_version}: ${inputs.lock.release_ready ? "release-ready" : "draft"} lock valid\n`,
