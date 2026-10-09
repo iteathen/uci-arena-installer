@@ -70,6 +70,14 @@ fs::path temporary_directory() {
     return directory;
 }
 
+void remove_locator_test_directory(const fs::path& root) {
+    REQUIRE(root.filename().string().starts_with("arena-setup-"));
+    REQUIRE_FALSE(fs::is_symlink(root));
+    REQUIRE(fs::canonical(root).parent_path() == fs::canonical(fs::temp_directory_path()));
+    REQUIRE(fs::canonical(root) == fs::absolute(root).lexically_normal());
+    fs::remove_all(arena::platform::filesystem_api_path(root));
+}
+
 json component(const std::string& id, const std::vector<std::string>& dependencies = {}) {
     return {
         {"id", id},
@@ -2078,6 +2086,197 @@ TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
                 .at("selected") == fs::absolute(token).lexically_normal().string());
     generated_input.close();
     fs::remove_all(root);
+}
+
+TEST_CASE("explicit locator clear revokes a UCI override and retains the managed profile") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.engine.consumer", "uci_engine", "runtime", {"saved_locator"});
+    const fs::path component_root = paths.install_root / "components" /
+                                    "replaceable.engine.consumer" / "1.0.0";
+    const fs::path runtime_root = paths.install_root / "components" / "runtime.host" / "1.0.0";
+    const fs::path profile = runtime_root / "launch-profile.json";
+    const std::string profile_bytes = R"({"executable":"node","arguments":["engine.mjs","--device"]})";
+    std::ofstream(profile) << profile_bytes;
+    const fs::path manifest_path = component_root / "arena-component.json";
+    json manifest = json::parse(std::ifstream(manifest_path));
+    const fs::path runtime_manifest_path = runtime_root / "arena-component.json";
+    json runtime_manifest = json::parse(std::ifstream(runtime_manifest_path));
+    runtime_manifest["files"].push_back({{"path", "launch-profile.json"},
+                                        {"size_bytes", profile_bytes.size()},
+                                        {"sha256", sha256_text(profile_bytes)}});
+    std::ofstream(runtime_manifest_path) << runtime_manifest.dump(2);
+    manifest["installer_integration"]["dependency_bindings"].push_back({
+        {"name", "managedEngineProfile"}, {"component_id", "runtime.host"},
+        {"source", "component_path"}, {"path", "launch-profile.json"}, {"required", true}});
+    std::ofstream(manifest_path) << manifest.dump(2);
+    static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    REQUIRE(json::parse(std::ifstream(configuration)).at("locators").contains("selected"));
+    const fs::path other = paths.data_root / "locators" / "timing_profile.json";
+    std::ofstream(other) << "retained other locator";
+    const fs::path credential = root / "operator-owned.fixture";
+    std::ofstream(credential) << "non-secret preserved fixture";
+    const json cleared = SetupEngine::import_path(paths, "uci_engine", {}, false, {}, true);
+    REQUIRE(cleared.at("state") == "cleared");
+    REQUIRE(cleared.at("removed") == true);
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "uci_engine.json"));
+    const json generated = json::parse(std::ifstream(configuration));
+    REQUIRE(generated.at("locators").empty());
+    REQUIRE(generated.at("bindings").at("managedEngineProfile") == profile.string());
+    REQUIRE(json::parse(std::ifstream(profile)).at("arguments") == json::array({"engine.mjs", "--device"}));
+    REQUIRE(fs::file_size(other) == std::string("retained other locator").size());
+    REQUIRE(fs::file_size(credential) == std::string("non-secret preserved fixture").size());
+    REQUIRE(fs::is_regular_file(ARENA_MOCK_UCI_PATH));
+    REQUIRE(SetupEngine::import_path(paths, "uci_engine", {}, false, {}, true).at("removed") == false);
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "unknown", {}, false, {}, true));
+    try {
+        static_cast<void>(SetupEngine::import_path(paths, "uci_engine", {}));
+        FAIL("empty semantic import action was accepted");
+    } catch (const std::runtime_error& failure) {
+        REQUIRE(std::string(failure.what()) == "import requires a path or explicit clear");
+    }
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "restaurant", {}, false, {}, true));
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "uci_engine", profile, false, {}, true));
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "uci_engine", {}, true, {}, true));
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "opening_book", {}, false,
+                                          "immutable_pinned_snapshot", true));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("locator clear restores saved authority and earlier consumer writes on late failure") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path first = write_mock_renderer_consumer(paths, "a.consumer", "uci_engine");
+    const fs::path last = write_mock_renderer_consumer(paths, "z.consumer", "uci_engine");
+    static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    const fs::path locator = paths.data_root / "locators" / "uci_engine.json";
+    const json old_locator = json::parse(std::ifstream(locator));
+    const json old_first = json::parse(std::ifstream(first));
+    const fs::path projection = first.parent_path() / "generated" / "context-projection.json";
+    const json old_projection = json::parse(std::ifstream(projection));
+    // A directory cannot be replaced by the final configuration file and is
+    // not owned as a generated file, even when it happens to be empty.
+    // Earlier consumer documents have already been written at this point.
+    fs::remove(last);
+    fs::create_directory(last);
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "uci_engine", {}, false, {}, true));
+    REQUIRE(json::parse(std::ifstream(locator)) == old_locator);
+    REQUIRE(json::parse(std::ifstream(first)) == old_first);
+    REQUIRE(json::parse(std::ifstream(projection)) == old_projection);
+    REQUIRE(fs::is_directory(last));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("locator clear reports failed compensation and retains exact recovery bytes") {
+#ifdef _WIN32
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(paths, "locked.consumer", "uci_engine");
+    static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    const json previous = json::parse(std::ifstream(configuration));
+    const fs::path projection = configuration.parent_path() / "generated" / "context-projection.json";
+    const json previous_projection = json::parse(std::ifstream(projection));
+    const fs::path locator = paths.data_root / "locators" / "uci_engine.json";
+    const json previous_locator = json::parse(std::ifstream(locator));
+    // Source bytes remain readable for backup, but the real Windows handle
+    // denies deletion/replacement during both publication and compensation.
+    const HANDLE held = CreateFileW(configuration.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(held != INVALID_HANDLE_VALUE);
+    std::string failure;
+    try {
+        static_cast<void>(SetupEngine::import_path(paths, "uci_engine", {}, false, {}, true));
+    } catch (const std::exception& error) {
+        failure = error.what();
+    } catch (...) {
+        CloseHandle(held);
+        throw;
+    }
+    CloseHandle(held);
+    REQUIRE(failure.find("cannot atomically activate " + configuration.string()) == 0);
+    REQUIRE(failure.find("consumer rollback failed") != std::string::npos);
+    REQUIRE(failure.find("backup retained at") != std::string::npos);
+    fs::path backup;
+    const std::string prefix = configuration.filename().string() + ".import-rollback-";
+    for (const auto& entry : fs::directory_iterator(configuration.parent_path())) {
+        if (entry.path().filename().string().starts_with(prefix)) backup = entry.path();
+    }
+    REQUIRE_FALSE(backup.empty());
+    REQUIRE(failure.find(backup.string()) != std::string::npos);
+    REQUIRE(json::parse(std::ifstream(backup)) == previous);
+    REQUIRE(json::parse(std::ifstream(configuration)) == previous);
+    REQUIRE(json::parse(std::ifstream(projection)) == previous_projection);
+    REQUIRE(json::parse(std::ifstream(locator)) == previous_locator);
+    remove_locator_test_directory(root);
+#else
+    SKIP("native delete-sharing compensation falsifier requires Windows");
+#endif
+}
+
+TEST_CASE("clearing a managed-copy locator preserves its payload and receipt") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path source = root / "book.bin";
+    std::ofstream(source) << "retained book";
+    const json imported = SetupEngine::import_path(paths, "opening_book", source, true);
+    const fs::path active = imported.at("path").get<std::string>();
+    const std::string id = imported.at("receipt").at("component_id").get<std::string>();
+    const fs::path receipt = paths.data_root / "receipts" / (id + ".json");
+    static_cast<void>(SetupEngine::import_path(paths, "opening_book", {}, false, {}, true));
+    REQUIRE(fs::is_regular_file(active / "book.bin"));
+    REQUIRE(fs::is_regular_file(source));
+    REQUIRE(json::parse(std::ifstream(receipt)) == imported.at("receipt"));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("clear revokes stale qualified-profile references without inspecting their targets") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    fs::create_directories(paths.data_root / "locators");
+    const fs::path retained = root / "historical-profile.fixture";
+    const std::string historical_bytes = "unqualified historical fixture, not qualification evidence";
+    std::ofstream(retained) << historical_bytes;
+    for (const std::string kind : {"timing_profile", "lichess_single_game_profile",
+                                   "lichess_capacity_profile"}) {
+        const fs::path locator = paths.data_root / "locators" / (kind + ".json");
+        // Retained historical metadata deliberately points at an incompatible
+        // fixture. Revocation must not require requalifying or opening it.
+        std::ofstream(locator) << json{{"schema", "arena_saved_locator_v1"},
+                                      {"schema_version", 1}, {"kind", kind},
+                                      {"mode", "in_place_reference"},
+                                      {"path", retained.string()}}.dump();
+        const json result = SetupEngine::import_path(paths, kind, {}, false, {}, true);
+        REQUIRE(result.at("removed") == true);
+        REQUIRE_FALSE(fs::exists(locator));
+        REQUIRE(fs::file_size(retained) == historical_bytes.size());
+        REQUIRE(SetupEngine::import_path(paths, kind, {}, false, {}, true).at("removed") == false);
+    }
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("cleared managed single-game profile stays absent from rendered consumer context") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    // Default locator source policy permits receipt fallback: prove that the
+    // retained managed-copy receipt is not itself profile selection authority.
+    const fs::path configuration = write_mock_renderer_consumer(
+        paths, "replaceable.profile.consumer", "lichess_single_game_profile");
+    const fs::path source = write_lichess_single_profile(root, "qualified-fixture.json");
+    const json imported = SetupEngine::import_path(paths, "lichess_single_game_profile", source);
+    const fs::path managed = imported.at("path").get<std::string>();
+    const std::string id = imported.at("receipt").at("component_id").get<std::string>();
+    const fs::path receipt = paths.data_root / "receipts" / (id + ".json");
+    REQUIRE(json::parse(std::ifstream(configuration)).at("locators").at("selected") == managed.string());
+    static_cast<void>(SetupEngine::import_path(paths, "lichess_single_game_profile", {}, false, {}, true));
+    REQUIRE(json::parse(std::ifstream(configuration)).at("locators").empty());
+    REQUIRE(json::parse(std::ifstream(configuration)).at("locator_details").empty());
+    const fs::path projection = configuration.parent_path() / "generated" / "context-projection.json";
+    REQUIRE(json::parse(std::ifstream(projection)).at("locators").empty());
+    REQUIRE(fs::is_regular_file(managed));
+    REQUIRE(fs::is_regular_file(source));
+    REQUIRE(json::parse(std::ifstream(receipt)) == imported.at("receipt"));
+    remove_locator_test_directory(root);
 }
 
 TEST_CASE("opening-book authority mode is explicit and reaches declared consumers") {

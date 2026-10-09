@@ -179,9 +179,10 @@ int main(int argc, char** argv) {
         std::string import_kind;
         fs::path import_source;
         bool managed_copy = false;
+        bool clear_locator = false;
         std::string authority_mode;
         auto* import_command =
-            app.add_subcommand("import", "Validate and save a local component locator");
+            app.add_subcommand("import", "Save or explicitly clear a local component locator");
         import_command
             ->add_option("--kind", import_kind,
                          "opening_book, syzygy, uci_engine, book_forge, evidence_service, "
@@ -194,15 +195,22 @@ int main(int argc, char** argv) {
                                    "lichess_single_game_profile", "lichess_capacity_profile",
                                    "lichess_transport_profile", "lichess_token_path",
                                    "restaurant"}));
-        import_command->add_option("--path", import_source)->required();
-        import_command->add_flag("--managed-copy", managed_copy,
+        auto* import_action = import_command->add_option_group("Locator action");
+        import_action->require_option(1, 1);
+        auto* import_path_option = import_action->add_option("--path", import_source);
+        auto* import_clear_option = import_action->add_flag(
+            "--clear", clear_locator, "Revoke only this saved locator and rerender its consumers");
+        import_clear_option->excludes(import_path_option);
+        auto* managed_copy_option = import_command->add_flag("--managed-copy", managed_copy,
                                  "Copy a small opening book into Manager-owned knowledge storage");
-        import_command
+        auto* authority_mode_option = import_command
             ->add_option("--authority-mode", authority_mode,
                          "Opening-book authority: service_managed_live_channel or "
                          "immutable_pinned_snapshot")
             ->check(CLI::IsMember({"service_managed_live_channel",
                                    "immutable_pinned_snapshot"}));
+        import_clear_option->excludes(managed_copy_option);
+        import_clear_option->excludes(authority_mode_option);
 
         std::string preset{"complete_arena"};
         std::vector<std::string> components;
@@ -298,7 +306,7 @@ int main(int argc, char** argv) {
                   json_output, result_file);
         } else if (*import_command) {
             print(SetupEngine::import_path(paths, import_kind, import_source, managed_copy,
-                                           authority_mode),
+                                           authority_mode, clear_locator),
                   json_output, result_file);
         } else if (*verify_command) {
             const auto result = SetupEngine::verify(paths);

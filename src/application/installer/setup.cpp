@@ -1,4 +1,5 @@
 #include "arena/application/installer/setup.hpp"
+#include "arena/domain/uuid.hpp"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
+#include <exception>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -4040,6 +4042,10 @@ json refresh_provider_consumers(
                 throw std::runtime_error(
                     "generated import consumer path contains a symbolic-link boundary");
             }
+            if (fs::exists(write.path) && !fs::is_regular_file(write.path)) {
+                throw std::runtime_error(
+                    "generated import consumer target must be a regular file");
+            }
             fs::create_directories(write.path.parent_path());
             const bool existed = fs::is_regular_file(write.path);
             const fs::path backup = write.path.string() + ".import-rollback-" + transaction_id;
@@ -4071,23 +4077,58 @@ json refresh_provider_consumers(
             }
         }
     } catch (...) {
-        std::error_code ignored;
+        const std::exception_ptr forward_failure = std::current_exception();
+        std::string rollback_failures;
         for (auto current = applied.rbegin(); current != applied.rend(); ++current) {
-            fs::remove(current->path, ignored);
-            ignored.clear();
-            if (current->existed && fs::is_regular_file(current->backup)) {
-                fs::rename(current->backup, current->path, ignored);
-                ignored.clear();
-            } else {
-                fs::remove(current->backup, ignored);
-                ignored.clear();
+            std::string rollback_error;
+            try {
+                if (contains_symbolic_link(current->path.parent_path()) ||
+                    fs::is_symlink(current->path) ||
+                    (fs::exists(current->path) && !fs::is_regular_file(current->path))) {
+                    throw std::runtime_error("consumer rollback target is not an owned regular file");
+                }
+                // Admit prior bytes before removing any current target. Missing
+                // or substituted backups must never cause destructive recovery.
+                if (current->existed &&
+                    (contains_symbolic_link(current->backup) ||
+                     !fs::is_regular_file(current->backup))) {
+                    throw std::runtime_error("consumer rollback backup is unavailable or linked");
+                }
+                std::error_code error;
+                fs::remove(current->path, error);
+                if (error) throw std::runtime_error("cannot remove consumer target: " + error.message());
+                if (current->existed) {
+                    fs::rename(current->backup, current->path, error);
+                    if (error) throw std::runtime_error("cannot restore consumer backup: " + error.message());
+                }
+            } catch (const std::exception& failure) {
+                rollback_error = failure.what();
+                rollback_failures += "; consumer rollback failed for " + current->path.string() +
+                    ": " + rollback_error + "; recovery backup path " + current->backup.string();
+                std::error_code status_error;
+                const auto status = fs::symlink_status(current->backup, status_error);
+                if (!status_error && fs::is_regular_file(status)) {
+                    rollback_failures += "; backup retained at " + current->backup.string();
+                }
             }
             if (current->retained_index.has_value()) {
-                (*retained_writes)[*current->retained_index]["state"] = "restored";
+                auto& record = (*retained_writes)[*current->retained_index];
+                record["state"] = rollback_error.empty() ? "restored" : "rollback_failed";
+                if (!rollback_error.empty()) record["rollback_error"] = rollback_error;
             }
         }
-        if (checkpoint) checkpoint();
-        throw;
+        if (checkpoint) {
+            try { checkpoint(); }
+            catch (const std::exception& failure) {
+                rollback_failures += "; consumer rollback checkpoint failed: " + std::string(failure.what());
+            }
+        }
+        if (rollback_failures.empty()) std::rethrow_exception(forward_failure);
+        std::string first_failure;
+        try { std::rethrow_exception(forward_failure); }
+        catch (const std::exception& failure) { first_failure = failure.what(); }
+        catch (...) { first_failure = "non-standard consumer refresh failure"; }
+        throw std::runtime_error(first_failure + rollback_failures);
     }
 
     if (retained_writes == nullptr) {
@@ -5410,7 +5451,79 @@ json SetupEngine::inventory(const SetupPaths& paths,
 
 json SetupEngine::import_path(const SetupPaths& paths, const std::string& kind,
                               const fs::path& path, const bool managed_copy,
-                              const std::string& authority_mode) {
+                              const std::string& authority_mode, const bool clear) {
+    if (clear) {
+        if (!path.empty() || managed_copy || !authority_mode.empty()) {
+            throw std::runtime_error("locator clear excludes path, managed copy, and authority mode");
+        }
+        if (!valid_discovery_kind(kind) || kind == "restaurant") {
+            throw std::runtime_error("unsupported locator clear kind " + kind);
+        }
+        const fs::path locator = normalized_absolute(paths.data_root) /
+                                 "locators" / (kind + ".json");
+        if (contains_symbolic_link(locator) || fs::is_symlink(locator) ||
+            (fs::exists(locator) && !fs::is_regular_file(locator))) {
+            throw std::runtime_error("locator clear requires an unlinked regular saved locator");
+        }
+        const bool existed = fs::is_regular_file(locator);
+        const std::string clear_transaction_id = arena::domain::uuid_v7();
+        const fs::path backup = locator.string() + ".clear-rollback-" + clear_transaction_id;
+        if (fs::exists(backup) || fs::is_symlink(backup)) {
+            throw std::runtime_error("locator clear backup already exists: " + backup.string());
+        }
+        if (existed) fs::rename(locator, backup);
+        json refreshed;
+        json consumer_writes = json::array();
+        try {
+            refreshed = refresh_import_consumers(
+                paths, kind, clear_transaction_id, &consumer_writes);
+        } catch (const std::exception& failure) {
+            const std::string first_failure = failure.what();
+            if (existed) {
+                try {
+                    if (fs::exists(locator) || contains_symbolic_link(locator)) {
+                        throw std::runtime_error("locator changed during clear rollback");
+                    }
+                    fs::rename(backup, locator);
+                } catch (const std::exception& rollback) {
+                    throw std::runtime_error(first_failure + "; locator rollback failed: " +
+                                             rollback.what() + "; backup retained at " + backup.string());
+                }
+            }
+            throw;
+        }
+        // Consumer state and locator revocation have committed. Disposable
+        // backup cleanup cannot now enter the locator compensation branch.
+        std::vector<fs::path> committed_backups;
+        for (const auto& write : consumer_writes) {
+            if (write.at("existed").get<bool>()) {
+                committed_backups.emplace_back(write.at("backup").get<std::string>());
+            }
+        }
+        if (existed) committed_backups.push_back(backup);
+        std::string cleanup_failures;
+        for (const auto& committed_backup : committed_backups) {
+            try {
+                if (contains_symbolic_link(committed_backup) ||
+                    !fs::is_regular_file(committed_backup)) {
+                    throw std::runtime_error("committed backup is unavailable or linked");
+                }
+                fs::remove(committed_backup);
+            } catch (const std::exception& cleanup) {
+                cleanup_failures += "; backup cleanup failed at " + committed_backup.string() +
+                                    ": " + cleanup.what();
+            }
+        }
+        if (!cleanup_failures.empty()) {
+            throw std::runtime_error("locator clear committed" + cleanup_failures);
+        }
+        return {{"schema", "arena_setup_import_result_v1"}, {"schema_version", 1},
+                {"kind", kind}, {"mode", "clear_saved_locator"}, {"state", "cleared"},
+                {"removed", existed}, {"refreshed_consumers", refreshed}};
+    }
+    if (path.empty()) {
+        throw std::runtime_error("import requires a path or explicit clear");
+    }
     const fs::path normalized = normalized_absolute(path);
     if (kind != "opening_book" && !authority_mode.empty()) {
         throw std::runtime_error("authority mode is supported only for opening_book");

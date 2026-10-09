@@ -54,7 +54,8 @@ class SetupEngine final {
                                                     const std::string& kind,
                                                     const std::filesystem::path& path,
                                                     bool managed_copy = false,
-                                                    const std::string& authority_mode = {});
+                                                    const std::string& authority_mode = {},
+                                                    bool clear = false);
 
     [[nodiscard]] static nlohmann::json save_lichess_token_reference(
         const std::filesystem::path& data_root,

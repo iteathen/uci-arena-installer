@@ -1500,6 +1500,7 @@ discovery:
 local_import:
   interface: arena_setup_import_result_v1
   command: arena-setup --json import --kind KIND --path PATH [--authority-mode MODE]
+  clear_command: arena-setup --json import --kind KIND --clear
   default_mode: in_place_reference
   opening_book_authority_modes:
     - service_managed_live_channel
@@ -1527,6 +1528,10 @@ local_import:
     lichess_token_path: path_reference_only_never_read
     restaurant: detect_only_import_forbidden
   rules:
+    - "Explicit --clear is mutually exclusive with --path, --managed-copy, and --authority-mode; import requires exactly one path or clear action."
+    - "Clear revokes only the selected supported saved locator. Restaurant remains detect-only. It never opens the referenced asset or credential, removes copied assets or receipts, or changes other locators. An absent locator is an idempotent clear."
+    - "Clear rerenders and verifies only manifest-declared affected consumers through the normal import lifecycle; failure restores the saved locator and changed consumer documents. Saved-locator revocation does not revoke separately valid receipt authority. The provider renderer alone interprets managed launch-profile arguments."
+    - "A failed compensation must retain the original forward cause and report each failed restoration with its recovery backup path; failed restoration never records restored. Unknown, linked, or irregular recovery boundaries are preserved. Clear retains consumer backups until semantic commit, and post-commit cleanup failure reports committed state and retained paths without restoring old locator authority."
     - Import never scans outside the supplied path and its explicitly allowed flat entries.
     - In-place imports save only normalized locators and never copy provider-owned data.
     - "Opening-book imports persist authority mode independently of storage mode. New imports default to immutable_pinned_snapshot; service_managed_live_channel must be explicit, is valid only for an in-place stable channel directory selected through provider output or explicit operator authority, and is never inferred from a filename or path shape."
