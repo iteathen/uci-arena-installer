@@ -28,7 +28,8 @@ export function validateReleaseIntegration({
   return { authority: "integrated_main", integrated_main: true };
 }
 
-export function validateRunnerPathBudget({ runnerWorkRoot, repositorySlug }) {
+export function validateRunnerPathBudget({ runnerWorkRoot, repositorySlug, requiresVcpkg = true }) {
+  if (typeof requiresVcpkg !== "boolean") throw new Error("runner vcpkg closure selection is invalid");
   if (typeof runnerWorkRoot !== "string" || !runnerWorkRoot.trim()) {
     throw new Error("runner work root is unavailable");
   }
@@ -48,19 +49,33 @@ export function validateRunnerPathBudget({ runnerWorkRoot, repositorySlug }) {
       "TryCompile-abcdefgh", "cmTC_abcdefgh.dir", "Debug",
       "cmTC_abcdefgh.tlog", "link-cvtres.write.1.tlog",
     ),
-    path.join(
+  ];
+  if (requiresVcpkg) projectedPaths.push(path.join(
       ...common,
       "vcpkg", "buildtrees", "libsodium", "x64-windows-release-rel",
       "builds", "msvc", "vs2022", "libsodium", "x64", "Release",
       "libsodium.dir", "Release", "libsodium-file-tracker.tlog",
       "link-cvtres.write.1.tlog",
-    ),
-  ];
+    ));
   const projectedLength = Math.max(...projectedPaths.map((entry) => entry.length));
   if (projectedLength > 240) {
     throw new Error(`projected release build path exceeds the 240-character budget (${projectedLength})`);
   }
   return { runner_work_root: resolved, projected_path_characters: projectedLength };
+}
+
+function sourceDeclaresVcpkg(repositoryRoot, workflow) {
+  // Source declarations, never component names, select the additional closure.
+  for (const directory of [repositoryRoot, path.join(repositoryRoot, "native")]) {
+    if (["vcpkg.json", "vcpkg-configuration.json"].some(
+      (file) => existsSync(path.join(directory, file)),
+    )) return true;
+    for (const file of ["CMakeLists.txt", "CMakePresets.json"]) {
+      const declaration = path.join(directory, file);
+      if (existsSync(declaration) && /\bvcpkg(?:\b|_)/iu.test(readFileSync(declaration, "utf8"))) return true;
+    }
+  }
+  return /\bvcpkg(?:\b|_)/iu.test(workflow);
 }
 
 export function validateCandidateReleaseTag({ candidateReleaseTag, expectedVersion }) {
@@ -347,7 +362,8 @@ export function validateReleaseSource({
     remoteMainHead,
     allowUnmergedDiagnostic,
   });
-  const pathBudget = validateRunnerPathBudget({ runnerWorkRoot, repositorySlug });
+  const pathBudget = validateRunnerPathBudget({ runnerWorkRoot, repositorySlug,
+    requiresVcpkg: sourceDeclaresVcpkg(repositoryRoot, workflow) });
   const publication = validatePublicationAuthority({
     publicationMode,
     candidateReleaseTag,
