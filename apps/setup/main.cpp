@@ -1,6 +1,8 @@
 #include <curl/curl.h>
 
 #include <CLI/CLI.hpp>
+#include <array>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -12,10 +14,15 @@
 #include <vector>
 
 #include "arena/application/installer/setup.hpp"
+#include "arena/application/installer/install_layout.hpp"
 #include "arena/ports/asset_search_index.hpp"
 #include "arena/platform/service_control.hpp"
 #ifdef _WIN32
 #include "arena/platform/windows_install_scope.hpp"
+#include "arena/platform/windows_package_layout.hpp"
+#include "arena/platform/filesystem_identity.hpp"
+#include "arena/ports/filesystem_identity.hpp"
+#include "arena/install-layout-policy.hpp"
 #endif
 
 namespace {
@@ -123,6 +130,24 @@ json load_json_document(const fs::path& path) {
     }
 }
 
+#ifdef _WIN32
+bool same_path(const fs::path& a, const fs::path& b) {
+    auto left_path = a.lexically_normal();
+    auto right_path = b.lexically_normal();
+    auto left = left_path.make_preferred().native();
+    auto right = right_path.make_preferred().native();
+    if (left.size() > 3 && left.back() == L'\\') left.pop_back();
+    if (right.size() > 3 && right.back() == L'\\') right.pop_back();
+    return CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
+        right.data(), static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
+}
+
+std::string package_path_text(const fs::path& value) {
+    const auto bytes = value.u8string();
+    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+}
+#endif
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -149,11 +174,13 @@ int main(int argc, char** argv) {
             app.add_option("--metadata-dir", metadata_directory, "Trusted TUF metadata directory");
         app.add_flag("--allow-unsigned-development-catalog", allow_unsigned_development_catalog,
                      "Permit an unsigned local catalog; forbidden for official releases");
-        app.add_option("--install-root", paths.install_root);
-        app.add_option("--data-root", paths.data_root);
-        app.add_option("--cache-root", paths.cache_root);
-        app.add_option("--workspace-root", paths.workspace_root);
-        app.add_option("--knowledge-root", paths.knowledge_root);
+        std::vector<std::pair<CLI::Option*, fs::path*>> root_options{
+            {app.add_option("--install-root", paths.install_root), &paths.install_root},
+            {app.add_option("--data-root", paths.data_root), &paths.data_root},
+            {app.add_option("--cache-root", paths.cache_root), &paths.cache_root},
+            {app.add_option("--workspace-root", paths.workspace_root), &paths.workspace_root},
+            {app.add_option("--knowledge-root", paths.knowledge_root), &paths.knowledge_root},
+        };
 #ifdef _WIN32
         app.add_option(
                "--install-scope",
@@ -173,6 +200,9 @@ int main(int argc, char** argv) {
 
         std::vector<fs::path> scan_roots;
         auto* inventory = app.add_subcommand("inventory", "Detect managed and local components");
+#ifdef _WIN32
+        auto* layout_command = app.add_subcommand("layout", "Read the MSI-owned selected installation paths");
+#endif
         inventory->add_option("--scan-root", scan_roots,
                               "Additional bounded root to inspect; may be repeated");
 
@@ -297,6 +327,59 @@ int main(int argc, char** argv) {
         if (!paths.manager_service_access && paths.restart_manager_service) {
             throw std::runtime_error(
                 "per-user setup cannot restart or impersonate the machine Manager service");
+        }
+        try {
+            const auto selection = arena::platform::read_windows_package_layout_selection(
+                install_scope == "per-user" ? arena::ports::InstallScope::per_user : arena::ports::InstallScope::per_machine);
+            if (!selection && *layout_command) {
+                print({{"schema", "arena_package_layout_selection_error_v1"},
+                       {"code", "selection_unavailable"}}, json_output, result_file);
+                curl_global_cleanup();
+                return 2;
+            }
+            if (!selection && !*inventory && !*verify_command && !*plan_command
+                && !*uninstall_plan_command && !*purge_plan_command) {
+                const bool complete_explicit_roots = std::all_of(root_options.begin(), root_options.end(),
+                    [](const auto& entry) { return entry.first->count() != 0; });
+                if (!complete_explicit_roots)
+                    throw std::runtime_error("package path selection is unavailable; explicit complete legacy or development roots are required");
+            }
+            if (selection) {
+                const auto resolved = arena::application::installer::resolve_package_layout_selection(
+                    json::parse(arena::packaging::install_layout_policy), *selection);
+                auto identity = arena::platform::make_filesystem_identity();
+                arena::application::installer::admit_package_layout_roots(resolved, *identity);
+                auto public_launcher = identity->admit_regular_file(resolved.stable_paths.setup_launcher);
+                auto private_runtime = identity->admit_regular_file(resolved.stable_paths.installer_runtime / "bin" / "arena-setup.exe");
+                if (*layout_command && !same_path(arena::platform::windows_executable_path(), private_runtime->absolute_path()))
+                    throw std::runtime_error("layout query is not the selected installed runtime");
+                const std::array<fs::path, 5> projected{
+                    resolved.roots.install, resolved.roots.data, resolved.roots.cache,
+                    resolved.roots.workspace, resolved.roots.knowledge};
+                for (std::size_t index = 0; index < root_options.size(); ++index) {
+                    const auto [option, value] = root_options[index];
+                    if (option->count() && !same_path(*value, projected[index]))
+                        throw std::runtime_error("explicit roots conflict with the installed package selection");
+                    *value = projected[index];
+                }
+                if (*layout_command) {
+                    print({{"schema", "arena_package_layout_selection_v1"}, {"scope", install_scope},
+                           {"integration_root", package_path_text(resolved.roots.integration)},
+                           {"roots", {{"data", package_path_text(paths.data_root)}, {"install", package_path_text(paths.install_root)},
+                                      {"cache", package_path_text(paths.cache_root)}, {"workspace", package_path_text(paths.workspace_root)},
+                                      {"knowledge", package_path_text(paths.knowledge_root)}}}}, json_output, result_file);
+                    curl_global_cleanup();
+                    return 0;
+                }
+            }
+        } catch (const std::exception&) {
+            if (*layout_command) {
+                print({{"schema", "arena_package_layout_selection_error_v1"},
+                       {"code", "selection_invalid"}}, json_output, result_file);
+                curl_global_cleanup();
+                return 2;
+            }
+            throw;
         }
 #endif
 

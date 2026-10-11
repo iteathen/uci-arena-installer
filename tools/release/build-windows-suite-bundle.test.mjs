@@ -228,6 +228,26 @@ test("suite bundle derives default-on Modify features and lifecycle commands fro
   }
 });
 
+test("suite install repair and uninstall use one persisted program and data selection", () => {
+  const f = fixture();
+  try {
+    writeFileSync(path.join(f.root, "manager.msi"), "fixture-msi");
+    const { source } = buildWindowsSuiteBundleSource(options(f, "per-user"));
+    assert.match(source, /Variable Name="ArenaProgramRoot" Type="formatted"[^>]*Persisted="yes"[^>]*bal:Overridable="yes"/u);
+    assert.match(source, /Variable Name="ArenaDataRoot" Type="formatted"[^>]*Persisted="yes"[^>]*bal:Overridable="yes"/u);
+    assert.match(source, /MsiProperty Name="INSTALL_ROOT" Value="\[ArenaProgramRoot\]"/u);
+    assert.match(source, /MsiProperty Name="ARENA_DATA_ROOT" Value="\[ArenaDataRoot\]"/u);
+    for (const command of ["InstallArguments", "RepairArguments", "UninstallArguments"]) {
+      const arguments_ = source.match(new RegExp(`${command}="([^"]*)"`, "u"))[1];
+      assert.ok(arguments_.includes('--install-root &quot;[ArenaProgramRoot]\\installed&quot;'));
+      assert.ok(arguments_.includes('--data-root &quot;[ArenaDataRoot]&quot;'));
+      assert.ok(arguments_.includes('--cache-root &quot;[ArenaDataRoot]\\cache&quot;'));
+      assert.ok(arguments_.includes('--workspace-root &quot;[ArenaDataRoot]\\workspaces&quot;'));
+      assert.ok(arguments_.includes('--knowledge-root &quot;[ArenaDataRoot]\\knowledge&quot;'));
+    }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("suite bundle rejects secret-bearing media before WiX", () => {
   const f = fixture();
   try {

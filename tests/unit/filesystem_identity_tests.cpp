@@ -1,4 +1,5 @@
 #include "arena/ports/filesystem_identity.hpp"
+#include "arena/application/installer/install_layout.hpp"
 
 #ifdef _WIN32
 #include "arena/platform/filesystem_identity.hpp"
@@ -846,6 +847,31 @@ TEST_CASE("Windows FilesystemIdentity rejects a junction ancestor") {
     } catch (const ports::FilesystemIdentityException& error) {
         REQUIRE(error.code() ==
                 ports::FilesystemIdentityErrorCode::link_or_reparse);
+    }
+}
+
+TEST_CASE("selected package roots reject cache installed and dangling junctions", "[package-layout]") {
+    WindowsTempRoot temporary;
+    const auto integration = temporary.path() / "program";
+    const auto data = temporary.path() / "data";
+    REQUIRE(fs::create_directory(integration));
+    REQUIRE(fs::create_directory(data));
+    arena::application::installer::ResolvedInstallLayout layout;
+    layout.roots = {integration, data, integration / "installed", data / "cache",
+        data / "workspaces", data / "knowledge", data / "release", data / "receipts",
+        data / "transactions", data / "preservation"};
+    auto identity = arena::platform::make_filesystem_identity();
+    REQUIRE_NOTHROW(arena::application::installer::admit_package_layout_roots(layout, *identity));
+    for (const auto& root : {layout.roots.cache, layout.roots.install}) {
+        const auto target = temporary.path() / "foreign";
+        REQUIRE(fs::create_directory(target));
+        DWORD native_error{};
+        if (!create_junction(root, target, native_error))
+            SKIP("owned junction creation unavailable (win32=" << native_error << ")");
+        CHECK_THROWS_AS(arena::application::installer::admit_package_layout_roots(layout, *identity), ports::FilesystemIdentityException);
+        REQUIRE(fs::remove(target));
+        CHECK_THROWS_AS(arena::application::installer::admit_package_layout_roots(layout, *identity), ports::FilesystemIdentityException);
+        REQUIRE(fs::remove(root));
     }
 }
 

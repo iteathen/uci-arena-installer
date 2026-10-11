@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { buildWindowsWixLayoutProjection } from "./install-layout.mjs";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?$/u;
 const SCOPES = new Set(["per-user", "per-machine"]);
@@ -224,13 +225,24 @@ export function buildWindowsSuiteBundleSource(options) {
     .join(" ");
   const restart = selectedScope.restart_manager_service
     ? " --restart-manager-service" : "";
+  const layout = buildWindowsWixLayoutProjection({
+    policy: readJson(fileURLToPath(new URL("../../packaging/install-layout.json", import.meta.url)), "InstallLayout policy"),
+    scope: options.scope,
+  });
+  const roots = Object.fromEntries(Object.entries(layout.roots).map(([name, root]) => [
+    name, `[${root.relative_to === "integration" ? "ArenaProgramRoot" : "ArenaDataRoot"}]\\${root.expression}`,
+  ]));
+  const pathArguments = [
+    `--install-root ${quoted(roots.install)}`,
+    `--data-root ${quoted("[ArenaDataRoot]")}`,
+    `--cache-root ${quoted(roots.cache)}`,
+    `--workspace-root ${quoted(roots.workspace)}`,
+    `--knowledge-root ${quoted(roots.knowledge)}`,
+  ];
   const global = [
     `--install-scope ${options.scope}`,
     `--bundle-owner ${quoted("[WixBundleProviderKey]")}`,
-    `--install-root ${quoted(selectedScope.install_root)}`,
-    `--data-root ${quoted(selectedScope.data_root)}`,
-    `--cache-root ${quoted(selectedScope.cache_root)}`,
-    `--knowledge-root ${quoted(selectedScope.knowledge_root)}`,
+    ...pathArguments,
     `--catalog ${quoted("[WixBundleExecutePackageCacheFolder]release\\catalog.json")}`,
     options.development
       ? "--allow-unsigned-development-catalog"
@@ -242,10 +254,7 @@ export function buildWindowsSuiteBundleSource(options) {
   const uninstall = [
     `--install-scope ${options.scope}`,
     `--bundle-owner ${quoted("[WixBundleProviderKey]")}`,
-    `--install-root ${quoted(selectedScope.install_root)}`,
-    `--data-root ${quoted(selectedScope.data_root)}`,
-    `--cache-root ${quoted(selectedScope.cache_root)}`,
-    `--knowledge-root ${quoted(selectedScope.knowledge_root)}`,
+    ...pathArguments,
     `--result-file ${quoted("[WixBundleLog_SuiteComponents].uninstall.json")}`,
     "uninstall --all --yes",
   ].join(" ");
@@ -253,6 +262,10 @@ export function buildWindowsSuiteBundleSource(options) {
   const payloads = entries.filter((relative) => path.normalize(relative) !== setupRelative);
   const variables = policy.features.map((feature) =>
     `    <Variable Name="${xml(feature.variable)}" Type="numeric" Value="${defaults.has(feature.component_id) ? 1 : 0}" Persisted="yes" bal:Overridable="yes" />`);
+  variables.push(
+    `    <Variable Name="ArenaProgramRoot" Type="formatted" Value="${xml(layout.anchors.integration.expression)}" Persisted="yes" bal:Overridable="yes" />`,
+    `    <Variable Name="ArenaDataRoot" Type="formatted" Value="${xml(layout.anchors.data.expression)}" Persisted="yes" bal:Overridable="yes" />`,
+  );
   const payloadLines = payloads.map((relative, index) =>
     `        <Payload Id="SuiteMedia${String(index + 1).padStart(4, "0")}" SourceFile="${xml(path.join(media, relative))}" Name="${xml(payloadName(relative).replaceAll("/", "\\"))}" />`);
   const name = `${policy.display_name} ${selectedScope.name_suffix}`
@@ -269,7 +282,8 @@ export function buildWindowsSuiteBundleSource(options) {
       ...variables,
       '    <Chain>',
       `      <MsiPackage Id="ManagerCore" SourceFile="${xml(msi)}" Visible="no" Vital="yes">`,
-      `        <MsiProperty Name="ARENA_DATA_ROOT" Value="${xml(selectedScope.data_root)}" />`,
+      '        <MsiProperty Name="INSTALL_ROOT" Value="[ArenaProgramRoot]" />',
+      '        <MsiProperty Name="ARENA_DATA_ROOT" Value="[ArenaDataRoot]" />',
       '      </MsiPackage>',
       `      <ExePackage Id="SuiteComponents" SourceFile="${xml(setup)}" InstallArguments="${install}" RepairArguments="${repair}" UninstallArguments="${uninstall}" DetectCondition="WixBundleInstalled" Protocol="none" PerMachine="${selectedScope.per_machine ? "yes" : "no"}" Permanent="no" Vital="yes">`,
       ...payloadLines,

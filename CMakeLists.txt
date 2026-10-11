@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(
   uci_arena_installer
-  VERSION 0.2.1
+  VERSION 0.2.2
   DESCRIPTION "Transactional installer and release assembly for UCI Arena"
   LANGUAGES CXX
 )
@@ -65,6 +65,7 @@ target_link_libraries(
 
 if(WIN32)
   target_sources(arena_installer_core PRIVATE
+    src/platform/windows/package_layout.cpp
     src/platform/windows/asset_search_index.cpp
     src/platform/windows/durable_state_publisher.cpp
     src/platform/windows/filesystem_identity.cpp
@@ -87,6 +88,10 @@ else()
 endif()
 
 add_executable(arena-setup apps/setup/main.cpp)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/packaging/install-layout.json" ARENA_LAYOUT_POLICY_BYTES)
+configure_file(packaging/install-layout-policy.hpp.in
+  "${CMAKE_CURRENT_BINARY_DIR}/generated/arena/install-layout-policy.hpp" @ONLY)
+target_include_directories(arena-setup PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(
   arena-setup
   PRIVATE arena_installer_core CLI11::CLI11 CURL::libcurl)

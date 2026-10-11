@@ -198,6 +198,25 @@ test("Manager MSI isolates differing Manager and Installer runtime files", () =>
   }
 });
 
+test("Manager MSI owns selected roots and gives the desktop the same five paths", () => {
+  const f = fixture();
+  try {
+    for (const scope of ["per-user", "per-machine"]) {
+      const source = buildManagerMsiSource(options(f, scope));
+      assert.ok(source.includes(`Software\\UCI Arena\\Installer\\PackageLayout\\${scope}`));
+      assert.match(source, /Name="Schema" Type="string" Value="arena_package_layout_selection_v1"/u);
+      assert.match(source, /Name="IntegrationRoot" Type="string" Value="\[INSTALL_ROOT\]"/u);
+      assert.match(source, /Name="DataRoot" Type="string" Value="\[ARENA_DATA_ROOT\]"/u);
+      const shortcut = source.match(/<Shortcut Id="ArenaManagerStartMenuShortcut"[^>]*>/u)[0];
+      assert.ok(shortcut.includes('--data-dir &quot;[ARENA_DATA_ROOT]&quot;'));
+      assert.ok(shortcut.includes('--install-root &quot;[INSTALL_ROOT]installed&quot;'));
+      assert.ok(shortcut.includes('--cache-root &quot;[ARENA_DATA_ROOT]\\cache&quot;'));
+      assert.ok(shortcut.includes('--workspace-root &quot;[ARENA_DATA_ROOT]\\workspaces&quot;'));
+      assert.ok(shortcut.includes('--knowledge-root &quot;[ARENA_DATA_ROOT]\\knowledge&quot;'));
+    }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("Manager MSI separates component identity from suite package version", () => {
   const f = fixture();
   try {

@@ -1,6 +1,7 @@
 #include "arena/application/installer/install_layout.hpp"
 
 #include "arena/application/installer/setup.hpp"
+#include "arena/ports/filesystem_identity.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -680,13 +681,14 @@ void validate_scope_semantics(const json& policy, const std::string_view scope) 
 
 [[nodiscard]] ResolvedInstallLayout resolve_validated(
     const json& policy, const ports::InstallScope scope,
-    const ports::InstallLayoutAnchorResolver& anchors) {
+    const ports::InstallLayoutAnchorResolver& anchors,
+    const std::optional<std::pair<fs::path, fs::path>>& selected = std::nullopt) {
     const auto selected_scope = scope_name(scope);
     const auto& definition = policy.at("scopes").at(selected_scope);
     const auto& definitions = definition.at("roots");
 
     std::map<ports::LayoutAnchor, fs::path> resolved_anchors;
-    for (const auto name : {std::string_view{"integration"}, std::string_view{"data"}}) {
+    if (!selected) for (const auto name : {std::string_view{"integration"}, std::string_view{"data"}}) {
         const auto& anchor_name = definitions.at(name).at("anchor").get_ref<const std::string&>();
         const auto anchor = anchor_from_name(anchor_name, "roots.anchor");
         if (!resolved_anchors.contains(anchor)) {
@@ -700,7 +702,10 @@ void validate_scope_semantics(const json& policy, const std::string_view scope) 
     result.policy_id = policy.at("policy_id").get<std::string>();
     result.policy_version = policy.at("policy_version").get<std::uint64_t>();
     result.scope = scope;
-    for (const auto name : {std::string_view{"integration"}, std::string_view{"data"}}) {
+    if (selected) {
+        result.roots.integration = selected->first;
+        result.roots.data = selected->second;
+    } else for (const auto name : {std::string_view{"integration"}, std::string_view{"data"}}) {
         const auto& definition_root = definitions.at(name);
         const auto anchor = anchor_from_name(
             definition_root.at("anchor").get_ref<const std::string&>(), "roots.anchor");
@@ -779,6 +784,43 @@ ResolvedInstallLayout resolve_install_layout(
     const json& validated_policy, const ports::InstallScope scope,
     const ports::InstallLayoutAnchorResolver& anchors) {
     return resolve_validated(validate_policy(validated_policy), scope, anchors);
+}
+
+ResolvedInstallLayout resolve_package_layout_selection(
+    const json& validated_policy, const json& selection) {
+    const auto policy = validate_policy(validated_policy);
+    if (policy.at("policy_version") != 2) fail("package selection", "unsupported policy generation");
+    exact_keys(selection, std::array<std::string_view, 4>{
+        "schema", "scope", "integration_root", "data_root"}, "package selection");
+    require_string(selection.at("schema"), "arena_package_layout_selection_v1", "package selection.schema");
+    const auto scope = scope_from_name(bounded_text(selection.at("scope"), "package selection.scope", 11));
+    const auto integration = descriptor_path(selection.at("integration_root"), "package selection.integration_root");
+    const auto data = descriptor_path(selection.at("data_root"), "package selection.data_root");
+    class NoAnchors final : public ports::InstallLayoutAnchorResolver {
+        fs::path resolve(ports::LayoutAnchor) const override {
+            throw std::logic_error("package selection must not resolve known-folder defaults");
+        }
+    } anchors;
+    return resolve_validated(policy, scope, anchors,
+        std::pair{path_value(integration.text), path_value(data.text)});
+}
+
+void admit_package_layout_roots(const ResolvedInstallLayout& layout,
+                               ports::FilesystemIdentity& identity) {
+    for (const auto name : root_names) {
+        fs::path existing = root_by_name(layout.roots, name);
+        for (;;) {
+            try {
+                (void)identity.admit_directory(existing);
+                break;
+            } catch (const ports::FilesystemIdentityException& error) {
+                if (error.code() != ports::FilesystemIdentityErrorCode::missing) throw;
+                if (existing.empty() || existing.parent_path() == existing)
+                    throw std::runtime_error("selected package root cannot be admitted");
+                existing = existing.parent_path();
+            }
+        }
+    }
 }
 
 InstalledLayout validate_installed_layout(
