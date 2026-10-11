@@ -11,6 +11,13 @@ The fixed-scope suite bundle accepts persisted `ArenaProgramRoot` and
 locations before registry/file publication, and removes the selection on normal
 uninstall. Normal uninstall preserves application data.
 
+The outer Windows launcher selects the fixed-scope child. For a fresh unattended
+personal installation, explicitly pass `--scope personal` before forwarded Burn
+arguments such as `/install /quiet /norestart`. `/quiet` alone does not select
+scope; without an existing installation or an explicit scope, the launcher waits
+at its scope selector before staging a child or executing packages. An existing
+installation retains its observed scope, and a conflicting override rejects.
+
 MSI owns one four-string record in the 64-bit registry view:
 `Software\UCI Arena\Installer\PackageLayout\<scope>`. It contains `Schema`,
 `Scope`, `IntegrationRoot`, and `DataRoot`. Scope selects HKCU or HKLM. Root
