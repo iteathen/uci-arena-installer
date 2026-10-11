@@ -1,0 +1,92 @@
+{
+  "schema": "arena_product_composition_v1",
+  "product_release": "0.3.57",
+  "installer": {
+    "repository": "iteathen/uci-arena-installer",
+    "minimum_version": "0.2.2"
+  },
+  "components": [
+    {
+      "role": "manager",
+      "component_id": "manager.core",
+      "version": "0.3.28",
+      "repository": "iteathen/uci-arena-manager",
+      "required": true,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "book_forge",
+      "component_id": "book_forge.service",
+      "version": "0.4.9",
+      "repository": "iteathen/uci-arena-book-forge",
+      "required": false,
+      "default_enabled": true,
+      "requires": [
+        "node_runtime.private",
+        "stockfish.engine"
+      ]
+    },
+    {
+      "role": "evidence_service",
+      "component_id": "uci_arena_evidence.service",
+      "version": "0.3.18",
+      "repository": "iteathen/uci-arena-evidence-service",
+      "required": false,
+      "default_enabled": true,
+      "requires": [
+        "node_runtime.private",
+        "uci_arena.vector"
+      ]
+    },
+    {
+      "role": "lichess_bot",
+      "component_id": "lichess.adapter",
+      "version": "1.0.45",
+      "repository": "iteathen/uci-arena-lichess-bot",
+      "required": false,
+      "default_enabled": true,
+      "requires": [
+        "node_runtime.private"
+      ]
+    },
+    {
+      "role": "node_runtime",
+      "component_id": "node_runtime.private",
+      "version": "26.11.1",
+      "repository": "iteathen/uci-arena-installer",
+      "required": false,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "stockfish",
+      "component_id": "stockfish.engine",
+      "version": "15.1",
+      "repository": "iteathen/uci-arena-installer",
+      "required": false,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "root_tablebase_provider",
+      "component_id": "syzygy.root-provider",
+      "version": "2.1.1",
+      "repository": "iteathen/uci-arena-syzygy-root-provider",
+      "required": false,
+      "default_enabled": true,
+      "requires": []
+    },
+    {
+      "role": "engine",
+      "component_id": "uci_arena.vector",
+      "version": "0.1.3",
+      "repository": "iteathen/UCI-Arena-Vector",
+      "required": false,
+      "default_enabled": true,
+      "requires": [
+        "node_runtime.private"
+      ]
+    }
+  ]
+}
