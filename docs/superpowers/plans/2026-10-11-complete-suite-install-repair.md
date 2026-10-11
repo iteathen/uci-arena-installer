@@ -30,7 +30,7 @@
 ### Task1: Repair provider acceptance boundaries
 
 - [x] Book0.4.9 signed and independently reviewed; isolated real owned Windows uninstall/copy/retained-C-backup/fresh-E-install sequence passed.
-- [ ] Bot owner: confirm fresh public replacement interlock; repair actual initial-clock handoff before readiness and across game reuse; independently review and sign a fresh version.
+- [x] Bot1.0.45 initial-clock handoff, portable timing-policy binding and offline restore independently reviewed; official signed payload and inventory verified.
 - [x] Fresh signed43 interlock reports activeWork0, disabled/inactive; old maintenance recovery is unnecessary.
 - [x] Vector0.1.3 signed bytes, actual policy, native checks and stopped configuration already qualified; reuse unchanged.
 
@@ -38,7 +38,7 @@
 
 **Files:** `compositions/complete-arena-0.3.55.json`, `specs/installation_contract_v1.yaml`; external lock/candidate directories are generated from exact signed inputs.
 
-- [x] Complete0.3.55 composition merged; Vector0.1.3 and Bot1.0.44 selected. Manager now requires a fresh root-aware version before final composition freeze.
+- [ ] Finalize Complete0.3.55 with Vector0.1.3, Book0.4.9, Bot1.0.45, Manager0.3.28 and Evidence0.3.16 after the remaining provider reviews/signatures.
 - [x] Composition source checks and independent review passed and exact reviewed head merged.
 - [ ] Assemble unified lock v3 from signed candidate rows and rerun official public provenance admission for all eight components.
 
@@ -46,7 +46,7 @@
 
 - [ ] Run existing `clean-build.mjs --complete-development --platform windows-x86_64 --validation-mode official` with exact lock, policy and candidate map; reuse current toolchain, no hand-maintained per-file installer components.
 - [ ] Independently review exact resulting artifacts and full component closure.
-- [ ] Repair and qualify current-generation MSI-owned selected-root binding across native setup, Manager, bundle, updater, repair and uninstall; do not claim pending IL05/06/07 implementation.
+- [x] Installer current-generation MSI-owned selected-root binding merged after native and isolated actual MSI install/repair/conflict/rollback/uninstall checks. Manager integration remains pending final review/signature; pending IL05/06/07 is not claimed.
 - [ ] Preserve user data, run normal personal-scope uninstall, retain C originals, install freshly on E and restore artifacts through public owning operations; retain failure, compensation and cleanup evidence.
 - [ ] Fix any proven owning-component defect rather than bypass it, and repeat only affected checks.
 

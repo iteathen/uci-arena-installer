@@ -9,7 +9,7 @@
     {
       "role": "manager",
       "component_id": "manager.core",
-      "version": "0.3.27",
+      "version": "0.3.28",
       "repository": "iteathen/uci-arena-manager",
       "required": true,
       "default_enabled": true,
@@ -30,7 +30,7 @@
     {
       "role": "evidence_service",
       "component_id": "uci_arena_evidence.service",
-      "version": "0.3.15",
+      "version": "0.3.16",
       "repository": "iteathen/uci-arena-evidence-service",
       "required": false,
       "default_enabled": true,
@@ -42,7 +42,7 @@
     {
       "role": "lichess_bot",
       "component_id": "lichess.adapter",
-      "version": "1.0.44",
+      "version": "1.0.45",
       "repository": "iteathen/uci-arena-lichess-bot",
       "required": false,
       "default_enabled": true,
