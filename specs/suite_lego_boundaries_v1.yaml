@@ -5,6 +5,12 @@ meta:
   owner: suite_architecture
 
 authority_document: docs/architecture/UCI_ARENA_COMPLETE_LEGO_ARCHITECTURE.md
+move_time_companion: docs/architecture/UCI_ARENA_MOVE_TIME_AUTHORITY.md
+companion_relationship: >
+  The companion clarifies timing ownership while current producer/consumer
+  contracts retain their implemented compatibility. Manager may forward actual
+  clocks unchanged; timing-policy allocation, learning and transport semantics
+  remain with their existing owners. It invents no new runtime capability.
 
 repository_role:
   name: uci-arena-installer

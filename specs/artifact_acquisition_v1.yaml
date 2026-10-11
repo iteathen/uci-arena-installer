@@ -150,7 +150,7 @@ fixed_bounds:
 artifact_source_contract:
   public_semantics:
     - each source is one UTF-8 string in caller-provided priority order
-    - `https://` prefix means HTTPS source
+    - "`https://` prefix means HTTPS source"
     - every other source must be a catalog-relative portable path
   https:
     - absolute HTTPS URI only
@@ -526,7 +526,7 @@ archive_input_contract:
     - after archive reaches exact ARCHIVE_EOF and closes, reobserve same open object and require object/metadata identity, kind, and size unchanged
     - require archive path binding same_object at completion
   terminal_status:
-    - `archive_read_next_header` success loop continues only for ARCHIVE_OK
+    - "`archive_read_next_header` success loop continues only for ARCHIVE_OK"
     - terminal success requires exactly ARCHIVE_EOF
     - ARCHIVE_WARN, ARCHIVE_RETRY, ARCHIVE_FAILED, ARCHIVE_FATAL, or other result is failure
     - close/free errors are bounded secondary evidence and never convert a failed parse to success

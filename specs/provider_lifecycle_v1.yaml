@@ -285,10 +285,10 @@ startup_control_v3:
   operation_declaration:
     arguments: bounded fixed argument vector appended by Installer-owned path arguments
     success_dispositions:
-      install: [ready] or [ready, safe_inactive]
+      install: "[ready] or [ready, safe_inactive]"
       uninstall: [ready]
       pre_replace: [ready]
-      post_replace: [ready] or [ready, safe_inactive]
+      post_replace: "[ready] or [ready, safe_inactive]"
   path_arguments:
     workspace_argument: required
     configuration_argument: required

@@ -319,12 +319,13 @@ exact_document_reader:
     - close through RAII and preserve primary versus cleanup observations
   json_contract:
     parser: nlohmann SAX construction with explicit limit enforcement
-    - consume only ExactDocument.bytes and require valid UTF-8
-    - reject duplicate object keys at every depth
-    - enforce depth, total-value, per-object, per-array, key, and string bounds before unbounded allocation
-    - reject floating point unless caller explicitly permits it
-    - reject binary, discarded, and unsupported values
-    - bound diagnostics without echoing document contents
+    rules:
+      - consume only ExactDocument.bytes and require valid UTF-8
+      - reject duplicate object keys at every depth
+      - enforce depth, total-value, per-object, per-array, key, and string bounds before unbounded allocation
+      - reject floating point unless caller explicitly permits it
+      - reject binary, discarded, and unsupported values
+      - bound diagnostics without echoing document contents
   default_json_limits:
     maximum_depth: 64
     maximum_values: 1000000
