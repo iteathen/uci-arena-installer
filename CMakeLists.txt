@@ -79,6 +79,7 @@ if(WIN32)
 else()
   target_sources(arena_installer_core PRIVATE
     src/platform/linux/asset_search_index.cpp
+    src/platform/linux/filesystem_identity.cpp
     src/platform/linux/filesystem_path.cpp
     src/platform/linux/process_platform.cpp
     src/platform/linux/service_control.cpp
@@ -279,6 +280,17 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     )
     target_link_libraries(
       arena_installer_tests PRIVATE arena_windows_installer_launcher)
+  else()
+    target_compile_definitions(
+      arena_installer_core PRIVATE ARENA_INSTALLER_TESTING)
+    target_sources(
+      arena_installer_tests
+      PRIVATE tests/unit/linux_filesystem_identity_tests.cpp
+    )
+    target_include_directories(
+      arena_installer_tests
+      PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/linux
+    )
   endif()
   include(Catch)
   catch_discover_tests(arena_installer_tests)
