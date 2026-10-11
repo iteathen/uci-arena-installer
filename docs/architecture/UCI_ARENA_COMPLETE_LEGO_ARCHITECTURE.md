@@ -11,7 +11,7 @@ deployment is cancelled. The retained C++ API illustrations in sections4–13
 are historical implementation sketches; their generic ownership principles
 remain useful, but they neither specify Vector's implementation nor authorize
 a native engine fallback. Vector's accepted specs own its concrete runtime.
-Native Manager, Installer, SDK/process/referee helpers and reference Stockfish
+CUDA-MCGS retains universal search/evaluator/resource/session ownership; Tensor and cuda-js retain their generic library responsibilities. Native Manager, Installer, SDK/process/referee helpers and reference Stockfish
 retain their independent roles.
 
 This document defines the intended ownership, dependency direction, substitution boundaries, and release topology for the complete UCI Arena suite. It is a target: current repositories may need staged migrations, but new work must reduce the distance to this structure and must not introduce new cross-boundary coupling.
@@ -44,7 +44,7 @@ It owns:
 
 - chess position, legal move, make/unmake, repetition, draw, and terminal truth;
 - UCI protocol behavior;
-- formal search contracts and the GPU-resident MCGS search implementation;
+- chess search policy/output semantics and product adapters over the public GPU-resident MCGS contract;
 - evaluation orchestration;
 - model-semantic adapters;
 - model execution through public cuda-js and Tensor contracts;
