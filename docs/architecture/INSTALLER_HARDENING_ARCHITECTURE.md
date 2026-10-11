@@ -38,6 +38,55 @@ bootstrap/integration       stable arena-setup
 
 Application repositories remain adjacent products. Installer consumes their immutable artifacts and contracts only. Installer never repairs provider internals, interprets chess/provider semantics, or reaches into provider source trees.
 
+### 1.1 Cross-platform target and current implementation
+
+This section reconciles the unique target-architecture proposal in historical
+[PR165](https://github.com/iteathen/uci-arena-installer/pull/165). Strong
+immutability is the steady-state acceptance target: routine application releases
+within existing contracts replace artifacts, manifests, provenance and
+composition/media data rather than Installer control flow or stable OS
+integration/bootstrap bytes. Genuine security, trust, protocol, contract or
+platform capability repairs remain mechanism changes and require qualification.
+The accepted per-user root-security repair is such a change.
+
+Windows and Linux should share semantic ownership for physical identity,
+acquisition/staging, exact persisted layout, transaction recovery and declared
+provider lifecycle while retaining thin platform adapters. Stable integration
+should be versioned independently from application payload; a future shared
+Manager dispatch contract must not encode registry/systemd or current application
+entrypoint details. Release-input planning should supply both update and fresh
+media from one deterministic input authority. Setup intent should select declared
+component/feature/resource data without product-name control branches or an
+arbitrary script/validator framework.
+
+These are target acceptance conditions, not current capability assertions:
+
+- #161 tracks cross-platform strong-immutability acceptance.
+- #162 tracks Linux persisted-layout parity with the shared semantic layout.
+- #163 tracks stable Linux integration/shared dispatch and application separation.
+- #164 tracks composition-driven neutral setup/resource planning.
+- Existing #77-#80 own Windows integration, release planning, media and layout;
+  transaction and acquisition owners retain their existing domains.
+
+Current Complete 0.3.59 was installed using a bounded Windows MSI-selected-root
+record and public `arena-setup --install-scope per-user --json layout` bridge.
+Manager MSI still contains application payload; Linux does not expose that new
+Windows selection port. The bridge does not establish full persisted
+InstalledLayout, cross-platform parity or transaction-v2 completion. Existing
+accepted lifecycle and platform compatibility remain usable while those target
+owners are unfinished. Adding future machinery beside a still-authoritative
+legacy path will not itself satisfy final target acceptance; any replacement
+must eventually make obsolete authority unreachable through its supported path.
+
+Installed 0.3.59 needed explicit operator ACL preparation of its existing E data
+root. Installer 0.2.3/Complete 0.3.60 adds qualified fresh-root preparation and
+unsafe-existing-root refusal. Its reviewed unsigned development upgrade then
+succeeded on that already-prepared E root; actual upgrade acceptance is distinct
+from the focused native fresh-root/refusal fixtures. Neither result proves the
+future architecture complete. Current packaging details and limits remain in
+[package layout selection](../development/package-layout-selection.md) and the
+[retained installation record](../development/preserving-fresh-install.md#verified-e-installation-and-0360-upgrade).
+
 ## 2. Shared foundational bricks
 
 The open issues overlap around filesystem identity, paths, lifecycle, and release authority. They must reuse the following owners rather than create issue-local mechanisms.

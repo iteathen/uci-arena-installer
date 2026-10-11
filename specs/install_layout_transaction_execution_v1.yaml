@@ -261,7 +261,7 @@ fixed_effect_order:
   - publish_state receipt rewrites
   - target descriptor publish_state
   - final layout_locator
-  forbidden_effects_for_il07_v1:
+forbidden_effects_for_il07_v1:
     - provider_lifecycle
     - service_control
     - activate_managed_tree
@@ -303,13 +303,14 @@ allowed_implementation_files:
   - CMakeLists.txt
 
 prerequisites:
-  - IL-02 common InstallLayout domain
-  - IL-03 Windows anchor/read-only locator adapters
-  - IL-05 planner updated to exact receipt path invariant above
-  - IL-06 InstalledLayoutAuthority loader
-  - FilesystemIdentity + ExactDocumentReader
-  - DurableStatePublisher native adapters
-  - TX-01 through TX-06 including arena_install_transaction_storage_bootstrap_v1
+  required:
+    - IL-02 common InstallLayout domain
+    - IL-03 Windows anchor/read-only locator adapters
+    - IL-05 planner updated to exact receipt path invariant above
+    - IL-06 InstalledLayoutAuthority loader
+    - FilesystemIdentity + ExactDocumentReader
+    - DurableStatePublisher native adapters
+    - TX-01 through TX-06 including arena_install_transaction_storage_bootstrap_v1
   rule: missing prerequisite is blocked_dependency, not permission for a local substitute
 
 validation:

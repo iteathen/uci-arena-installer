@@ -37,6 +37,12 @@ principles:
       approved.
 
 hard_rules:
+  - Strong cross-platform immutability and persisted-layout parity are target
+    acceptance in INSTALLER_HARDENING_ARCHITECTURE.md, not a claim that the
+    current package bridge or every legacy path has been replaced.
+  - Genuine Installer security, trust, protocol or platform repairs may require
+    mechanism changes; ordinary conforming application releases should remain
+    component/manifest/composition changes rather than product-name branches.
   - Never read a component repository's source tree during composition.
   - Never place credentials in manifests, logs, arguments, or receipts.
   - Never weaken provenance or repository visibility to make composition pass.

@@ -52,4 +52,20 @@ installation. Query the installed authority with
 five-root tuple. See [package path selection](docs/development/package-layout-selection.md)
 and [preserving fresh installation](docs/development/preserving-fresh-install.md).
 The current-generation MSI record does not claim the pending IL05/06/07 or
-transaction-v2 architecture is complete.
+transaction-v2 architecture is complete. The [hardening target](docs/architecture/INSTALLER_HARDENING_ARCHITECTURE.md#11-cross-platform-target-and-current-implementation)
+also distinguishes future cross-platform stable integration from the current
+Manager-payload MSI. Routine conforming application updates should change
+artifacts/manifests/composition; genuine Installer security or protocol repairs
+remain qualified mechanism changes.
+
+[Move-time ownership](docs/architecture/UCI_ARENA_MOVE_TIME_AUTHORITY.md) keeps
+clock forwarding separate from timing-policy calculations and Installer artifact
+composition. [Historical PR dispositions](docs/development/historical-pr-dispositions.md)
+retain superseded work and unfinished coverage without reviving the cancelled
+C++ engine campaign.
+
+The reviewed unsigned Complete 0.3.60 development suite upgraded the prepared
+E installation successfully with runtime 0.2.3, eight unchanged signed component
+versions and 990 verified files. [Installed acceptance](docs/development/preserving-fresh-install.md#verified-e-installation-and-0360-upgrade)
+keeps the earlier 0.3.59 operator ACL preparation, fresh-root fixture proof and
+existing engine-evidence limits separate. Bot remains stopped.

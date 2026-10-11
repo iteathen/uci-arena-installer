@@ -565,7 +565,8 @@ provider_installer_integration:
       trusted merely because it exists.
     - Adding or changing provider configuration normally changes only the
       provider renderer and manifest bindings, not Installer control flow.
-    - The contract is capability-neutral: an Engine component may use the same
+    - >-
+      The contract is capability-neutral: an Engine component may use the same
       renderer boundary to publish arena_uci_engine_launch_profile_v1. Engine
       owns translation of timing, search, model, and knowledge contracts into
       UCI options; Installer supplies only declared receipt and locator paths,
@@ -574,7 +575,8 @@ provider_installer_integration:
       calibration field, or knowledge binding changes the Engine artifact and
       manifest data. It must not introduce an Engine-id or UCI-option branch in
       Installer planning, deployment, verification, repair, or rollback.
-    - A startup-capable provider declares arena_provider_startup_control_v1
+    - >-
+      A startup-capable provider declares arena_provider_startup_control_v1
       beside its renderer: exact entrypoint, fixed install/uninstall argument
       arrays, workspace/configuration flags, result envelope, and required
       configuration-match/live evidence. Installer never guesses these values
@@ -590,7 +592,8 @@ provider_installer_integration:
       No component root is renamed until every affected consumer proves inactive.
       The provider stops and retargets its existing credential-bearing startup
       registration without opening or copying credential contents.
-    - A successful pre_replace response proves the registration remains
+    - >-
+      A successful pre_replace response proves the registration remains
       installed, is inactive, and is replacement-ready. Installer defers every
       affected consumer restart until all component roots and receipts are
       committed. Before any restart, Installer reruns each unchanged affected
@@ -789,7 +792,8 @@ packaging:
         stripped, public manual pages and the changelog are reproducibly
         compressed, and copyright plus bundled-dependency license evidence is
         installed with the package.
-      - A Lintian override is allowed only for one exact documented occurrence
+      - >-
+        A Lintian override is allowed only for one exact documented occurrence
         that follows from the standalone distribution contract: reviewed
         static dependency linkage in a named executable, or the absence of a
         public manual page for a named internal service, broker, or desktop
@@ -832,7 +836,8 @@ packaging:
         release builds default to rejecting same-version replacement; the
         development flag is explicit in the clean-build composition path and
         never changes downgrade protection.
-      - The Complete development bootstrapper uses the upgrade transaction for
+      - >-
+        The Complete development bootstrapper uses the upgrade transaction for
         both initial installation and related-bundle replacement. With no
         receipts the upgrade transaction installs normally; with existing
         receipts it stages and replaces every changed or unproven component.
@@ -988,7 +993,8 @@ packaging:
         scope. Every component installed beneath the user profile has an
         MSI-owned HKCU key path where Windows Installer requires it, and ICE38
         is a blocking validation rather than a suppressed warning.
-      - Burn passes the fixed package scope explicitly to arena-setup together
+      - >-
+        Burn passes the fixed package scope explicitly to arena-setup together
         with every scope-owned root: install, data, cache, and knowledge. The
         provider workspace is not package-scope-owned and retains arena-setup's
         native default unless an operator explicitly selects an override. The
@@ -1036,7 +1042,8 @@ packaging:
         registration cannot remove, restore, or replace live installation
         authority; registry cleanup requires separate exact evidence and is not
         inferred by the bundle plan.
-      - A scope-neutral native launcher may provide one visible Personal or All
+      - >-
+        A scope-neutral native launcher may provide one visible Personal or All
         users choice while delegating unchanged to the two fixed-scope bundles.
         It is a launcher brick, not a configurable WiX bundle: it never
         extracts components, evaluates upgrade policy, mutates receipts, or
