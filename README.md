@@ -43,3 +43,13 @@ then apply that exact plan with
 Purge is path-bounded and ownership-aware. It never deletes external token
 files, in-place books, tablebases, engines, or profiles, and it preserves and
 reports a managed file whose current identity differs from its receipt.
+
+Fresh Windows installations can select program and data locations through the
+bundle's `ArenaProgramRoot` and `ArenaDataRoot` variables. Repair retains the
+installed selection; changing location uses preserving uninstall and a fresh
+installation. Query the installed authority with
+`arena-setup --install-scope per-user --json layout`, then forward its complete
+five-root tuple. See [package path selection](docs/development/package-layout-selection.md)
+and [preserving fresh installation](docs/development/preserving-fresh-install.md).
+The current-generation MSI record does not claim the pending IL05/06/07 or
+transaction-v2 architecture is complete.
