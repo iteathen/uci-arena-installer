@@ -5,7 +5,7 @@ Authority: suite-level product and repository boundaries
 Composition owner: `uci-arena-installer`
 
 Current engine authority (2026-10-11): `iteathen/UCI-Arena-Vector` owns the
-deployed chess/search product, using maintained JavaScript and restricted
+current chess/search product, using maintained JavaScript and restricted
 Device-JS through public cuda-js, Tensor and MCGS contracts. C++ chess/search
 deployment is cancelled. The retained C++ API illustrations in sections4–13
 are historical implementation sketches; their generic ownership principles
