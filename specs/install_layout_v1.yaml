@@ -25,7 +25,7 @@ purpose: >
   installed policy snapshot, descriptor, and digest-bound locator—not current
   repository defaults—remain authority for that installation.
 
-confirmed_current_defect:
+historical_layout_drift_before_selected_package_roots:
   observations:
     - packaging/windows/manager-integration.json owns one program/data/runtime/launcher/scope-marker path map
     - packaging/windows/suite-bundle.json independently owns install/data/cache/knowledge roots
@@ -34,8 +34,11 @@ confirmed_current_defect:
     - current routine updater defaults SetupPaths.install_root to ProgramData/UCI Arena Manager/installed
   conclusion: >
     A per-machine full installation and a later routine package update can
-    address different component stores. This is a present competing-authority
-    defect, not merely a future drift risk.
+    address different component stores under those former independent defaults.
+    This motivated the current-generation selected-package-root correction below.
+    Its registered fresh Windows route now uses one admitted public root tuple;
+    this does not establish completion of the future installed descriptor and
+    transaction-v2 architecture or qualify every historical layout.
 
 current_generation_fresh_package_selection:
   authority: >
