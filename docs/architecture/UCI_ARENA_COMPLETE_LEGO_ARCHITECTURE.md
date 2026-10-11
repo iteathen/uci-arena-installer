@@ -4,6 +4,16 @@ Status: target architecture
 Authority: suite-level product and repository boundaries  
 Composition owner: `uci-arena-installer`
 
+Current engine authority (2026-10-11): `iteathen/UCI-Arena-Vector` owns the
+deployed chess/search product, using maintained JavaScript and restricted
+Device-JS through public cuda-js, Tensor and MCGS contracts. C++ chess/search
+deployment is cancelled. The retained C++ API illustrations in sections4–13
+are historical implementation sketches; their generic ownership principles
+remain useful, but they neither specify Vector's implementation nor authorize
+a native engine fallback. Vector's accepted specs own its concrete runtime.
+Native Manager, Installer, SDK/process/referee helpers and reference Stockfish
+retain their independent roles.
+
 This document defines the intended ownership, dependency direction, substitution boundaries, and release topology for the complete UCI Arena suite. It is a target: current repositories may need staged migrations, but new work must reduce the distance to this structure and must not introduce new cross-boundary coupling.
 
 ## 1. Product topology
@@ -13,7 +23,7 @@ The suite consists of six independently owned product repositories:
 ```text
 uci-arena-installer
         |
-        +-- uci-arena-engine
+        +-- UCI-Arena-Vector
         +-- uci-arena-manager
         +-- uci-arena-lichess-bot
         +-- uci-arena-book-forge
@@ -24,24 +34,26 @@ The installer assembles the suite. Manager is the installed control plane. The e
 
 ## 2. Repository ownership
 
-### 2.1 `uci-arena-engine`
+### 2.1 `UCI-Arena-Vector`
 
-The current `UCI_Arena` repository is the engine brick and should eventually be renamed without changing its product identity or history.
+Vector is the current engine product. `uci-arena-engine` retains historical
+C++ engine work and independently published generic contracts/helpers; its
+cancelled engine artifacts are not selected by the current suite composition.
 
 It owns:
 
 - chess position, legal move, make/unmake, repetition, draw, and terminal truth;
 - UCI protocol behavior;
-- formal search contracts and the minimax and MCGS search implementations;
+- formal search contracts and the GPU-resident MCGS search implementation;
 - evaluation orchestration;
 - model-semantic adapters;
-- inference-runtime ports and concrete runtime adapters, including ONNX Runtime;
+- model execution through public cuda-js and Tensor contracts;
 - opening-book and tablebase consumption;
 - engine diagnostics and correctness tests;
 - engine-specific evidence runtime tools; and
 - engine component packaging.
 
-It does not own Lichess API behavior, suite management, product installation, opening-book acquisition, evidence scheduling, account credentials, or suite composition.
+It does not own Lichess API behavior, suite management, product installation, opening-book acquisition, evidence scheduling, account credentials, or suite composition. ONNX/reference runtimes used for independent numerical comparison do not become production inference or CPU search fallbacks.
 
 ### 2.2 `uci-arena-manager`
 
@@ -176,7 +188,12 @@ Restaurant owns source eligibility, sampling, weighting, reanalysis, feature and
 
 Manager Live Games, Game History, and Replay surfaces will use bounded typed provider projections over the same canonical game identity. UI-specific records cannot become a second game archive. Installer never interprets games, evaluations, model semantics, training eligibility, or CCR.
 
-## 4. Engine source topology
+## 4. Historical engine source topology
+
+The following C++ topology and interface sketches describe the retained legacy
+design. Current Vector source topology and public library boundaries are owned
+by its accepted product specs. Do not translate these sketches into a new C++
+implementation or select a legacy deployment to satisfy a current capability.
 
 ```text
 engine/
@@ -411,7 +428,10 @@ New installable component:
 
 ## 14. Product composition and versioning
 
-Suite and component versions are independent:
+Suite and component versions are independent. Current exact identities and
+versions come from the selected `compositions/complete-arena-*.json` and its
+verified release lock. The following older values are illustrative historical
+data, not a deployable selection:
 
 ```yaml
 product_release: 2026.08.0
