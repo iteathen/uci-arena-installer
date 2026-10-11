@@ -376,6 +376,61 @@ test("runner preflight reserves an MSVC-safe build path budget", () => {
     runnerWorkRoot: path.resolve("C:/", "long-release-root-".repeat(12)),
     repositorySlug: "iteathen/uci-arena-lichess-bot",
   }), /240-character budget/u);
+  const evidenceLength = { runnerWorkRoot: RUNNER_ROOT, repositorySlug: "owner/uci-arena-evidence-service" };
+  assert.throws(() => validateRunnerPathBudget(evidenceLength), /240-character budget/u);
+  const nativeOnly = validateRunnerPathBudget({ ...evidenceLength, requiresVcpkg: false });
+  assert.ok(Number.isFinite(nativeOnly.projected_path_characters));
+  assert.ok(nativeOnly.projected_path_characters <= 240);
+  assert.throws(() => validateRunnerPathBudget({ ...evidenceLength, requiresVcpkg: null }), /closure selection is invalid/u);
+});
+
+test("source runner path budget follows its declared native and vcpkg closure", () => {
+  const owned = fixture();
+  try {
+    mkdirSync(path.join(owned.root, "native"));
+    writeFileSync(path.join(owned.root, "native", "CMakeLists.txt"), "project(owned_native_helper)\n");
+    const input = {
+      repositoryRoot: owned.root, expectedVersion: "1.2.3", expectedComponentId: "provider.component",
+      workflowPath: owned.workflowPath, requiredRunnerLabels: owned.labels,
+      releaseRef: "main", localHead: HEAD, remoteMainHead: HEAD,
+      runnerWorkRoot: RUNNER_ROOT, repositorySlug: "owner/uci-arena-evidence-service",
+      publicationMode: "workflow-owned",
+    };
+    assert.ok(validateReleaseSource(input).projected_path_characters <= 240);
+    assert.throws(() => validateReleaseSource({ ...input,
+      runnerWorkRoot: path.join(RUNNER_ROOT, "long-native-release-root-".repeat(8)),
+    }), /240-character budget/u);
+    writeFileSync(path.join(owned.root, "vcpkg.json"), JSON.stringify({ dependencies: ["libsodium"] }));
+    assert.throws(() => validateReleaseSource(input), /240-character budget/u);
+  } finally {
+    rmSync(owned.root, { recursive: true, force: true });
+  }
+});
+
+test("source vcpkg configuration and selected workflow references retain deep projection", () => {
+  for (const declaration of ["configuration", "workflow", "cmake", "native-manifest", "native-presets"]) {
+    const owned = fixture();
+    try {
+      if (declaration === "configuration") writeFileSync(path.join(owned.root, "vcpkg-configuration.json"), "{}\n");
+      if (declaration === "workflow") writeFileSync(owned.workflowPath,
+        readFileSync(owned.workflowPath, "utf8") + "      - run: vcpkg install\n");
+      if (declaration === "cmake") writeFileSync(path.join(owned.root, "CMakeLists.txt"),
+        'set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")\n');
+      if (declaration.startsWith("native-")) mkdirSync(path.join(owned.root, "native"));
+      if (declaration === "native-manifest") writeFileSync(path.join(owned.root, "native", "vcpkg.json"), "{}\n");
+      if (declaration === "native-presets") writeFileSync(path.join(owned.root, "native", "CMakePresets.json"),
+        JSON.stringify({ configurePresets: [{ cacheVariables: { CMAKE_TOOLCHAIN_FILE: "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" } }] }));
+      assert.throws(() => validateReleaseSource({
+        repositoryRoot: owned.root, expectedVersion: "1.2.3", expectedComponentId: "provider.component",
+        workflowPath: owned.workflowPath, requiredRunnerLabels: owned.labels,
+        releaseRef: "main", localHead: HEAD, remoteMainHead: HEAD,
+        runnerWorkRoot: RUNNER_ROOT, repositorySlug: "owner/uci-arena-evidence-service",
+        publicationMode: "workflow-owned",
+      }), /240-character budget/u);
+    } finally {
+      rmSync(owned.root, { recursive: true, force: true });
+    }
+  }
 });
 
 test("candidate prerelease tags are optional and version-bound", () => {
