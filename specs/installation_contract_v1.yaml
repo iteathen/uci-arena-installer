@@ -1832,6 +1832,52 @@ transaction:
       - Purge cannot promise rollback after destructive data removal. Every
         operation and partial failure remains visible in transaction evidence.
   manager_data_root_retention:
+    current_generation_windows_per_user_access:
+      status: accepted_operator_policy_SP_001
+      minimum_installer_runtime_version: 0.2.3
+      owner: arena_setup_platform_directory_permissions
+      scope: selected_per_user_data_root_only
+      rules:
+        - Per-user apply, repair, and upgrade prepare the selected Manager data
+          root before SetupEngine receipt, transaction, cache acquisition, or
+          provider effects. Valid TUF catalog loads, including plan and
+          unconfirmed apply, transfer this root explicitly to anti-rollback
+          security-state publication and prepare it before that publication.
+          Signature, expiry, delegated-version and rollback checks stay required.
+          Root creation follows verified signatures, expiry and delegated
+          versions; existing rollback versions are checked before replacement.
+          Catalog schema validation remains later in the historical load order.
+        - TUF publication uses exact no-reparse bounded state reads and the
+          existing durable publisher with an exact-prior or absent precondition.
+          Its state parent remains private; broad retained state-parent authority
+          is refused, never repaired. Nonpublishing catalog diagnostics and
+          invalid TUF inputs need not create the selected data root.
+        - The public apply and standalone release-media retention operations
+          enforce the same root preparation before their first directory write.
+        - Only one missing final data-root directory may be created beneath
+          ordinary existing no-reparse ancestors. Missing parents are an
+          actionable failure; this operation never recursively creates parents.
+        - Fresh root creation supplies a protected DACL before visibility.
+          The current user owns the root; only that user, LocalSystem, and
+          Administrators receive inherited write/delete/owner/ACL authority.
+          Built-in users receive read and traverse authority only.
+        - An existing ordinary root is inspected without changing its owner,
+          DACL, children, or file bytes. Null, uninspectable, non-canonical, or
+          foreign write authority fails before SetupEngine data-state/component
+          effects, with an
+          instruction to prepare that selected root explicitly or choose a
+          fresh root. Confirmation is not implicit ACL-adoption authority.
+        - The operation reads directory security metadata only. It never
+          reads client.key or credential contents, recursively repairs child
+          ACLs, or treats a safe root as proof of safe retained file permissions.
+        - Existing key admission remains Manager-owned and fail-closed;
+          normal uninstall still preserves client.key bytes and file ACLs.
+        - Per-machine and Linux permission behavior is unchanged. This is a
+          current SetupEngine packaging requirement, not an ACL policy added
+          to transaction-storage bootstrap or future InstallLayout authority.
+        - The current Burn chain applies Manager MSI before SuiteComponents.
+          A later refusal may therefore require ordinary MSI rollback. These
+          rules do not claim zero effects across the whole bootstrapper.
     windows_defaults:
       per_user: "%LOCALAPPDATA%\\UCI Arena Manager"
       per_machine: "C:\\ProgramData\\UCI Arena Manager"

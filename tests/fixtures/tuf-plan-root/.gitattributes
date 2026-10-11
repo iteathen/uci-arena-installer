@@ -1,0 +1,2 @@
+# TUF descriptors and the fixture compiled root pin bind the exact file bytes.
+*.json -text

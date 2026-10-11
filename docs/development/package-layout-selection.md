@@ -5,6 +5,51 @@ explicit program and data location. It uses Windows Installer's existing
 transaction ownership and does not implement the pending IL05/06/07 installed
 descriptor or transaction-v2 architecture.
 
+The per-user permission amendment follows the accepted SP-001 operator policy:
+refuse an unsafe existing folder and explain explicit preparation or a fresh
+location. Its source implementation and Windows fixture evidence are reviewable
+for the 0.3.60 candidate; it is not an existing 0.3.59 packaging guarantee. The accepted 0.3.59
+E installation required explicit operator preparation of the selected root after
+Manager correctly refused inherited broad write authority. That operational
+record is retained separately; it does not authorize automatic ACL adoption.
+The 0.3.60 composition requires Installer runtime 0.2.3 for this repair; all eight
+component versions and their signed inputs remain the same as 0.3.59.
+
+Under this Personal-installation policy, the selected data root must have ordinary existing
+ancestors. Setup creates one missing final data directory with a protected DACL
+already in place: the interactive user, LocalSystem, and Administrators may
+write; built-in users may read and traverse. An inherited broad parent permission
+does not become write authority on this new root or its newly created state
+directories. Missing parents, links, junctions, and unsafe existing roots fail
+before SetupEngine's component/data-state effects. The current Burn chain may
+already have applied Manager MSI and rolls it back on a later refusal; this is
+not a zero-effects guarantee across the whole bootstrapper.
+
+A valid TUF catalog load can publish anti-rollback security state during `plan`
+or unconfirmed `apply`. The resolved per-user root is transferred explicitly to
+that publication owner and prepared before the state write. Signature, expiry,
+version and rollback validation remain mandatory. Exact no-reparse reading and
+durable publication protect the state target; unsafe retained state-directory
+permissions are refused rather than changed. Invalid TUF inputs and nonpublishing
+unsigned catalog diagnostics do not create a fresh data root merely to inspect
+the catalog. The signed/TUF fixture qualifies this path separately from the
+installed 0.3.59 unsigned development suite.
+Root preparation follows TUF signature, expiry, and delegated-version checks;
+rollback-version checks still precede state replacement. Catalog schema
+validation occurs later, so a valid signed target with an unsupported catalog
+schema may legitimately leave private rollback-protection state before failing.
+
+An existing data directory is inspected, never silently repaired. If setup
+reports that the per-user data root is not private, choose a fresh data location
+or explicitly prepare the exact selected directory's permissions as its owner.
+Preserve its prior security metadata for recovery; permit write authority only
+for the owning interactive user, LocalSystem, and Administrators, and retain
+read/traverse access for built-in users if required. This is an operator security
+operation, separate from installer confirmation. Do not recursively replace
+retained file ACLs, read or copy client keys, change the source backup, or weaken
+Manager's key admission. Setup does not certify the permissions of retained
+children; Manager still admits its own key through its native security port.
+
 The fixed-scope suite bundle accepts persisted `ArenaProgramRoot` and
 `ArenaDataRoot` variables. Manager MSI receives `INSTALL_ROOT` and
 `ARENA_DATA_ROOT`, remembers both on repair, rejects conflicting replacement

@@ -31,7 +31,8 @@ class SetupEngine final {
                  const std::filesystem::path& metadata_directory = {},
                  bool allow_unsigned_development_catalog = false,
                  const std::filesystem::path& rollback_state_path = {},
-                 const std::filesystem::path& retained_development_trust_path = {});
+                 const std::filesystem::path& retained_development_trust_path = {},
+                 const std::filesystem::path& per_user_data_root = {});
 
     [[nodiscard]] static nlohmann::json
     validate_release_media(const nlohmann::json& catalog,

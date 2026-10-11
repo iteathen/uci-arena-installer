@@ -1,0 +1,9 @@
+{
+  "components": [],
+  "presets": {
+    "manager_only": []
+  },
+  "schema": "arena_install_catalog_v1",
+  "schema_version": 1,
+  "suite_version": "1.0.0"
+}

@@ -205,7 +205,40 @@ test("apply script reconciles exact retained payloads before arena-setup", {
     writeFileSync(retainedManager, readFileSync(path.join(root, "manager.core.tar.gz")));
     const programRoot = path.join(root, "program");
     mkdirSync(path.join(programRoot, "bin"), { recursive: true });
-    writeFileSync(path.join(programRoot, "bin", "arena-setup.exe"), "not executed");
+    const setup = path.join(programRoot, "bin", "arena-setup.exe");
+    const layoutCall = path.join(root, "layout-called.txt");
+    const projection = {
+      schema: "arena_package_layout_selection_v1",
+      scope: "per-user",
+      integration_root: programRoot,
+      roots: {
+        data: dataRoot,
+        install: path.join(programRoot, "installed"),
+        cache: path.join(dataRoot, "cache"),
+        workspace: path.join(dataRoot, "workspaces"),
+        knowledge: path.join(dataRoot, "knowledge"),
+      },
+    };
+    const encoded = (value) => Buffer.from(value, "utf8").toString("base64");
+    const source = path.join(root, "FixtureSetup.cs");
+    writeFileSync(source, `using System; using System.IO; using System.Text;
+public static class FixtureSetup {
+  public static int Main(string[] args) {
+    if (args.Length != 4 || args[0] != "--install-scope" || args[1] != "per-user" ||
+        args[2] != "--json" || args[3] != "layout") return 2;
+    File.WriteAllText(Encoding.UTF8.GetString(Convert.FromBase64String("${encoded(layoutCall)}")), String.Join("\\n", args));
+    Console.WriteLine(Encoding.UTF8.GetString(Convert.FromBase64String("${encoded(JSON.stringify(projection))}")));
+    return 0;
+  }
+}`);
+    const compileScript = path.join(root, "compile-fixture.ps1");
+    const psLiteral = (value) => `'${value.replaceAll("'", "''")}'`;
+    writeFileSync(compileScript,
+      `$ErrorActionPreference = 'Stop'\nAdd-Type -Path ${psLiteral(source)} -OutputAssembly ${psLiteral(setup)} -OutputType ConsoleApplication\n`);
+    const compiled = spawnSync("powershell.exe", ["-NoProfile", "-File", compileScript], {
+      encoding: "utf8", timeout: 30_000,
+    });
+    assert.equal(compiled.status, 0, compiled.stderr);
     const runtimeRoot = path.join(programRoot, "libexec", "uci-arena-installer");
     mkdirSync(runtimeRoot, { recursive: true });
     writeFileSync(path.join(runtimeRoot, "arena-installer-runtime.json"), JSON.stringify({
@@ -225,6 +258,7 @@ test("apply script reconciles exact retained payloads before arena-setup", {
       timeout: 30_000,
     });
     assert.equal(validation.status, 0, validation.stderr);
+    assert.equal(readFileSync(layoutCall, "utf8"), "--install-scope\nper-user\n--json\nlayout");
     const summary = JSON.parse(validation.stdout.trim().split(/\r?\n/u).at(-1));
     assert.deepEqual(summary, {
       schema: "arena_suite_update_media_validation_v1",

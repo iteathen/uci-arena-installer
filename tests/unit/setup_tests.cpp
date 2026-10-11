@@ -4,10 +4,12 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cctype>
+#include <cstring>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iostream>
 #include <iterator>
 #include <optional>
 #include <sodium.h>
@@ -20,6 +22,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
 #endif
 
 #include "arena/application/installer/credential_recovery.hpp"
@@ -27,8 +31,10 @@
 #include "arena/application/installer/setup.hpp"
 #include "arena/domain/uuid.hpp"
 #include "arena/platform/filesystem_path.hpp"
+#include "arena/platform/workspace_permissions.hpp"
 #include "arena/ports/asset_search_index.hpp"
 #include "arena/ports/provider_lifecycle.hpp"
+#include "arena/ports/native_process.hpp"
 
 namespace {
 
@@ -683,6 +689,308 @@ void write_manager_api_service_install(
 }
 
 } // namespace
+
+#ifdef _WIN32
+namespace {
+void add_fixture_broad_directory_write(const fs::path& directory) {
+    PSECURITY_DESCRIPTOR descriptor{};
+    PACL original{};
+    std::wstring native = directory.native();
+    REQUIRE(GetNamedSecurityInfoW(native.data(), SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION, nullptr, nullptr, &original, nullptr,
+                &descriptor) == ERROR_SUCCESS);
+    std::array<unsigned char, SECURITY_MAX_SID_SIZE> sid{};
+    DWORD length = static_cast<DWORD>(sid.size());
+    REQUIRE(CreateWellKnownSid(WinAuthenticatedUserSid, nullptr, sid.data(), &length));
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE;
+    access.grfAccessMode = GRANT_ACCESS;
+    access.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid.data());
+    PACL updated{};
+    REQUIRE(SetEntriesInAclW(1, &access, original, &updated) == ERROR_SUCCESS);
+    const DWORD status = SetNamedSecurityInfoW(native.data(), SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION, nullptr, nullptr, updated, nullptr);
+    LocalFree(updated); LocalFree(descriptor);
+    REQUIRE(status == ERROR_SUCCESS);
+}
+
+std::string fixture_dacl(const fs::path& directory) {
+    PSECURITY_DESCRIPTOR descriptor{};
+    std::wstring native = directory.native();
+    REQUIRE(GetNamedSecurityInfoW(native.data(), SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION, nullptr, nullptr, nullptr, nullptr,
+                &descriptor) == ERROR_SUCCESS);
+    LPSTR text{};
+    REQUIRE(ConvertSecurityDescriptorToStringSecurityDescriptorA(descriptor,
+        SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &text, nullptr));
+    const std::string result{text};
+    LocalFree(text); LocalFree(descriptor);
+    return result;
+}
+
+bool fixture_authenticated_users_can_write(const fs::path& directory) {
+    PSECURITY_DESCRIPTOR descriptor{}; PACL dacl{};
+    std::wstring native = directory.native();
+    REQUIRE(GetNamedSecurityInfoW(native.data(), SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr, &descriptor) == ERROR_SUCCESS);
+    std::array<unsigned char, SECURITY_MAX_SID_SIZE> sid{};
+    DWORD length = static_cast<DWORD>(sid.size());
+    REQUIRE(CreateWellKnownSid(WinAuthenticatedUserSid, nullptr, sid.data(), &length));
+    TRUSTEE_W trustee{}; trustee.TrusteeForm = TRUSTEE_IS_SID;
+    trustee.ptstrName = reinterpret_cast<LPWSTR>(sid.data());
+    ACCESS_MASK rights{};
+    REQUIRE(GetEffectiveRightsFromAclW(dacl, &trustee, &rights) == ERROR_SUCCESS);
+    LocalFree(descriptor);
+    return (rights & (FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD |
+        DELETE | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL)) != 0;
+}
+
+json fixture_empty_install_plan() {
+    return {{"schema", "arena_install_plan_v1"}, {"blockers", json::array()},
+            {"actions", json::array()}};
+}
+} // namespace
+
+TEST_CASE("per-user fresh data root is private before Installer state creation", "[data-root-access]") {
+    const fs::path root = temporary_directory();
+    add_fixture_broad_directory_write(root);
+    REQUIRE(fixture_authenticated_users_can_write(root));
+    SetupPaths paths = paths_under(root);
+    paths.manager_service_access = false;
+    REQUIRE(SetupEngine::apply(json::object(), fixture_empty_install_plan(), paths,
+        true, false).at("state") == "committed");
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(paths.data_root));
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(paths.data_root / "transactions"));
+    REQUIRE(fixture_dacl(paths.data_root).starts_with("D:P"));
+    const auto dacl = fixture_dacl(paths.data_root);
+    REQUIRE(SetupEngine::apply(json::object(), fixture_empty_install_plan(), paths,
+        true, false).at("state") == "committed");
+    REQUIRE(fixture_dacl(paths.data_root) == dacl);
+    REQUIRE(fixture_authenticated_users_can_write(root));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("per-user unsafe existing data root refuses before effects and preserves child ACL", "[data-root-access]") {
+    const fs::path root = temporary_directory();
+    SetupPaths paths = paths_under(root);
+    paths.manager_service_access = false;
+    fs::create_directory(paths.data_root);
+    add_fixture_broad_directory_write(paths.data_root);
+    const fs::path retained = paths.data_root / "retained-artifact.txt";
+    std::ofstream(retained) << "owned fixture artifact";
+    const auto before = fixture_dacl(paths.data_root), child_before = fixture_dacl(retained);
+    try {
+        static_cast<void>(SetupEngine::apply(json::object(), fixture_empty_install_plan(), paths, true, false));
+        FAIL("unsafe existing data root was accepted");
+    } catch (const std::runtime_error& error) {
+        REQUIRE(std::string(error.what()) == "per-user data root is not private; prepare its directory permissions explicitly or select a fresh root");
+    }
+    REQUIRE_FALSE(fs::exists(paths.install_root));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "transactions"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts"));
+    REQUIRE(fixture_dacl(paths.data_root) == before);
+    REQUIRE(fixture_dacl(retained) == child_before);
+    REQUIRE(fs::file_size(retained) == 22);
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("per-user data root requires an ordinary existing parent", "[data-root-access]") {
+    const fs::path root = temporary_directory();
+    SetupPaths paths = paths_under(root);
+    paths.manager_service_access = false;
+    paths.data_root = root / "missing-parent" / "data";
+    REQUIRE_THROWS(SetupEngine::apply(json::object(), fixture_empty_install_plan(), paths, true, false));
+    REQUIRE_FALSE(fs::exists(root / "missing-parent"));
+    REQUIRE_FALSE(fs::exists(paths.install_root));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("standalone per-user release retention prepares its root before staging", "[data-root-access]") {
+    const fs::path root = temporary_directory();
+    add_fixture_broad_directory_write(root);
+    SetupPaths paths = paths_under(root);
+    paths.manager_service_access = false;
+    const auto media = root / "media";
+    fs::create_directory(media);
+    const json catalog{{"schema", "arena_install_catalog_v1"}, {"schema_version", 1},
+        {"suite_version", "1.0.0"}, {"components", json::array()}};
+    const auto source = media / "catalog.json";
+    std::ofstream(source) << catalog.dump();
+    REQUIRE(SetupEngine::persist_release_media(catalog, paths, source, {}, true).at("schema") == "arena_retained_release_media_v1");
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(paths.data_root));
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(paths.data_root / "release"));
+    add_fixture_broad_directory_write(paths.data_root);
+    const auto before = fixture_dacl(paths.data_root);
+    REQUIRE_THROWS(SetupEngine::persist_release_media(catalog, paths, source, {}, true));
+    REQUIRE(fixture_dacl(paths.data_root) == before);
+    REQUIRE(fs::is_regular_file(paths.data_root / "release" / "catalog.json"));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("per-user existing data root rejects null object callback and inherit-only broad authority", "[data-root-access]") {
+    for (const std::string variant : {"null", "object", "callback", "inherit-only", "foreign-sid"}) {
+        INFO(variant);
+        const fs::path root = temporary_directory();
+        SetupPaths paths = paths_under(root);
+        paths.manager_service_access = false;
+        arena::platform::prepare_per_user_data_root(paths.data_root);
+        std::wstring native = paths.data_root.native();
+        PSECURITY_DESCRIPTOR descriptor{}; PACL original{};
+        REQUIRE(GetNamedSecurityInfoW(native.data(), SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION, nullptr, nullptr, &original, nullptr, &descriptor) == ERROR_SUCCESS);
+        std::array<unsigned char, SECURITY_MAX_SID_SIZE> sid{};
+        DWORD length = static_cast<DWORD>(sid.size());
+        REQUIRE(CreateWellKnownSid(WinAuthenticatedUserSid, nullptr, sid.data(), &length));
+        std::vector<unsigned char> storage(original->AclSize + SECURITY_MAX_SID_SIZE + 128);
+        auto* modified = reinterpret_cast<ACL*>(storage.data());
+        REQUIRE(InitializeAcl(modified, static_cast<DWORD>(storage.size()), ACL_REVISION_DS));
+        for (DWORD i = 0; i < original->AceCount; ++i) {
+            void* ace{}; REQUIRE(GetAce(original, i, &ace));
+            REQUIRE(AddAce(modified, ACL_REVISION_DS, MAXDWORD, ace, static_cast<ACE_HEADER*>(ace)->AceSize));
+        }
+        if (variant == "object") {
+            GUID object_type{0x22b85c12, 0x6a1b, 0x48d8, {0xb4, 0x27, 0x41, 0x22, 0x67, 0x85, 0x02, 0xa1}};
+            REQUIRE(AddAccessAllowedObjectAce(modified, ACL_REVISION_DS, 0,
+                FILE_GENERIC_READ, &object_type, nullptr, sid.data()));
+        } else if (variant == "callback") {
+            std::vector<unsigned char> ace(sizeof(ACE_HEADER) + sizeof(ACCESS_MASK) + length);
+            auto* header = reinterpret_cast<ACE_HEADER*>(ace.data());
+            header->AceType = ACCESS_ALLOWED_CALLBACK_ACE_TYPE;
+            header->AceSize = static_cast<WORD>(ace.size());
+            const ACCESS_MASK access = FILE_GENERIC_READ;
+            std::memcpy(ace.data() + sizeof(ACE_HEADER), &access, sizeof(access));
+            std::memcpy(ace.data() + sizeof(ACE_HEADER) + sizeof(access), sid.data(), length);
+            REQUIRE(AddAce(modified, ACL_REVISION_DS, MAXDWORD, ace.data(), static_cast<DWORD>(ace.size())));
+        } else if (variant == "inherit-only") {
+            REQUIRE(AddAccessAllowedAceEx(modified, ACL_REVISION_DS,
+                INHERIT_ONLY_ACE | OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE,
+                FILE_GENERIC_WRITE, sid.data()));
+        } else if (variant == "foreign-sid") {
+            PSID foreign{};
+            REQUIRE(ConvertStringSidToSidW(L"S-1-5-21-111-222-333-444", &foreign));
+            const BOOL added = AddAccessAllowedAceEx(modified, ACL_REVISION_DS, 0,
+                FILE_GENERIC_WRITE, foreign);
+            LocalFree(foreign);
+            REQUIRE(added);
+        }
+        const DWORD status = SetNamedSecurityInfoW(native.data(), SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            nullptr, nullptr, variant == "null" ? nullptr : modified, nullptr);
+        LocalFree(descriptor);
+        REQUIRE(status == ERROR_SUCCESS);
+        const auto before = fixture_dacl(paths.data_root);
+        REQUIRE_THROWS(arena::platform::prepare_per_user_data_root(paths.data_root));
+        REQUIRE(fixture_dacl(paths.data_root) == before);
+        REQUIRE_FALSE(fs::exists(paths.data_root / "transactions"));
+        remove_locator_test_directory(root);
+    }
+}
+
+TEST_CASE("valid TUF plan prepares a private per-user root before confirmed apply", "[data-root-access]") {
+    const fs::path root = temporary_directory();
+    add_fixture_broad_directory_write(root);
+    const fs::path metadata = fs::path(ARENA_INSTALLER_SOURCE_DIR) / "tests/fixtures/tuf-plan-root";
+    const auto execute = [&](const SetupPaths& paths, const std::string& command,
+                             const fs::path& media, const bool confirmed, const unsigned exit_code,
+                             const bool unsigned_catalog = false) {
+        std::vector<std::string> arguments{
+            "--install-scope", "per-user", "--install-root", paths.install_root.string(),
+            "--data-root", paths.data_root.string(), "--cache-root", paths.cache_root.string(),
+            "--workspace-root", paths.workspace_root.string(), "--knowledge-root", paths.knowledge_root.string(),
+            "--catalog", (media / "catalog.json").string()};
+        if (unsigned_catalog) arguments.push_back("--allow-unsigned-development-catalog");
+        else { arguments.push_back("--metadata-dir"); arguments.push_back(media.string()); }
+        arguments.insert(arguments.end(), {command, "--preset", "manager_only"});
+        if (confirmed) arguments.push_back("--yes");
+        std::cout << "fixture-cli-argv " << json(arguments).dump() << '\n';
+        arena::ports::NativeProcess process;
+        process.start(ARENA_SETUP_ROOT_FIXTURE_PATH, root, arguments);
+        std::string output;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (process.running() && std::chrono::steady_clock::now() < deadline) {
+            if (const auto line = process.read_line(std::chrono::milliseconds(100))) output += *line + '\n';
+        }
+        while (const auto line = process.read_line(std::chrono::milliseconds(10))) output += *line + '\n';
+        process.stop(std::chrono::milliseconds(0));
+        INFO(output);
+        REQUIRE(process.exit_code() == exit_code);
+        return output;
+    };
+    SetupPaths paths = paths_under(root);
+    paths.manager_service_access = false;
+    REQUIRE_FALSE(fs::exists(paths.data_root));
+    static_cast<void>(execute(paths, "plan", metadata, false, 0));
+    REQUIRE(fs::is_directory(paths.data_root));
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(paths.data_root));
+    REQUIRE(fs::is_regular_file(paths.data_root / "trust/tuf-versions.json"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "transactions"));
+    REQUIRE_FALSE(fs::exists(paths.data_root / "receipts"));
+    REQUIRE_FALSE(fs::exists(paths.install_root));
+    static_cast<void>(execute(paths, "apply", metadata, true, 0));
+    REQUIRE(fs::is_directory(paths.data_root / "transactions"));
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(paths.data_root / "transactions"));
+
+    SetupPaths unconfirmed = paths_under(root / "unconfirmed");
+    unconfirmed.manager_service_access = false;
+    static_cast<void>(execute(unconfirmed, "apply", metadata, false, 2));
+    REQUIRE(fs::is_regular_file(unconfirmed.data_root / "trust/tuf-versions.json"));
+    REQUIRE_FALSE(fixture_authenticated_users_can_write(unconfirmed.data_root));
+    REQUIRE_FALSE(fs::exists(unconfirmed.data_root / "transactions"));
+
+    SetupPaths nonpublishing = paths_under(root / "nonpublishing");
+    nonpublishing.manager_service_access = false;
+    static_cast<void>(execute(nonpublishing, "apply", root / "missing-metadata", true, 2));
+    REQUIRE_FALSE(fs::exists(nonpublishing.data_root));
+    REQUIRE_FALSE(fs::exists(nonpublishing.install_root));
+
+    SetupPaths diagnostic = paths_under(root / "unsigned-diagnostic");
+    diagnostic.manager_service_access = false;
+    static_cast<void>(execute(diagnostic, "plan", metadata, false, 0, true));
+    REQUIRE_FALSE(fs::exists(diagnostic.data_root));
+    REQUIRE_FALSE(fs::exists(diagnostic.install_root));
+
+    SetupPaths rollback = paths_under(root / "rollback");
+    rollback.manager_service_access = false;
+    static_cast<void>(execute(rollback, "plan", metadata, false, 0));
+    const auto state = rollback.data_root / "trust/tuf-versions.json";
+    const json higher{{"schema", "arena_tuf_rollback_state_v1"}, {"root", 1},
+        {"timestamp", 2}, {"snapshot", 1}, {"targets", 1}};
+    const std::string prior = higher.dump();
+    // The native publisher's activated stage retains hidden attributes.
+    // OPEN_EXISTING mutates this owned fixture without CREATE_ALWAYS refusing it.
+    HANDLE state_handle = CreateFileW(state.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    REQUIRE(state_handle != INVALID_HANDLE_VALUE);
+    DWORD written{};
+    const BOOL write_ok = WriteFile(state_handle, prior.data(), static_cast<DWORD>(prior.size()), &written, nullptr);
+    const BOOL truncate_ok = SetEndOfFile(state_handle);
+    CloseHandle(state_handle);
+    REQUIRE(write_ok);
+    REQUIRE(written == prior.size());
+    REQUIRE(truncate_ok);
+    const auto rollback_failure = execute(rollback, "plan", metadata, false, 2);
+    REQUIRE(rollback_failure.find("TUF rollback detected for timestamp") != std::string::npos);
+    const std::string preserved{std::istreambuf_iterator<char>(std::ifstream(state).rdbuf()), {}};
+    REQUIRE(preserved == prior);
+    REQUIRE_FALSE(fs::exists(rollback.data_root / "transactions"));
+
+    SetupPaths unsafe = paths_under(root / "unsafe");
+    unsafe.manager_service_access = false;
+    fs::create_directory(unsafe.data_root);
+    add_fixture_broad_directory_write(unsafe.data_root);
+    const auto before = fixture_dacl(unsafe.data_root);
+    const auto unsafe_failure = execute(unsafe, "plan", metadata, false, 2);
+    REQUIRE(unsafe_failure.find("per-user data root is not private") != std::string::npos);
+    REQUIRE(fixture_dacl(unsafe.data_root) == before);
+    REQUIRE_FALSE(fs::exists(unsafe.data_root / "trust"));
+    REQUIRE_FALSE(fs::exists(unsafe.data_root / "transactions"));
+    REQUIRE_FALSE(fs::exists(unsafe.data_root / "receipts"));
+    REQUIRE_FALSE(fs::exists(unsafe.install_root));
+    remove_locator_test_directory(root);
+}
+#endif
 
 TEST_CASE("setup plan resolves only explicitly composed components") {
     const fs::path root = temporary_directory();
