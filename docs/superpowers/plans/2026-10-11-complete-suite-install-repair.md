@@ -57,3 +57,9 @@
 - [ ] Verify bot disabled and zero instances; record exact installed acceptance and remaining evidence limits.
 
 Existing historical failed installer artifacts and receipts remain immutable evidence. This plan changes no provider contract by itself.
+
+### Actual restoration finding and Complete0.3.56
+
+Complete0.3.55 was built from all eight officially verified signed component inputs and its exact unsigned development installer artifacts passed independent review. Preserving component uninstall completed; all three provider Tasks were observed absent. Verified copies of Book, Evidence and knowledge artifacts reached E, with C originals retained (Book renamed within its original parent after verification). Book's public command adopted its copied catalog and paused it.
+
+Actual Evidence locator adoption deferred before mutation: Windows PowerShell5 and7 expose missing `GetTask` as typed `FileNotFoundException` with HRESULT_FILE_NOT_FOUND, while Evidence0.3.16 accepted only COMException. Complete0.3.56 changes only the Evidence row to0.3.17. Its independently reviewed producer fix must retain fail-closed handling of connection/folder/access-denied/unknown failures. Exact signed0.3.17 inputs, full suite build/artifact review and actual adoption/installation remain required; no installation success is claimed yet. Bot artifact copying also requires a qualified extended-path ADS enumeration fix for retained paths exceeding260characters. Neither failure authorizes data deletion or bypassing the producer's offline guard.
