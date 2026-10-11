@@ -37,6 +37,12 @@
 #include "arena/platform/filesystem_path.hpp"
 #include "arena/platform/service_control.hpp"
 #include "arena/platform/workspace_permissions.hpp"
+#ifdef _WIN32
+#include "arena/application/installer/exact_document.hpp"
+#include "arena/platform/filesystem_identity.hpp"
+#include "arena/platform/durable_state_publisher.hpp"
+#include "arena/ports/durable_state_publisher.hpp"
+#endif
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -367,7 +373,7 @@ std::uint64_t metadata_version(const json& metadata, const std::string& role) {
 }
 
 void verify_tuf_chain(const fs::path& catalog_path, const fs::path& metadata_directory,
-                      const fs::path& rollback_state_path) {
+                      const fs::path& rollback_state_path, const fs::path& per_user_data_root) {
     if (sodium_init() < 0) {
         throw std::runtime_error("libsodium initialization failed");
     }
@@ -415,8 +421,44 @@ void verify_tuf_chain(const fs::path& catalog_path, const fs::path& metadata_dir
             versions.at("targets").get<std::uint64_t>()) {
         throw std::runtime_error("TUF delegated metadata versions disagree");
     }
+    std::optional<json> previous_state;
+#ifdef _WIN32
+    std::optional<ExactDocument> prior_document;
+    const bool private_publication = !rollback_state_path.empty() && !per_user_data_root.empty();
+    if (private_publication) {
+        if (!per_user_data_root.is_absolute() ||
+            per_user_data_root != per_user_data_root.lexically_normal() ||
+            !rollback_state_path.is_absolute() ||
+            rollback_state_path != rollback_state_path.lexically_normal() ||
+            !within(per_user_data_root, rollback_state_path)) {
+            throw std::runtime_error("TUF rollback target is outside the explicit per-user data root");
+        }
+        // Signatures, expiry and delegated versions have succeeded. New roots
+        // have no prior rollback state; existing directory ACLs remain unchanged.
+        arena::platform::prepare_per_user_data_root(per_user_data_root);
+        try {
+            arena::platform::prepare_per_user_data_root(rollback_state_path.parent_path());
+        } catch (const std::exception& error) {
+            throw std::runtime_error(std::string("TUF rollback-state directory: ") + error.what());
+        }
+        auto identity = arena::platform::make_filesystem_identity();
+        const auto parent = identity->admit_directory(rollback_state_path.parent_path());
+        try {
+            prior_document = ExactDocumentReader{}.read_child(*parent,
+                rollback_state_path.filename().generic_string(), {65536, true});
+            previous_state = parse_bounded_json(*prior_document, {});
+        } catch (const arena::ports::FilesystemIdentityException& error) {
+            if (error.code() != arena::ports::FilesystemIdentityErrorCode::missing) throw;
+        }
+    } else
+#else
+    static_cast<void>(per_user_data_root);
+#endif
     if (!rollback_state_path.empty() && fs::is_regular_file(rollback_state_path)) {
-        const json previous = read_json(rollback_state_path);
+        previous_state = read_json(rollback_state_path);
+    }
+    if (previous_state) {
+        const json& previous = *previous_state;
         if (previous.value("schema", "") != "arena_tuf_rollback_state_v1") {
             throw std::runtime_error("TUF rollback state is malformed");
         }
@@ -427,7 +469,7 @@ void verify_tuf_chain(const fs::path& catalog_path, const fs::path& metadata_dir
         }
     }
     if (!rollback_state_path.empty()) {
-        write_json_atomic(rollback_state_path, {
+        const json candidate{
                                                    {"schema", "arena_tuf_rollback_state_v1"},
                                                    {"root_sha256", pinned_root},
                                                    {"root", versions.at("root")},
@@ -435,7 +477,26 @@ void verify_tuf_chain(const fs::path& catalog_path, const fs::path& metadata_dir
                                                    {"snapshot", versions.at("snapshot")},
                                                    {"targets", versions.at("targets")},
                                                    {"verified_at", current_utc_iso()},
-                                               });
+                                               };
+#ifdef _WIN32
+        if (private_publication) {
+            const std::string bytes = candidate.dump(2) + '\n';
+            const auto identity = arena::platform::make_filesystem_identity();
+            const auto publisher = arena::platform::make_durable_state_publisher(*identity);
+            const auto result = publisher->publish({rollback_state_path,
+                std::span<const std::byte>{reinterpret_cast<const std::byte*>(bytes.data()), bytes.size()},
+                65536, prior_document ? arena::ports::PublicationPrecondition::exact_sha256 :
+                    arena::ports::PublicationPrecondition::absent,
+                prior_document ? std::optional{prior_document->sha256} : std::nullopt,
+                std::chrono::seconds(10)});
+            if (result.outcome != arena::ports::PublicationOutcome::activated) {
+                throw std::runtime_error("TUF rollback state publication did not prove activation and durability");
+            }
+        } else
+#endif
+        {
+            write_json_atomic(rollback_state_path, candidate);
+        }
     }
 }
 
@@ -4987,7 +5048,8 @@ std::string SetupEngine::platform_key() {
 json SetupEngine::load_catalog(const fs::path& catalog_path, const fs::path& metadata_directory,
                                const bool allow_unsigned_development_catalog,
                                const fs::path& rollback_state_path,
-                               const fs::path& retained_development_trust_path) {
+                               const fs::path& retained_development_trust_path,
+                               const fs::path& per_user_data_root) {
     std::string catalog_trust;
     if (metadata_directory.empty()) {
         if (!allow_unsigned_development_catalog) {
@@ -5025,7 +5087,7 @@ json SetupEngine::load_catalog(const fs::path& catalog_path, const fs::path& met
             catalog_trust = "explicit_unsigned_development";
         }
     } else {
-        verify_tuf_chain(catalog_path, metadata_directory, rollback_state_path);
+        verify_tuf_chain(catalog_path, metadata_directory, rollback_state_path, per_user_data_root);
         catalog_trust = "tuf";
     }
     json catalog = read_json(catalog_path);
@@ -5131,6 +5193,11 @@ json SetupEngine::persist_release_media(const json& catalog, const SetupPaths& p
     const fs::path stage = paths.data_root / ("release.staging-" + transaction_id);
     const fs::path backup = paths.data_root / ("release.rollback-" + transaction_id);
     std::error_code ignored;
+#ifdef _WIN32
+    if (!paths.manager_service_access) {
+        arena::platform::prepare_per_user_data_root(paths.data_root);
+    }
+#endif
     fs::create_directories(paths.data_root);
     fs::remove_all(stage, ignored);
     ignored.clear();
@@ -6009,6 +6076,11 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
     if (!paths.bundle_owner.empty() && !valid_bundle_owner(paths.bundle_owner)) {
         throw std::runtime_error("bundle owner is invalid");
     }
+#ifdef _WIN32
+    if (!paths.manager_service_access) {
+        arena::platform::prepare_per_user_data_root(paths.data_root);
+    }
+#endif
     const fs::path components_root = paths.install_root / "components";
     const fs::path staging_root = paths.install_root / ".staging";
     const fs::path receipts_root = paths.data_root / "receipts";

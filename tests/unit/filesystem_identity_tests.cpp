@@ -1,9 +1,11 @@
 #include "arena/ports/filesystem_identity.hpp"
 #include "arena/application/installer/install_layout.hpp"
+#include "arena/ports/native_process.hpp"
 
 #ifdef _WIN32
 #include "arena/platform/filesystem_identity.hpp"
 #include "arena/platform/filesystem_path.hpp"
+#include "arena/platform/workspace_permissions.hpp"
 #include "../../src/platform/windows/filesystem_identity_private.hpp"
 
 #define NOMINMAX
@@ -872,6 +874,57 @@ TEST_CASE("selected package roots reject cache installed and dangling junctions"
         REQUIRE(fs::remove(target));
         CHECK_THROWS_AS(arena::application::installer::admit_package_layout_roots(layout, *identity), ports::FilesystemIdentityException);
         REQUIRE(fs::remove(root));
+    }
+}
+
+TEST_CASE("per-user data root rejects a final and ancestor junction without traversing it", "[data-root-access]") {
+    WindowsTempRoot temporary;
+    const auto target = temporary.path() / "target";
+    const auto junction = temporary.path() / "junction";
+    REQUIRE(fs::create_directory(target));
+    write_file(target / "retained.txt", "retained fixture");
+    DWORD native_error{};
+    if (!create_junction(junction, target, native_error)) {
+        SKIP("owned junction creation unavailable (win32=" << native_error << ")");
+    }
+    REQUIRE_THROWS(arena::platform::prepare_per_user_data_root(junction));
+    REQUIRE_THROWS(arena::platform::prepare_per_user_data_root(junction / "data"));
+    REQUIRE_FALSE(fs::exists(target / "data"));
+    REQUIRE(fs::file_size(target / "retained.txt") == 16);
+}
+
+TEST_CASE("valid TUF publication rejects a state-parent or final-target junction", "[data-root-access]") {
+    for (const bool parent_link : {true, false}) {
+        WindowsTempRoot temporary;
+        const auto data = temporary.path() / "data", foreign = temporary.path() / "foreign";
+        arena::platform::prepare_per_user_data_root(data);
+        REQUIRE(fs::create_directory(foreign));
+        write_file(foreign / "retained.txt", "retained fixture");
+        const auto trust = data / "trust";
+        if (!parent_link) arena::platform::prepare_per_user_data_root(trust);
+        DWORD native_error{};
+        if (!create_junction(parent_link ? trust : trust / "tuf-versions.json", foreign, native_error)) {
+            SKIP("owned junction creation unavailable (win32=" << native_error << ")");
+        }
+        const fs::path media = fs::path(ARENA_INSTALLER_SOURCE_DIR) / "tests/fixtures/tuf-plan-root";
+        arena::ports::NativeProcess process;
+        process.start(ARENA_SETUP_ROOT_FIXTURE_PATH, temporary.path(), {
+            "--install-scope", "per-user", "--install-root", (temporary.path() / "install").string(),
+            "--data-root", data.string(), "--cache-root", (temporary.path() / "cache").string(),
+            "--workspace-root", (temporary.path() / "workspace").string(),
+            "--knowledge-root", (temporary.path() / "knowledge").string(),
+            "--catalog", (media / "catalog.json").string(), "--metadata-dir", media.string(),
+            "plan", "--preset", "manager_only"});
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (process.running() && std::chrono::steady_clock::now() < deadline) {
+            static_cast<void>(process.read_line(std::chrono::milliseconds(100)));
+        }
+        process.stop(std::chrono::milliseconds(0));
+        REQUIRE(process.exit_code() == 2);
+        REQUIRE_FALSE(fs::exists(foreign / "tuf-versions.json"));
+        REQUIRE(fs::file_size(foreign / "retained.txt") == 16);
+        REQUIRE_FALSE(fs::exists(data / "receipts"));
+        REQUIRE_FALSE(fs::exists(data / "transactions"));
     }
 }
 

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(
   uci_arena_installer
-  VERSION 0.2.2
+  VERSION 0.2.3
   DESCRIPTION "Transactional installer and release assembly for UCI Arena"
   LANGUAGES CXX
 )
@@ -233,6 +233,21 @@ if(ARENA_INSTALLER_BUILD_TESTS)
     tests/unit/tuf_trust_tests.cpp
     tests/unit/windows_installer_launcher_tests.cpp
   )
+  if(WIN32)
+    # Exercise the real CLI ordering against absent fixture layout authority;
+    # this target is never installed or packaged and never reads shared registry.
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/tuf-plan-root/root.json" ARENA_FIXTURE_TUF_ROOT_SHA256)
+    add_executable(arena_setup_root_fixture apps/setup/main.cpp
+      src/application/installer/setup.cpp tests/mocks/absent_package_layout.cpp)
+    target_include_directories(arena_setup_root_fixture PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_definitions(arena_setup_root_fixture PRIVATE
+      ARENA_TUF_ROOT_SHA256="${ARENA_FIXTURE_TUF_ROOT_SHA256}")
+    target_link_libraries(arena_setup_root_fixture PRIVATE arena_installer_core CLI11::CLI11 CURL::libcurl
+      LibArchive::LibArchive unofficial-sodium::sodium)
+    add_dependencies(arena_installer_tests arena_setup_root_fixture)
+    target_compile_definitions(arena_installer_tests PRIVATE
+      ARENA_SETUP_ROOT_FIXTURE_PATH="$<TARGET_FILE:arena_setup_root_fixture>")
+  endif()
   add_dependencies(
     arena_installer_tests arena_mock_uci arena_mock_service)
   target_compile_definitions(

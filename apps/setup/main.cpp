@@ -456,7 +456,13 @@ int main(int argc, char** argv) {
                 catalog_path, metadata_directory, allow_unsigned_development_catalog,
                 paths.data_root / "trust" / "tuf-versions.json",
                 paths.data_root / "release" /
-                    "development-trust.json");
+                    "development-trust.json",
+#ifdef _WIN32
+                paths.manager_service_access ? fs::path{} : paths.data_root
+#else
+                fs::path{}
+#endif
+                );
             json feature_reconciliation;
             if (!bundle_features.empty()) {
                 feature_reconciliation =
