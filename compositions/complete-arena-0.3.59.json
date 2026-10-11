@@ -30,7 +30,7 @@
     {
       "role": "evidence_service",
       "component_id": "uci_arena_evidence.service",
-      "version": "0.3.18",
+      "version": "0.3.19",
       "repository": "iteathen/uci-arena-evidence-service",
       "required": false,
       "default_enabled": true,
