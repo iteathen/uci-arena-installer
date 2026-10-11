@@ -16,6 +16,11 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#ifdef _WIN32
+#include "arena/platform/windows_package_layout.hpp"
+#include <windows.h>
+#include <objbase.h>
+#endif
 
 namespace {
 
@@ -413,6 +418,74 @@ TEST_CASE("locator and SetupPaths are exact projections of installed authority")
     CHECK(paths.restart_manager_service);
     CHECK_FALSE(paths.manager_service_access);
 }
+
+TEST_CASE("package-selected roots reuse policy children and reject overlap", "[package-layout]") {
+    const json selection{
+        {"schema", "arena_package_layout_selection_v1"}, {"scope", "per-user"},
+        {"integration_root", "E:\\Programs\\UCI Arena Manager"},
+        {"data_root", "E:\\Data\\UCI Arena Manager"},
+    };
+    const auto layout = installer::resolve_package_layout_selection(active_policy(), selection);
+    CHECK(layout.roots.integration == fs::path{"E:\\Programs\\UCI Arena Manager"});
+    CHECK(layout.roots.install == fs::path{"E:\\Programs\\UCI Arena Manager\\installed"});
+    CHECK(layout.roots.workspace == fs::path{"E:\\Data\\UCI Arena Manager\\workspaces"});
+    CHECK(layout.roots.cache == fs::path{"E:\\Data\\UCI Arena Manager\\cache"});
+    CHECK(layout.roots.knowledge == fs::path{"E:\\Data\\UCI Arena Manager\\knowledge"});
+    for (const auto field : {"schema", "scope", "integration_root", "data_root"}) {
+        auto bad = selection;
+        bad.erase(field);
+        CHECK_THROWS_AS(installer::resolve_package_layout_selection(active_policy(), bad), std::invalid_argument);
+    }
+    for (const auto invalid : {"E:\\", "relative", "e:\\programs\\uci arena manager\\data", "E:\\Data\\..\\Arena", "E:\\Data\\CON"}) {
+        auto bad = selection;
+        bad["data_root"] = invalid;
+        CHECK_THROWS_AS(installer::resolve_package_layout_selection(active_policy(), bad), std::invalid_argument);
+    }
+    auto bad = selection;
+    bad["extra"] = true;
+    CHECK_THROWS_AS(installer::resolve_package_layout_selection(active_policy(), bad), std::invalid_argument);
+}
+
+#ifdef _WIN32
+TEST_CASE("Windows package selection distinguishes absence from partial typed and wrong-scope records", "[package-layout]") {
+    GUID uuid{};
+    REQUIRE(CoCreateGuid(&uuid) == S_OK);
+    wchar_t text[40]{};
+    REQUIRE(StringFromGUID2(uuid, text, 40) > 0);
+    const std::wstring base = L"Software\\UCI Arena\\Tests\\PackageLayout-" + std::wstring{text};
+    struct Cleanup {
+        std::wstring key;
+        ~Cleanup() { RegDeleteTreeW(HKEY_CURRENT_USER, key.c_str()); }
+    } cleanup{base};
+    REQUIRE_FALSE(arena::platform::read_windows_package_layout_selection(ports::InstallScope::per_user, base).has_value());
+    HKEY key{};
+    REQUIRE(RegCreateKeyExW(HKEY_CURRENT_USER, (base + L"\\per-user").c_str(), 0, nullptr, 0,
+        KEY_ALL_ACCESS | KEY_WOW64_64KEY, nullptr, &key, nullptr) == ERROR_SUCCESS);
+    struct Close { HKEY key; ~Close() { RegCloseKey(key); } } close{key};
+    const auto set = [&](const wchar_t* name, const wchar_t* value) {
+        REQUIRE(RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value),
+            static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t))) == ERROR_SUCCESS);
+    };
+    CHECK_THROWS(arena::platform::read_windows_package_layout_selection(ports::InstallScope::per_user, base));
+    set(L"Schema", L"arena_package_layout_selection_v1");
+    set(L"Scope", L"per-user");
+    set(L"IntegrationRoot", L"E:\\Programs\\Arena\\");
+    set(L"DataRoot", L"E:\\Data\\Arena");
+    const auto loaded = arena::platform::read_windows_package_layout_selection(ports::InstallScope::per_user, base);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->at("integration_root") == "E:\\Programs\\Arena");
+    CHECK(loaded->at("data_root") == "E:\\Data\\Arena");
+    set(L"Scope", L"per-machine");
+    CHECK_THROWS(arena::platform::read_windows_package_layout_selection(ports::InstallScope::per_user, base));
+    set(L"Scope", L"per-user");
+    const DWORD wrong_type = 4;
+    REQUIRE(RegSetValueExW(key, L"DataRoot", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&wrong_type), sizeof(wrong_type)) == ERROR_SUCCESS);
+    CHECK_THROWS(arena::platform::read_windows_package_layout_selection(ports::InstallScope::per_user, base));
+    set(L"DataRoot", L"E:\\Data\\Arena");
+    set(L"Extra", L"unexpected");
+    CHECK_THROWS(arena::platform::read_windows_package_layout_selection(ports::InstallScope::per_user, base));
+}
+#endif
 
 TEST_CASE("layout diagnostics are bounded and do not disclose rejected fields") {
     auto policy = active_policy();

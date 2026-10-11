@@ -37,6 +37,44 @@ confirmed_current_defect:
     address different component stores. This is a present competing-authority
     defect, not merely a future drift risk.
 
+current_generation_fresh_package_selection:
+  authority: >
+    The project owner explicitly selected uninstall with preservation followed by
+    a fresh E-volume installation on 2026-10-11. This bounded current-generation
+    packaging route specializes the v1 custom-root restriction for fresh installs.
+    It does not implement or claim IL-05, IL-06, IL-07 or transaction-v2 completion.
+  persistence_owner: Windows Installer owns one transactional registry component
+  schema: arena_package_layout_selection_v1
+  registration:
+    view: 64
+    hive: HKCU for per-user; HKLM for per-machine
+    key: Software/UCI Arena/Installer/PackageLayout/<scope>
+    exact_string_values: [Schema, Scope, IntegrationRoot, DataRoot]
+  selection:
+    - IntegrationRoot and DataRoot are explicitly selected absolute normalized non-root paths
+    - neither root contains or aliases the other
+    - existing roots and ancestors require ordinary no-reparse admission
+    - all children derive from the canonical policy-v2 relative expressions
+    - repair remembers existing roots before applying defaults
+    - conflicting root overrides reject before publication; changing location requires normal uninstall first
+    - normal MSI uninstall removes selection registration and preserves application data
+  public_projection:
+    command: arena-setup --install-scope <scope> --json layout
+    exact_fields: [schema, scope, integration_root, roots]
+    exact_roots: [data, install, cache, workspace, knowledge]
+    unavailable_or_invalid: controlled nonzero result without guessed roots
+    consumers: [Manager desktop, Manager CLI setup adapter, routine updater, suite bundle]
+    rule: >
+      Installer alone reads and validates selected-root registration. Other
+      consumers use its closed public projection and forward the complete root
+      tuple. The updater may read IntegrationRoot only as a launcher pointer; the
+      public installed runtime admits that pointer before its roots are used.
+  limits:
+    - this record is distinct from the future policy/digest-bound InstalledLayout descriptor and locator
+    - this route creates no second transaction engine, journal, migration or registry writer
+    - source data restoration remains a separately quiesced producer-owned operation
+    - a missing selection retains existing explicit development and legacy diagnostic paths but cannot authorize installed Manager setup
+
 hierarchy:
   lego:
     brick: InstallLayout

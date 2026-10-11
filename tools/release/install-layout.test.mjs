@@ -18,6 +18,33 @@ const anchors = {
 };
 const clone = (value = policy) => structuredClone(value);
 
+test("an explicit fresh package selection derives every child on the selected volumes", () => {
+  const selectedRoots = { integration: "E:\\Programs\\UCI Arena Manager", data: "E:\\Data\\UCI Arena Manager" };
+  const selected = resolveInstallLayout({ policy, scope: "per-user", anchors, selectedRoots });
+  assert.equal(selected.integration_root, "E:\\Programs\\UCI Arena Manager");
+  assert.deepEqual(selected.roots, {
+    data: "E:\\Data\\UCI Arena Manager",
+    install: "E:\\Programs\\UCI Arena Manager\\installed",
+    cache: "E:\\Data\\UCI Arena Manager\\cache",
+    workspace: "E:\\Data\\UCI Arena Manager\\workspaces",
+    knowledge: "E:\\Data\\UCI Arena Manager\\knowledge",
+    release: "E:\\Data\\UCI Arena Manager\\release",
+    receipts: "E:\\Data\\UCI Arena Manager\\receipts",
+    transactions: "E:\\Data\\UCI Arena Manager\\transactions",
+    preservation: "E:\\Data\\UCI Arena Manager\\preservation",
+  });
+});
+
+test("fresh package selection rejects partial unsafe and overlapping roots", () => {
+  for (const selectedRoots of [
+    { integration: "E:\\Programs\\Arena" },
+    { integration: "E:\\", data: "E:\\Data\\Arena" },
+    { integration: "relative", data: "E:\\Data\\Arena" },
+    { integration: "E:\\Programs\\Arena", data: "e:\\programs\\arena\\data" },
+    { integration: "E:\\Programs\\Arena", data: "E:\\Data\\Arena", extra: true },
+  ]) assert.throws(() => resolveInstallLayout({ policy, scope: "per-user", anchors, selectedRoots }), TypeError);
+});
+
 test("active install-layout policy resolves exact personal and machine targets", () => {
   const personal = resolveInstallLayout({ policy, scope: "per-user", anchors });
   assert.equal(personal.integration_root, "C:\\Users\\Example\\AppData\\Local\\Programs\\UCI Arena Manager");

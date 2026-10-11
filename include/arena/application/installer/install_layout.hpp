@@ -8,6 +8,8 @@
 #include <string>
 #include <string_view>
 
+namespace arena::ports { class FilesystemIdentity; }
+
 namespace arena::application::installer {
 
 struct SetupPaths;
@@ -64,6 +66,14 @@ validate_install_layout_policy(const nlohmann::json& candidate);
 resolve_install_layout(const nlohmann::json& validated_policy,
                        arena::ports::InstallScope scope,
                        const arena::ports::InstallLayoutAnchorResolver& anchors);
+
+// Current-generation MSI selection; this is not InstalledLayout authority.
+[[nodiscard]] ResolvedInstallLayout
+resolve_package_layout_selection(const nlohmann::json& validated_policy,
+                                 const nlohmann::json& selection);
+
+void admit_package_layout_roots(const ResolvedInstallLayout& layout,
+                               arena::ports::FilesystemIdentity& identity);
 
 [[nodiscard]] InstalledLayout
 validate_installed_layout(const nlohmann::json& validated_policy,

@@ -1,0 +1,4 @@
+#pragma once
+namespace arena::packaging {
+inline constexpr char install_layout_policy[] = R"arena_policy(@ARENA_LAYOUT_POLICY_BYTES@)arena_policy";
+}

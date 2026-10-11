@@ -211,16 +211,25 @@ export function validateInstallLayoutPolicy(candidate) {
   return freeze(structuredClone(candidate));
 }
 
-export function resolveInstallLayout({ policy, scope, anchors }) {
+export function resolveInstallLayout({ policy, scope, anchors, selectedRoots }) {
   const validated = validateInstallLayoutPolicy(policy);
   if (!SCOPES.includes(scope)) fail("scope", "unsupported value");
-  object(anchors, "anchors");
   const definition = validated.scopes[scope];
-  const needed = new Set([definition.roots.integration.anchor, definition.roots.data.anchor]);
-  const resolvedAnchors = {};
-  for (const anchor of needed) resolvedAnchors[anchor] = validateAnchor(anchors[anchor], `anchors.${anchor}`);
-  const integration = joinDescendant(resolvedAnchors[definition.roots.integration.anchor], definition.roots.integration.segments, "roots.integration");
-  const data = joinDescendant(resolvedAnchors[definition.roots.data.anchor], definition.roots.data.segments, "roots.data");
+  let integration;
+  let data;
+  if (selectedRoots !== undefined) {
+    if (validated.policy_version !== 2) fail("selectedRoots", "unsupported policy generation");
+    exactKeys(selectedRoots, ["integration", "data"], "selectedRoots");
+    integration = validateAnchor(selectedRoots.integration, "selectedRoots.integration");
+    data = validateAnchor(selectedRoots.data, "selectedRoots.data");
+  } else {
+    object(anchors, "anchors");
+    const needed = new Set([definition.roots.integration.anchor, definition.roots.data.anchor]);
+    const resolvedAnchors = {};
+    for (const anchor of needed) resolvedAnchors[anchor] = validateAnchor(anchors[anchor], `anchors.${anchor}`);
+    integration = joinDescendant(resolvedAnchors[definition.roots.integration.anchor], definition.roots.integration.segments, "roots.integration");
+    data = joinDescendant(resolvedAnchors[definition.roots.data.anchor], definition.roots.data.segments, "roots.data");
+  }
   if (caseKey(integration) === caseKey(data) || isDescendant(integration, data) || isDescendant(data, integration)) {
     fail("roots", "integration and data overlap");
   }

@@ -20,6 +20,7 @@ import {
   validateExtractedComponent,
 } from "./component-artifact.mjs";
 import { validateInstallerRuntime } from "./build-installer-runtime.mjs";
+import { buildWindowsWixLayoutProjection } from "./install-layout.mjs";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/u;
 const SCOPES = new Set(["per-user", "per-machine"]);
@@ -151,6 +152,7 @@ function renderFileComponent({
   selectedScope,
   policy,
   manifest,
+  layout,
 }) {
   const componentId = stableId("CMP", `${scope}:${relative}`);
   const componentGuid = stableGuid(`uci-arena-manager:${scope}:${relative}`);
@@ -161,8 +163,12 @@ function renderFileComponent({
   ];
   const desktopPath = manifest.entrypoints[policy.entrypoints.desktop];
   if (relative === desktopPath) {
+    const child = (name) => layout.roots[name].relative_to === "integration"
+      ? `[INSTALL_ROOT]${layout.roots[name].expression}`
+      : `[ARENA_DATA_ROOT]\\${layout.roots[name].expression}`;
+    const arguments_ = `--data-dir &quot;[ARENA_DATA_ROOT]&quot; --install-root &quot;${child("install")}&quot; --cache-root &quot;${child("cache")}&quot; --workspace-root &quot;${child("workspace")}&quot; --knowledge-root &quot;${child("knowledge")}&quot;`;
     lines.push(
-      `          <Shortcut Id="ArenaManagerStartMenuShortcut" Directory="ProgramMenuFolder" Name="${xml(policy.start_menu.name)}" WorkingDirectory="INSTALL_ROOT" Advertise="no" />`,
+      `          <Shortcut Id="ArenaManagerStartMenuShortcut" Directory="ProgramMenuFolder" Name="${xml(policy.start_menu.name)}" WorkingDirectory="INSTALL_ROOT" Arguments="${arguments_}" Advertise="no" />`,
     );
   }
   lines.push("        </File>");
@@ -225,7 +231,17 @@ export function buildManagerMsiSource({
   }
 
   const policy = readJson(path.resolve(policyPath), "Manager Windows integration policy");
-  const selectedScope = validatePolicy(policy, scope);
+  const scopeIntegration = validatePolicy(policy, scope);
+  const layout = buildWindowsWixLayoutProjection({
+    policy: readJson(fileURLToPath(new URL("../../packaging/install-layout.json", import.meta.url)), "InstallLayout policy"),
+    scope,
+  });
+  const selectedScope = {
+    ...scopeIntegration,
+    root_folder: layout.anchors.integration.wix_folder_id,
+    root_segments: layout.anchors.integration.segments,
+    data_root: layout.anchors.data.expression,
+  };
   const { manifest, declared, manifestPath } = validateManagerArtifact(
     resolvedRoot, managerVersion ?? version, policy,
   );
@@ -283,6 +299,7 @@ export function buildManagerMsiSource({
     selectedScope,
     policy,
     manifest,
+    layout,
   }));
   const rootOpen = selectedScope.root_segments.map((segment, index) => {
     const relative = selectedScope.root_segments.slice(0, index + 1).join("/");
@@ -295,6 +312,13 @@ export function buildManagerMsiSource({
   const childDirectories = renderDirectories(directoryTree(payloadPaths),
     "      ".repeat(selectedScope.root_segments.length + 1));
   const packageScope = selectedScope.package_scope;
+  const layoutKey = `Software\\UCI Arena\\Installer\\PackageLayout\\${scope}`;
+  const layoutHive = scope === "per-user" ? "HKCU" : "HKLM";
+  const layoutComponent = stableId("CMP", `package-layout:${scope}`);
+  const layoutSearches = [
+    ["ARENA_PRIOR_SCHEMA", "Schema"], ["ARENA_PRIOR_SCOPE", "Scope"],
+    ["ARENA_PRIOR_INTEGRATION", "IntegrationRoot"], ["ARENA_PRIOR_DATA", "DataRoot"],
+  ].map(([property, name]) => `    <Property Id="${property}" Secure="yes"><RegistrySearch Id="Search${property}" Root="${layoutHive}" Key="${xml(layoutKey)}" Name="${name}" Type="raw" Bitness="always64" /></Property>`);
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -307,7 +331,15 @@ export function buildManagerMsiSource({
     '    </Upgrade>',
     '    <Launch Condition="NOT OPPOSITE_SCOPE_FOUND OR Installed" Message="The other UCI Arena Manager installation scope is already installed. Uninstall it before changing scope." />',
     '    <Property Id="ARENA_DATA_ROOT" Secure="yes" />',
-    `    <SetProperty Id="ARENA_DATA_ROOT" Value="${xml(selectedScope.data_root)}" Before="CostFinalize" Sequence="both" Condition="NOT ARENA_DATA_ROOT" />`,
+    ...layoutSearches,
+    '    <Property Id="INSTALL_ROOT" Secure="yes" />',
+    '    <SetProperty Id="INSTALL_ROOT" Value="[ARENA_PRIOR_INTEGRATION]" Before="CostFinalize" Sequence="both" Condition="NOT INSTALL_ROOT AND ARENA_PRIOR_INTEGRATION" />',
+    '    <SetProperty Id="ARENA_DATA_ROOT" Action="RestoreArenaDataRoot" Value="[ARENA_PRIOR_DATA]" Before="SetARENA_DATA_ROOT" Sequence="both" Condition="NOT ARENA_DATA_ROOT AND ARENA_PRIOR_DATA" />',
+    `    <SetProperty Id="ARENA_DATA_ROOT" Value="${xml(layout.anchors.data.expression)}" Before="CostFinalize" Sequence="both" Condition="NOT ARENA_DATA_ROOT" />`,
+    '    <Launch Condition="NOT (ARENA_PRIOR_SCHEMA OR ARENA_PRIOR_SCOPE OR ARENA_PRIOR_INTEGRATION OR ARENA_PRIOR_DATA) OR (ARENA_PRIOR_SCHEMA = &quot;arena_package_layout_selection_v1&quot; AND ARENA_PRIOR_SCOPE = &quot;' + scope + '&quot; AND ARENA_PRIOR_INTEGRATION AND ARENA_PRIOR_DATA)" Message="The retained UCI Arena path selection is incomplete or unsupported. Repair that installation before reinstalling." />',
+    '    <CustomAction Id="RejectChangedPackageRoots" Error="The installed UCI Arena paths cannot be changed by repair or upgrade. Uninstall first to select another location." />',
+    '    <InstallUISequence><Custom Action="RejectChangedPackageRoots" After="CostFinalize" Condition="NOT REMOVE AND ((ARENA_PRIOR_INTEGRATION AND NOT INSTALL_ROOT ~= ARENA_PRIOR_INTEGRATION) OR (ARENA_PRIOR_DATA AND NOT ARENA_DATA_ROOT ~= ARENA_PRIOR_DATA))" /></InstallUISequence>',
+    '    <InstallExecuteSequence><Custom Action="RejectChangedPackageRoots" After="CostFinalize" Condition="NOT REMOVE AND ((ARENA_PRIOR_INTEGRATION AND NOT INSTALL_ROOT ~= ARENA_PRIOR_INTEGRATION) OR (ARENA_PRIOR_DATA AND NOT ARENA_DATA_ROOT ~= ARENA_PRIOR_DATA))" /></InstallExecuteSequence>',
     '    <Property Id="ARPPRODUCTICON" Value="ArenaInstallerIcon" />',
     `    <Icon Id="ArenaInstallerIcon" SourceFile="${xml(resolvedIcon)}" />`,
     '    <StandardDirectory Id="ProgramMenuFolder" />',
@@ -318,8 +350,17 @@ export function buildManagerMsiSource({
     '    </StandardDirectory>',
     '    <Feature Id="ManagerCore" Title="UCI Arena Manager" Level="1">',
     ...components.map(({ componentId }) => `      <ComponentRef Id="${componentId}" />`),
+    `      <ComponentRef Id="${layoutComponent}" />`,
     '    </Feature>',
     ...components.flatMap(({ lines }) => lines),
+    `    <Component Id="${layoutComponent}" Directory="INSTALL_ROOT" Guid="${stableGuid(`uci-arena-package-layout:${scope}`)}" Bitness="always64">`,
+    `      <RegistryKey Root="${layoutHive}" Key="${xml(layoutKey)}">`,
+    '        <RegistryValue Name="Schema" Type="string" Value="arena_package_layout_selection_v1" KeyPath="yes" />',
+    `        <RegistryValue Name="Scope" Type="string" Value="${scope}" />`,
+    '        <RegistryValue Name="IntegrationRoot" Type="string" Value="[INSTALL_ROOT]" />',
+    '        <RegistryValue Name="DataRoot" Type="string" Value="[ARENA_DATA_ROOT]" />',
+    '      </RegistryKey>',
+    '    </Component>',
     '  </Package>',
     '</Wix>',
     '',

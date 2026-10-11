@@ -6,6 +6,7 @@ param(
     [string]$DataRoot = '',
     [string]$InstallRoot = '',
     [string]$CacheRoot = '',
+    [string]$WorkspaceRoot = '',
     [string]$KnowledgeRoot = '',
     [switch]$ValidateMediaOnly
 )
@@ -110,23 +111,48 @@ if ($actualFiles.Count -ne $declaredPaths.Count) {
 }
 
 $scopeCandidates = @()
+function Get-PackageProgramPointer {
+    param([string]$RequestedScope)
+    $hive = if ($RequestedScope -eq 'per-user') { [Microsoft.Win32.RegistryHive]::CurrentUser } else { [Microsoft.Win32.RegistryHive]::LocalMachine }
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Registry64)
+    $key = $null
+    try {
+        $key = $base.OpenSubKey("Software\UCI Arena\Installer\PackageLayout\$RequestedScope", $false)
+        if ($null -eq $key) { return '' }
+        if ($key.GetValueKind('IntegrationRoot') -ne [Microsoft.Win32.RegistryValueKind]::String) {
+            throw 'The installed program locator is invalid.'
+        }
+        $pointer = [string]$key.GetValue('IntegrationRoot', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if (-not $pointer -or $pointer.Length -gt 32767 -or -not [System.IO.Path]::IsPathRooted($pointer)) {
+            throw 'The installed program locator is invalid.'
+        }
+        return $pointer
+    } finally {
+        if ($null -ne $key) { $key.Dispose() }
+        $base.Dispose()
+    }
+}
 if ($Scope -in @('auto', 'per-user')) {
+    $personalPointer = Get-PackageProgramPointer -RequestedScope 'per-user'
     $scopeCandidates += [pscustomobject]@{
         Scope = 'per-user'
-        Program = if ($ManagerProgramRoot) { $ManagerProgramRoot } else {
+        Program = if ($ManagerProgramRoot) { $ManagerProgramRoot } elseif ($personalPointer) { $personalPointer } else {
             Join-Path $env:LOCALAPPDATA 'Programs\UCI Arena Manager'
         }
         Data = if ($DataRoot) { $DataRoot } else {
             Join-Path $env:LOCALAPPDATA 'UCI Arena Manager'
         }
+        Selected = [bool]$personalPointer
     }
 }
 if ($Scope -in @('auto', 'per-machine')) {
+    $machinePointer = Get-PackageProgramPointer -RequestedScope 'per-machine'
     $scopeCandidates += [pscustomobject]@{
         Scope = 'per-machine'
-        Program = if ($ManagerProgramRoot) { $ManagerProgramRoot } else {
+        Program = if ($ManagerProgramRoot) { $ManagerProgramRoot } elseif ($machinePointer) { $machinePointer } else {
             Join-Path $env:ProgramFiles 'UCI Arena Manager'
         }
+        Selected = [bool]$machinePointer
         Data = if ($DataRoot) { $DataRoot } else {
             Join-Path $env:ProgramData 'UCI Arena Manager'
         }
@@ -158,6 +184,29 @@ $effectiveCacheRoot = if ($CacheRoot) { $CacheRoot } else {
 }
 $effectiveKnowledgeRoot = if ($KnowledgeRoot) { $KnowledgeRoot } else {
     Join-Path $effectiveDataRoot 'knowledge'
+}
+$effectiveWorkspaceRoot = if ($WorkspaceRoot) { $WorkspaceRoot } else {
+    Join-Path $effectiveDataRoot 'workspaces'
+}
+if ($selected.Selected) {
+    $layoutText = & $setup --install-scope $selected.Scope --json layout
+    if ($LASTEXITCODE -ne 0) { throw 'The installed path authority could not be admitted.' }
+    $layout = ($layoutText -join "`n") | ConvertFrom-Json
+    if ($layout.schema -ne 'arena_package_layout_selection_v1' -or $layout.scope -ne $selected.Scope -or
+        [System.IO.Path]::GetFullPath([string]$layout.integration_root).TrimEnd('\') -ine [System.IO.Path]::GetFullPath($selected.Program).TrimEnd('\')) {
+        throw 'The installed path authority does not match the selected program.'
+    }
+    foreach ($pair in @(@($DataRoot, $layout.roots.data), @($InstallRoot, $layout.roots.install),
+        @($CacheRoot, $layout.roots.cache), @($WorkspaceRoot, $layout.roots.workspace), @($KnowledgeRoot, $layout.roots.knowledge))) {
+        if ($pair[0] -and [System.IO.Path]::GetFullPath([string]$pair[0]).TrimEnd('\') -ine [System.IO.Path]::GetFullPath([string]$pair[1]).TrimEnd('\')) {
+            throw 'Update overrides conflict with the installed path selection.'
+        }
+    }
+    $effectiveDataRoot = [string]$layout.roots.data
+    $effectiveInstallRoot = [string]$layout.roots.install
+    $effectiveCacheRoot = [string]$layout.roots.cache
+    $effectiveWorkspaceRoot = [string]$layout.roots.workspace
+    $effectiveKnowledgeRoot = [string]$layout.roots.knowledge
 }
 $packageReleaseRoot = Join-Path $packageRoot 'release'
 $packageCatalog = Join-Path $packageReleaseRoot 'catalog.json'
@@ -259,6 +308,7 @@ try {
         '--install-root', $effectiveInstallRoot,
         '--data-root', $effectiveDataRoot,
         '--cache-root', $effectiveCacheRoot,
+        '--workspace-root', $effectiveWorkspaceRoot,
         '--knowledge-root', $effectiveKnowledgeRoot,
         '--json'
     )
