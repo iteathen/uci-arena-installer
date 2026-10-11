@@ -667,7 +667,7 @@ setup:
       - uci_arena_evidence.service
       - lichess.adapter
     selected_product_profile:
-      composition: compositions/complete-arena-0.3.54.json
+      composition: compositions/complete-arena-0.3.55.json
       feature_policy: packaging/windows/suite-bundle.json
       historical_compositions: immutable separately versioned composition data
       dependencies: declared composition and provider manifests, not feature controls
