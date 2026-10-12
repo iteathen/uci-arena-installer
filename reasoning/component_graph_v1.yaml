@@ -38,8 +38,9 @@ premises:
     confidence: 0.99
   - id: I-P3
     statement: >
-      Existing installations must be interpreted through persisted installed authority rather
-      than future code defaults if updates are to remain durable.
+      Future code defaults can differ from the policy and roots under which an existing
+      installation was created; reconstructing installed state from current defaults can
+      misidentify the actual installation.
     confidence: 0.98
   - id: I-P4
     statement: >
