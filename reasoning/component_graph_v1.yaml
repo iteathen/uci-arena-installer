@@ -7,7 +7,7 @@ global_graph: reasoning/suite_graph_v1.yaml
 
 imports:
   objectives: [G-O1, G-O2]
-  premises: [G-P4, G-P6, G-P7, G-P11, G-P12]
+  premises: [G-P4, G-P6, G-P7, G-P11, G-P12, G-P20, G-P21, G-P23]
   targets: [G-T6, G-T7, G-T8, G-T12, G-T14]
 
 local_objectives:
