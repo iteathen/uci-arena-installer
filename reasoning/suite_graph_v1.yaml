@@ -530,6 +530,21 @@ component_graphs:
     repository: iteathen/uci-arena-syzygy-root-provider
     path: reasoning/component_graph_v1.yaml
 
+dependency_nodes:
+  - component: node_runtime.private
+    role: execution_dependency
+    reasoning_owner: external_or_installer_packaging
+    local_reasoning_graph: none
+    note: >
+      Node is runtime mechanism, not an independent UCI Arena product-policy owner.
+  - component: stockfish.engine
+    role: external_reference_and_optional_engine_dependency
+    reasoning_owner: external_upstream_plus_consuming_component_contracts
+    local_reasoning_graph: none
+    note: >
+      Stockfish may serve as opponent, reference, or Book Forge dependency. UCI Arena does
+      not invent an internal Stockfish decision graph for upstream engine behavior.
+
 decision_procedure:
   - identify_affected_scopes
   - load_relevant_global_local_and_interface_nodes
