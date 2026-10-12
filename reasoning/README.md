@@ -140,3 +140,62 @@ Confidence updates should identify:
 
 Historical failed assertions and rejected implementations remain useful evidence and should
 not be erased merely because the current graph prefers another path.
+
+
+## Premise taxonomy and completeness audit
+
+Premises should describe accepted facts, epistemic limits, ownership facts, environmental
+conditions, or user/context facts. A preferred implementation behavior is not a premise merely
+because it is strongly desired; place normative design choices in implementation targets,
+dominance relations, importance relations, or hard authority gates.
+
+Use these premise classes when auditing coverage:
+
+- **domain** — facts about chess, competition, clocks, engines, knowledge, or the proving
+  environment;
+- **epistemic** — what evidence can and cannot establish, including confounding, independence,
+  statistical power, generalization, and overfitting;
+- **composition/ownership** — which owner is authoritative for a semantic fact and how
+  cross-component composition can change truth;
+- **environment/resource** — hardware, concurrency, latency, resource contention, lifecycle,
+  and other conditions that can materially change behavior;
+- **operator/usability** — facts about user intent, configuration identity, discoverability,
+  error interpretation, and consequential control.
+
+A graph is premise-complete relative to the current objectives when:
+
+1. every implementation target has a traceable derivation from at least one root objective
+   plus the premises materially needed to justify that target;
+2. every material cross-component interface has premises covering authority, identity/scope,
+   lifecycle/change boundaries, and failure meaning where those can change a decision;
+3. every comparative/qualification claim addresses material confounding, sampling/
+   representativeness, independence, statistical power or inconclusive outcomes, and
+   generalization scope;
+4. every foreground-performance claim accounts for material runtime/resource/configuration
+   conditions that can change the measured behavior;
+5. every user-facing mutation that can alter experiment meaning accounts for operator intent
+   and identity;
+6. known counterexamples or historical failures that could change candidate selection are
+   represented rather than erased;
+7. no premise is merely a restatement of a chosen implementation.
+
+Completeness is scoped, not universal. A newly introduced candidate can expose a new relevant
+premise; that premise must be added before the candidate receives durable authority.
+
+## Assertion relevance audit
+
+Every implicit assertion must identify a material decision consequence. It belongs in the
+active graph only when changing its truth could change one or more implementation targets,
+candidate admissibility, evidence requirements, dominance/importance relations, or expected
+objective outcome.
+
+Graphs may record this with an `assertion_relevance` section mapping assertion IDs to the
+targets or decisions they affect. An assertion with no such connection is out of scope and
+should be removed rather than accumulated as general philosophy.
+
+Two recurring epistemic rules are especially important for UCI Arena:
+
+- failure to reject a difference is not evidence of equivalence unless an equivalence claim
+  and its power/bounds were actually designed and qualified;
+- the best candidate among tested candidates is evidence only about that tested candidate
+  set and declared support, not proof of global optimality.
