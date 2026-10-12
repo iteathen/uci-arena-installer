@@ -59,6 +59,19 @@ objectives:
     source_class: explicit_owner
     consequence_if_neglected: major
 
+objective_structure:
+  root_objectives: [G-O1, G-O2]
+  default_pairwise_dominance: none
+  rule: >
+    Good chess playing and good usability are both intended ends. Neither globally dominates
+    the other. Causal enablement, feasibility, importance, and dominance are evaluated
+    separately; a precedence relation exists only inside a stated genuine conflict scope.
+  feasibility_and_projected_attainment:
+    role: evidence_for_expected_consequence_not_objective_legitimacy
+    note: >
+      A difficult objective remains valid. Ease of implementation or high projected success
+      does not by itself justify sacrificing another objective.
+
 mission:
   - id: G-M1
     name: feature_rich_trustworthy_proving_ground
