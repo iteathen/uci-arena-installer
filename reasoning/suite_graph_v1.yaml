@@ -579,7 +579,6 @@ causal_relations:
   - {id: G-C3, cause: G-T2, effect: G-T4, relation: enabler, confidence: 0.96}
   - {id: G-C4, cause: G-T3, effect: G-T4, relation: complementary_external_evidence, confidence: 0.94}
   - {id: G-C5, cause: G-T4, effect: G-T13, relation: necessary_condition, confidence: 0.99}
-  - {id: G-C6, cause: G-T13, effect: G-O1, relation: feedback_improvement_path, confidence: 0.95}
   - {id: G-C7, cause: G-T5, effect: G-T11, relation: enabler, confidence: 0.95}
   - {id: G-C8, cause: G-T6, effect: G-T2, relation: necessary_condition_for_composed_validity, confidence: 0.97}
   - {id: G-C9, cause: G-T6, effect: G-T3, relation: necessary_condition_for_composed_validity, confidence: 0.97}
@@ -588,6 +587,12 @@ causal_relations:
   - {id: G-C12, cause: G-T10, effect: G-T2, relation: validity_preserver, confidence: 0.96}
   - {id: G-C13, cause: G-T7, effect: G-T11, relation: enabler, confidence: 0.90}
   - {id: G-C14, cause: G-T3, effect: G-T15, relation: necessary_condition, confidence: 0.98}
+
+# Outcome hypotheses point back to objectives conceptually, but are not edges of the
+# acyclic reasoning-dependency graph. Their effects must be tested and incorporated
+# into a later evidence/confidence revision instead of closing a graph cycle.
+outcome_hypotheses:
+  - {id: G-C6, cause: G-T13, objective: G-O1, relation: feedback_improvement_path, confidence: 0.95, graph_edge: false}
 
 target_derivations:
   G-T1: [G-O1, G-P4, G-P17, G-P20, G-P23, G-P27, G-P28]
