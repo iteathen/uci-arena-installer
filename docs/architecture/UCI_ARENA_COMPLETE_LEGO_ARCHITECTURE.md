@@ -30,7 +30,8 @@ confidence-bearing and contextual, while explicit hard authority gates remain ma
 
 ## 1. Product topology
 
-The suite consists of six independently owned product repositories:
+The suite has six independently owned core product repositories and an optional
+independently owned Syzygy root-knowledge provider component:
 
 ```text
 uci-arena-installer
@@ -39,10 +40,11 @@ uci-arena-installer
         +-- uci-arena-manager
         +-- uci-arena-lichess-bot
         +-- uci-arena-book-forge
-        `-- uci-arena-evidence-service
+        +-- uci-arena-evidence-service
+        `-- uci-arena-syzygy-root-provider (optional)
 ```
 
-The installer assembles the suite. Manager is the installed control plane. The engine owns chess and search. Lichess Bot, Book Forge, and Evidence Service are external provider products. Repositories communicate only through published contracts and immutable release artifacts; they never import one another's internal source trees.
+The installer assembles the suite. Manager is the installed control plane. The engine owns chess and search. Lichess Bot, Book Forge, and Evidence Service are external provider products. The optional Syzygy repository owns an independent root-tablebase knowledge component, not engine search or chess semantics; its presence in the topology does not assert signed release, installation or runtime qualification. Current component selections come from versioned Installer composition data. Repositories communicate only through published contracts and immutable release artifacts; they never import one another's internal source trees.
 
 ## 2. Repository ownership
 
