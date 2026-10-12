@@ -161,13 +161,6 @@ premises:
       orderings; contrary evidence can revise them inside the hard-gate envelope.
     confidence: 0.999
     source_class: explicit_owner
-  - id: G-P14
-    statement: >
-      Only implicit assertions capable of materially changing the current objectives,
-      candidates, evidence requirements, or target relations belong in the active reasoning
-      graph.
-    confidence: 0.999
-    source_class: explicit_owner
   - id: G-P15
     statement: >
       Shared-resource background acquisition, analysis, maintenance, concurrency, and
