@@ -50,8 +50,9 @@ premises:
     confidence: 0.995
   - id: I-P5
     statement: >
-      Windows and Linux need different low-level adapters but should share installation
-      semantics wherever the platform does not force a difference.
+      Windows and Linux require different low-level adapters, while the meaning of common
+      installed-state and lifecycle outcomes can remain equivalent except where platform
+      constraints force different semantics.
     confidence: 0.96
 
   - id: I-P6
