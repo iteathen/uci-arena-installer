@@ -3,11 +3,12 @@ graph_id: uci_arena_installer
 version: 1
 status: initial_owner_directed
 component: uci_arena_installer
+concern_areas: [C03, C04, C08, C09, C10, C11, C12]
 global_graph: reasoning/suite_graph_v1.yaml
 
 imports:
   objectives: [G-O1, G-O2]
-  premises: [G-P4, G-P6, G-P7, G-P11, G-P12, G-P20, G-P21, G-P23]
+  premises: [G-P4, G-P6, G-P7, G-P20, G-P21, G-P23]
   targets: [G-T6, G-T7, G-T8, G-T12, G-T14]
 
 local_objectives:
@@ -71,6 +72,16 @@ premises:
       future defaults alone.
     confidence: 0.99
 
+premise_metadata:
+  I-P1: {kind: structural}
+  I-P2: {kind: empirical_regular}
+  I-P3: {kind: structural}
+  I-P4: {kind: structural}
+  I-P5: {kind: structural}
+  I-P6: {kind: structural}
+  I-P7: {kind: material_risk}
+  I-P8: {kind: structural}
+
 implicit_assertions:
   - id: I-A1
     statement: >
@@ -123,44 +134,81 @@ implicit_assertions:
     derived_from: [I-P7, G-P21]
     confidence: 0.99
 
+assertion_metadata:
+  I-A1: {inference: conditional, boundary: "Product-neutrality need not forbid component-specific data or producer-owned adapters; it forbids product names from selecting generic Installer mechanism."}
+  I-A2: {inference: structural, boundary: "Recovery complexity is not disfavored when it protects real installed/user state."}
+  I-A3: {inference: conditional, boundary: "Platform integration may legitimately change when the integration contract itself changes."}
+  I-A4: {inference: conditional, boundary: "Platform-specific mechanics may differ; only the meaning of installed authority and lifecycle outcomes needs semantic parity."}
+  I-A5: {inference: structural, boundary: "Installer may validate declared compatibility and typed installation contracts without interpreting provider domain semantics."}
+  I-A6: {inference: structural, boundary: "Compatibility checks do not independently establish runtime behavior or strength."}
+  I-A7: {inference: structural, boundary: "Deployment qualification remains valuable inside its own scope."}
+  I-A8: {inference: conditional, boundary: "A partial update can be acceptable only when its mixed state is itself an explicitly supported coherent generation."}
+
 implementation_targets:
   - id: I-T1
-    name: manifest_driven_product_neutral_core
+    name: independently_composable_components
+    statement: >
+      Accept independently released conforming components without requiring generic deployment
+      logic to know their product-specific internals.
     supports: [I-O1, I-O2, G-T12]
   - id: I-T2
-    name: strong_cross_platform_immutability
+    name: routine_component_evolution_without_mechanism_rewrite
     statement: >
-      Routine conforming application releases change immutable inputs and generated
-      composition/media rather than Installer mechanism source.
+      Let ordinary component version, payload, layout, and compatible contract changes flow
+      through declared release inputs rather than requiring unrelated Installer mechanism changes.
     supports: [I-O1, I-O2]
   - id: I-T3
-    name: persisted_layout_authority
+    name: durable_installed_state_identity
+    statement: >
+      Recover the exact meaning and locations of an existing installation across later
+      Installer/default-policy changes.
     supports: [I-O1, G-T8]
   - id: I-T4
-    name: transactional_install_upgrade_repair_uninstall
+    name: coherent_recoverable_lifecycle_mutation
+    statement: >
+      Ensure install, update, repair, and removal either establish a coherent intended state or
+      retain an explicit recoverable failure state under interruption and partial effects.
     supports: [I-O1, G-T8]
   - id: I-T5
-    name: exact_artifact_provenance_and_identity
+    name: exact_deployment_identity_and_compatibility
+    statement: >
+      Establish exact artifact identity, provenance, selected composition, and declared
+      compatibility before claiming a valid deployed suite.
     supports: [I-O2, G-T6]
   - id: I-T6
-    name: stable_os_integration_and_bootstrap
+    name: application_release_independence_from_stable_platform_integration
+    statement: >
+      Permit ordinary application releases to change without needlessly replacing stable
+      platform integration whose contract remains compatible.
     supports: [I-O1, G-T12]
   - id: I-T7
-    name: preservation_and_explicit_destructive_actions
+    name: preserve_operator_owned_and_recovery_state
+    statement: >
+      Preserve operator-owned, externally owned, and recovery-relevant state unless the
+      operator explicitly authorizes its destruction.
     supports: [I-O1, G-T14]
   - id: I-T8
-    name: simple_operator_release_and_install_workflows
+    name: low_burden_deployment_workflow
+    statement: >
+      Minimize unnecessary operator work and ambiguity across installation, update, repair,
+      release, and removal workflows.
     supports: [I-O1, G-T7]
   - id: I-T9
-    name: truthful_failure_and_recovery_reporting
+    name: truthful_deployment_failure_and_recovery_state
+    statement: >
+      Report success, failure, rollback, preservation, and unresolved recovery state without
+      converting uncertainty or partial effects into success.
     supports: [I-O1, G-T8, G-T9]
   - id: I-T10
-    name: windows_linux_semantic_parity
+    name: cross_platform_installation_semantic_parity
+    statement: >
+      Preserve equivalent suite installation/lifecycle semantics across supported platforms
+      except where genuine platform differences require different mechanics.
     supports: [I-O1, I-O2]
 
 target_derivations:
   I-T1: [I-O1, I-O2, I-P1, I-P2, I-P6]
-  I-T2: [I-O1, I-O2, I-P2, G-P11]
+  I-T2: [I-O1, I-O2, I-P2]
   I-T3: [I-O1, I-P3, I-P8]
   I-T4: [I-O1, I-P7, G-P20]
   I-T5: [I-O2, I-P1, I-P6, G-P6]
@@ -169,6 +217,10 @@ target_derivations:
   I-T8: [I-O1, G-P7, I-P2]
   I-T9: [I-O1, I-P7, G-P20]
   I-T10: [I-O1, I-O2, I-P3, I-P5]
+
+target_semantics:
+  status: problem_characterized
+  solution_selected_by_reasoning_graph: false
 
 assertion_relevance:
   I-A1: [I-T1, I-T2]
@@ -181,10 +233,10 @@ assertion_relevance:
   I-A8: [I-T4, I-T5, I-T9]
 
 dominance_relations:
-  - {id: I-D1, stronger: I-T5, weaker: I-T8, context: convenience_conflicts_with_exact_identity, confidence: 0.995, consequence: critical}
-  - {id: I-D2, stronger: I-T7, weaker: I-T8, context: simplification_would_destroy_user_owned_or_recovery_state, confidence: 0.995, consequence: critical}
-  - {id: I-D3, stronger: I-T2, weaker: I-T8, context: short_term_convenience_adds_recurring_product_specific_installer_code, confidence: 0.91, consequence: major}
-  - {id: I-D4, stronger: I-T4, weaker: I-T8, context: happy_path_simplicity_weakens_interruption_recovery, confidence: 0.96, consequence: major}
+  - {id: I-D1, stronger: I-T5, weaker: I-T8, context: convenience_conflicts_with_exact_identity, strength: strict_necessary_condition, basis: [I-P6, I-A6], confidence: 0.995, consequence: critical}
+  - {id: I-D2, stronger: I-T7, weaker: I-T8, context: simplification_would_destroy_user_owned_or_recovery_state, strength: strict_necessary_condition, basis: [I-P4, I-P8, I-A2], confidence: 0.995, consequence: critical}
+  - {id: I-D3, stronger: I-T2, weaker: I-T8, context: short_term_convenience_adds_recurring_product_specific_installer_code, strength: strong_conditional, basis: [I-P2, I-A1, I-A3], confidence: 0.91, consequence: major}
+  - {id: I-D4, stronger: I-T4, weaker: I-T8, context: happy_path_simplicity_weakens_interruption_recovery, strength: strong_conditional, basis: [I-P7, I-A2, I-A8], confidence: 0.96, consequence: major}
 
 importance_relations:
   - {id: I-I1, more_important: I-T8, less_important: I-T6, context: normal_user_install_when_both_are_safe, confidence: 0.86}
