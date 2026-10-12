@@ -9,8 +9,8 @@ This repository owns UCI Arena suite composition, installation, upgrade/repair/u
 ## Decision reasoning
 
 Before a substantive architecture, design, implementation-selection, or cross-component
-decision, read `reasoning/README.md`, `reasoning/suite_graph_v1.yaml`, and
-`reasoning/component_graph_v1.yaml`. The suite graph owns global objectives,
+decision, read `reasoning/README.md`, `reasoning/concern_census_v1.yaml`,
+`reasoning/suite_graph_v1.yaml`, and `reasoning/component_graph_v1.yaml`. The suite graph owns global objectives,
 cross-component premises/assertions, and interface reasoning; the component graph is the
 Installer-local projection.
 
