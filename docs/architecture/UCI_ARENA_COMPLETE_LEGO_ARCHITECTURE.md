@@ -16,6 +16,18 @@ retain their independent roles.
 
 This document defines the intended ownership, dependency direction, substitution boundaries, and release topology for the complete UCI Arena suite. It is a target: current repositories may need staged migrations, but new work must reduce the distance to this structure and must not introduce new cross-boundary coupling.
 
+## Decision-reasoning graph
+
+The suite's explicit objective/premise/assertion/target reasoning system is defined in
+[`reasoning/README.md`](../../reasoning/README.md) and
+[`reasoning/suite_graph_v1.yaml`](../../reasoning/suite_graph_v1.yaml). Component
+repositories own local reasoning projections and export cross-component conclusions back to
+the suite graph.
+
+The reasoning graph guides architecture and implementation selection; it does not silently
+supersede accepted behavior contracts. Its dominance and importance relations are
+confidence-bearing and contextual, while explicit hard authority gates remain mandatory.
+
 ## 1. Product topology
 
 The suite consists of six independently owned product repositories:

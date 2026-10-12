@@ -1,0 +1,127 @@
+schema: uci_arena_concern_census_v1
+census_id: uci_arena_suite_concerns
+version: 1
+status: initial_owner_directed
+purpose: >
+  Coverage map used before premise derivation. These are reasoning domains, not repositories,
+  modules, ownership assignments, or implementation choices.
+
+concern_areas:
+  - id: C01
+    name: chess_truth_and_game_semantics
+    questions:
+      - What makes a game, move, terminal result, draw claim, clock, and rule interpretation valid?
+      - Which rule or protocol differences can change the meaning of a result?
+    related_objectives: [G-O1]
+    related_targets: [G-T1]
+  - id: C02
+    name: engine_decision_quality
+    questions:
+      - What determines practical move quality under real clock/resource constraints?
+      - How do search, model semantics, timing, and reusable knowledge interact?
+    related_objectives: [G-O1]
+    related_targets: [G-T1, G-T13]
+  - id: C03
+    name: competitive_experiment_design
+    questions:
+      - Are comparisons fair, paired, balanced, randomized or otherwise controlled where needed?
+      - Which openings, colors, clocks, options, seeds, variants, and runtime facts define the experiment?
+    related_objectives: [G-O1]
+    related_targets: [G-T2, G-T4]
+  - id: C04
+    name: evidence_causality_and_statistics
+    questions:
+      - What does each evidence class actually establish?
+      - Are samples independent, representative, sufficiently powered, protected from overfitting, and correctly scoped?
+      - Is the oracle genuinely independent from the implementation under test?
+    related_objectives: [G-O1]
+    related_targets: [G-T4, G-T13, G-T15]
+  - id: C05
+    name: knowledge_sources_and_external_chess_information
+    questions:
+      - How do books, tablebases, external evaluators, and retained evidence alter engine behavior?
+      - When are they exact, advisory, qualified, unavailable, or confounding experimental factors?
+    related_objectives: [G-O1]
+    related_targets: [G-T1, G-T4, G-T11]
+  - id: C06
+    name: external_validation_and_opponent_environment
+    questions:
+      - What does competition against independently operated engines establish that internal testing cannot?
+      - How do opponent sampling, ratings, platform rules, availability, and time controls limit generalization?
+    related_objectives: [G-O1]
+    related_targets: [G-T3, G-T15]
+  - id: C07
+    name: runtime_resources_performance_and_measurement
+    questions:
+      - How do hardware, concurrency, CPU/GPU/memory/disk pressure, transport latency, and instrumentation alter behavior?
+      - Which internal performance proxies actually correlate with downstream chess outcome?
+    related_objectives: [G-O1]
+    related_targets: [G-T4, G-T10]
+  - id: C08
+    name: composition_ownership_and_interfaces
+    questions:
+      - Which component owns each semantic fact, lifecycle, and state transition?
+      - Can individually correct components compose into an invalid suite?
+      - Which interface assumptions need suite-level reasoning?
+    related_objectives: [G-O1, G-O2]
+    related_targets: [G-T5, G-T6, G-T12]
+  - id: C09
+    name: lifecycle_identity_versioning_and_recovery
+    questions:
+      - What must survive crashes, updates, partial operations, process replacement, and historical version changes?
+      - Which exact identities and latched inputs are required to reproduce or interpret a result?
+    related_objectives: [G-O1, G-O2]
+    related_targets: [G-T4, G-T8, G-T12]
+  - id: C10
+    name: operator_usability_intent_and_observability
+    questions:
+      - Can intended users install, configure, run, understand, diagnose, and recover the proving ground?
+      - Does automation preserve explicit operator choices and truthful state?
+    related_objectives: [G-O2]
+    related_targets: [G-T7, G-T9, G-T14]
+  - id: C11
+    name: security_authorization_credentials_and_trust
+    questions:
+      - Which actions require explicit authorization or credential isolation?
+      - Where could trust, secret handling, substitution, or authority confusion invalidate operation or evidence?
+    related_objectives: [G-O1, G-O2]
+    related_targets: [G-T1, G-T6, G-T14]
+  - id: C12
+    name: evolution_portability_and_change_radius
+    questions:
+      - Can components, policies, platforms, and experiments evolve without unrelated rewrites or semantic leakage?
+      - Which current implementation details are accidental rather than enduring requirements?
+    related_objectives: [G-O1, G-O2]
+    related_targets: [G-T5, G-T12]
+
+premise_coverage:
+  G-P1: [C03, C04]
+  G-P2: [C06]
+  G-P3: [C04, C06]
+  G-P4: [C08]
+  G-P5: [C06, C08]
+  G-P6: [C04, C09]
+  G-P7: [C10]
+  G-P8: [C04, C12]
+  G-P9: [C04, C09]
+  G-P10: [C07]
+  G-P15: [C07]
+  G-P16: [C02, C03, C06, C07]
+  G-P17: [C03, C04, C07]
+  G-P18: [C04]
+  G-P19: [C04]
+  G-P20: [C01, C06, C08, C09]
+  G-P21: [C03, C05, C08, C09, C10]
+  G-P22: [C03, C08, C09]
+  G-P23: [C08, C10, C11]
+  G-P24: [C03, C04, C06]
+  G-P25: [C02, C04, C07]
+  G-P26: [C03, C04, C06]
+  G-P27: [C01, C02, C04]
+  G-P28: [C04, C06, C07]
+
+audit_rules:
+  - Every global premise must map to at least one concern area.
+  - Every concern area must connect to at least one current objective or implementation target.
+  - A concern area without a material UCI Arena consequence is out of scope.
+  - Concern areas do not select component ownership or technical architecture.

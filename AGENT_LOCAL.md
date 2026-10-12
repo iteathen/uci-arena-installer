@@ -6,6 +6,19 @@ Universal engineering and design guidance comes from the account-global `AGENTS.
 
 This repository owns UCI Arena suite composition, installation, upgrade/repair/uninstall, release assembly, staging, validation, recovery, and operator-facing deployment results. It does not own Engine, Manager, Lichess Bot, Book Forge, or Evidence Service behavior.
 
+## Decision reasoning
+
+Before a substantive architecture, design, implementation-selection, or cross-component
+decision, read `reasoning/README.md`, `reasoning/concern_census_v1.yaml`,
+`reasoning/suite_graph_v1.yaml`, and `reasoning/component_graph_v1.yaml`. The suite graph owns global objectives,
+cross-component premises/assertions, and interface reasoning; the component graph is the
+Installer-local projection.
+
+Use the graph to surface relevant implicit assertions and compare candidates through the
+declared confidence-bearing dominance/importance relations. Accepted specifications and
+explicit hard constraints still own current behavior. A graph/spec contradiction requires
+review; it is not permission to ignore the spec.
+
 ## Local routing
 
 Before substantive work run:
