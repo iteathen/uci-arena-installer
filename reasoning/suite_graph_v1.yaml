@@ -497,6 +497,16 @@ cross_component_edges:
     supports: [G-T3, G-T4, G-T13]
     confidence: 0.96
 
+  - id: G-X8
+    from: uci_arena_syzygy_root_provider
+    to: uci_arena_vector
+    statement: >
+      The root-tablebase provider supplies exact or truthfully deferred root knowledge within
+      its admitted dataset/history/rule scope; Vector retains canonical chess, search, legality,
+      and live timing authority.
+    supports: [G-T1, G-T5, G-T6]
+    confidence: 0.995
+
 component_graphs:
   - component: uci_arena_installer
     repository: iteathen/uci-arena-installer
@@ -515,6 +525,9 @@ component_graphs:
     path: reasoning/component_graph_v1.yaml
   - component: uci_arena_evidence_service
     repository: iteathen/uci-arena-evidence-service
+    path: reasoning/component_graph_v1.yaml
+  - component: uci_arena_syzygy_root_provider
+    repository: iteathen/uci-arena-syzygy-root-provider
     path: reasoning/component_graph_v1.yaml
 
 decision_procedure:
