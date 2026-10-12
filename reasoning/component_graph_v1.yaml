@@ -1,0 +1,138 @@
+schema: uci_arena_component_reasoning_graph_v1
+graph_id: uci_arena_installer
+version: 1
+status: initial_owner_directed
+component: uci_arena_installer
+global_graph: reasoning/suite_graph_v1.yaml
+
+imports:
+  objectives: [G-O1, G-O2]
+  premises: [G-P4, G-P6, G-P7, G-P11, G-P12]
+  targets: [G-T6, G-T7, G-T8, G-T12, G-T14]
+
+local_objectives:
+  - id: I-O1
+    statement: >
+      Make a complete UCI Arena proving environment easy to install, update, repair,
+      recover, and remove on Windows and Linux.
+    derived_from: [G-O2]
+    confidence: 0.995
+  - id: I-O2
+    statement: >
+      Preserve exact, reproducible suite composition so chess and evidence changes are not
+      confounded by deployment drift.
+    derived_from: [G-O1, G-T6]
+    confidence: 0.97
+
+premises:
+  - id: I-P1
+    statement: >
+      Independently released components can describe installation requirements through
+      immutable manifests, provenance, contracts, and composition data.
+    confidence: 0.98
+  - id: I-P2
+    statement: >
+      Ordinary application evolution should not require Installer control-flow changes when
+      existing installation contracts can express the new artifact.
+    confidence: 0.99
+  - id: I-P3
+    statement: >
+      Existing installations must be interpreted through persisted installed authority rather
+      than future code defaults if updates are to remain durable.
+    confidence: 0.98
+  - id: I-P4
+    statement: >
+      User-owned data, credentials, external books/tablebases, and useful retained evidence
+      are distinct from replaceable program payloads.
+    confidence: 0.995
+  - id: I-P5
+    statement: >
+      Windows and Linux need different low-level adapters but should share installation
+      semantics wherever the platform does not force a difference.
+    confidence: 0.96
+
+implicit_assertions:
+  - id: I-A1
+    statement: >
+      Product-specific setup branches increase the probability that ordinary component
+      changes will require Installer source changes.
+    derived_from: [I-P1, I-P2]
+    confidence: 0.97
+  - id: I-A2
+    statement: >
+      A successful update that cannot recover from interruption or preserve the last working
+      installation does not satisfy usability merely because the happy path is simple.
+    derived_from: [G-O2, I-P4]
+    confidence: 0.98
+  - id: I-A3
+    statement: >
+      Rebuilding stable OS integration or bootstrap for every application-only release creates
+      avoidable release coupling and weakens durability.
+    derived_from: [I-P2, G-T12]
+    confidence: 0.97
+  - id: I-A4
+    statement: >
+      If Windows and Linux derive old installation meaning from different current-code
+      conventions, cross-platform durability is incomplete.
+    derived_from: [I-P3, I-P5]
+    confidence: 0.94
+  - id: I-A5
+    statement: >
+      Installer interpretation of chess, timing, book, evidence, or provider semantics would
+      create a second semantic authority and increase future change radius.
+    derived_from: [G-P4, I-P1]
+    confidence: 0.99
+
+implementation_targets:
+  - id: I-T1
+    name: manifest_driven_product_neutral_core
+    supports: [I-O1, I-O2, G-T12]
+  - id: I-T2
+    name: strong_cross_platform_immutability
+    statement: >
+      Routine conforming application releases change immutable inputs and generated
+      composition/media rather than Installer mechanism source.
+    supports: [I-O1, I-O2]
+  - id: I-T3
+    name: persisted_layout_authority
+    supports: [I-O1, G-T8]
+  - id: I-T4
+    name: transactional_install_upgrade_repair_uninstall
+    supports: [I-O1, G-T8]
+  - id: I-T5
+    name: exact_artifact_provenance_and_identity
+    supports: [I-O2, G-T6]
+  - id: I-T6
+    name: stable_os_integration_and_bootstrap
+    supports: [I-O1, G-T12]
+  - id: I-T7
+    name: preservation_and_explicit_destructive_actions
+    supports: [I-O1, G-T14]
+  - id: I-T8
+    name: simple_operator_release_and_install_workflows
+    supports: [I-O1, G-T7]
+  - id: I-T9
+    name: truthful_failure_and_recovery_reporting
+    supports: [I-O1, G-T8, G-T9]
+  - id: I-T10
+    name: windows_linux_semantic_parity
+    supports: [I-O1, I-O2]
+
+dominance_relations:
+  - {id: I-D1, stronger: I-T5, weaker: I-T8, context: convenience_conflicts_with_exact_identity, confidence: 0.995, consequence: critical}
+  - {id: I-D2, stronger: I-T7, weaker: I-T8, context: simplification_would_destroy_user_owned_or_recovery_state, confidence: 0.995, consequence: critical}
+  - {id: I-D3, stronger: I-T2, weaker: I-T8, context: short_term_convenience_adds_recurring_product_specific_installer_code, confidence: 0.91, consequence: major}
+  - {id: I-D4, stronger: I-T4, weaker: I-T8, context: happy_path_simplicity_weakens_interruption_recovery, confidence: 0.96, consequence: major}
+
+importance_relations:
+  - {id: I-I1, more_important: I-T8, less_important: I-T6, context: normal_user_install_when_both_are_safe, confidence: 0.86}
+  - {id: I-I2, more_important: I-T2, less_important: I-T8, context: recurring_application_release_maintenance, confidence: 0.93}
+  - {id: I-I3, more_important: I-T10, less_important: I-T8, context: platform_divergence_would_create_different_product_semantics, confidence: 0.88}
+
+exports:
+  - id: I-X1
+    statement: exact installed component identity and composition are deployment facts
+    supports_global: [G-T6, G-T12]
+  - id: I-X2
+    statement: install lifecycle reports success failure rollback and preservation without interpreting component semantics
+    supports_global: [G-T7, G-T8]
