@@ -12,6 +12,9 @@ without showing how it follows from the project's objectives and premises.
 
 The graph is a directed acyclic reasoning structure, not a single-parent requirements tree.
 A node may derive from several objectives, premises, assertions, or component exports.
+Feedback from a target to an objective is an outcome hypothesis, not a directed
+dependency edge back into the objective; record it separately and use subsequent
+evidence revisions to update confidence without creating a cycle.
 
 The suite-level graph lives in `reasoning/suite_graph_v1.yaml`. Each product repository
 owns a local `reasoning/component_graph_v1.yaml` projection. Local graphs import relevant
