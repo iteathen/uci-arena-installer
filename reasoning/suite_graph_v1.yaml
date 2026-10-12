@@ -1,0 +1,529 @@
+schema: uci_arena_reasoning_graph_v1
+graph_id: uci_arena_suite
+version: 1
+status: initial_owner_directed
+owner: uci_arena_suite
+methodology: reasoning/README.md
+
+authority:
+  behavioral_specs_remain_authoritative: true
+  reasoning_role: design_selection_and_specification_review
+  hard_gate_rule: >
+    Explicit owner prohibitions, security and credential boundaries, required external
+    protocol truth, and accepted hard constraints cannot be waived by confidence scoring.
+
+confidence_model:
+  semantics: contextual_subjective_bayesian_credence
+  range: [0.0, 1.0]
+  utility_separate: true
+  consequence_separate: true
+  naive_independence_forbidden: true
+  update_rule: >
+    Update only when owner direction, accepted authority, empirical evidence, a falsifier,
+    or a materially stronger derivation changes the belief. Record affected downstream nodes.
+  source_classes:
+    explicit_owner: strongest direct project-purpose evidence
+    accepted_authority: accepted specification or contract in its owned domain
+    empirical: measured evidence with retained scope and identity
+    strong_derivation: multi-premise reasoning with no known material contradiction
+    tentative: plausible but materially uncertain working belief
+
+relevance_boundary:
+  include_assertion_when:
+    - changes_candidate_admissibility
+    - changes_dominance
+    - changes_importance
+    - changes_expected_objective_consequence
+    - changes_required_evidence
+    - changes_implementation_selection
+  universal_logical_closure: false
+
+objectives:
+  - id: G-O1
+    name: good_chess_playing
+    statement: >
+      Enable and validate increasingly strong chess play by engines. UCI Arena contributes
+      by exposing weaknesses, comparing alternatives, generating trustworthy feedback, and
+      testing whether claimed improvements survive increasingly demanding competition.
+    confidence: 0.999
+    source_class: explicit_owner
+    consequence_if_neglected: critical
+  - id: G-O2
+    name: good_usability
+    statement: >
+      Make the proving ground practical, understandable, and efficient for intended users
+      to install, configure, operate, observe, update, repair, and control without
+      unnecessary expertise, ambiguity, work, or risk.
+    confidence: 0.999
+    source_class: explicit_owner
+    consequence_if_neglected: major
+
+mission:
+  - id: G-M1
+    name: feature_rich_trustworthy_proving_ground
+    statement: >
+      Provide a feature-rich and trustworthy proving ground that progresses from controlled
+      diagnosis and reproducible competition to uncontrolled external validation, while
+      presenting those capabilities through a usable product.
+    derived_from: [G-O1, G-O2]
+    confidence: 0.997
+    source_class: explicit_owner
+  - id: G-M2
+    name: terminal_external_benchmark
+    statement: >
+      Treat sustained competitive success against elite external engines, under independently
+      operated conditions such as Lichess, as the aspirational terminal validation of engine
+      strength after controlled evidence has already established diagnosable internal quality.
+    derived_from: [G-O1, G-M1]
+    confidence: 0.995
+    source_class: explicit_owner
+
+premises:
+  - id: G-P1
+    statement: >
+      Controlled tests are best suited to causal diagnosis, reproducibility, regression
+      isolation, and comparison under known conditions.
+    confidence: 0.98
+    source_class: strong_derivation
+  - id: G-P2
+    statement: >
+      Uncontrolled competition against engines and configurations we did not create or select
+      supplies external validity that an entirely self-selected test population cannot.
+    confidence: 0.99
+    source_class: explicit_owner
+  - id: G-P3
+    statement: >
+      External competition is noisy and therefore complements rather than replaces controlled
+      evidence when diagnosing why an engine improved or regressed.
+    confidence: 0.97
+    source_class: strong_derivation
+  - id: G-P4
+    statement: >
+      UCI Arena is a composed system. Component-local correctness does not establish
+      whole-suite correctness because interfaces, lifecycle, timing, identity, and state
+      transitions can fail at composition boundaries.
+    confidence: 0.99
+    source_class: accepted_authority
+  - id: G-P5
+    statement: >
+      Engine neutrality and substitution are necessary for an arena intended to compare
+      multiple chess engines rather than merely exercise one product.
+    confidence: 0.99
+    source_class: explicit_owner
+  - id: G-P6
+    statement: >
+      Evidence is scoped to the runtime, rules, controls, opponents, hardware, identities,
+      and experimental conditions that materially affect its truth; generalization requires
+      separate support.
+    confidence: 0.995
+    source_class: accepted_authority
+  - id: G-P7
+    statement: >
+      Poor usability can reduce experiment breadth, cause configuration mistakes, discourage
+      repetition, and hide failures, thereby degrading both user experience and the quality
+      of the proving ground.
+    confidence: 0.95
+    source_class: strong_derivation
+  - id: G-P8
+    statement: >
+      A local safety or correctness repair does not establish that the repair is globally
+      optimal, generally applicable, or entitled to supersede a richer qualified subsystem.
+    confidence: 0.995
+    source_class: empirical
+  - id: G-P9
+    statement: >
+      Negative results, failed experiments, superseded policies, and rejected candidates are
+      evidence and help prevent repeated mistakes or selection bias.
+    confidence: 0.97
+    source_class: accepted_authority
+  - id: G-P10
+    statement: >
+      Measurement and diagnostic machinery can perturb the system being measured; proving
+      ground instrumentation must therefore be bounded and its effect considered.
+    confidence: 0.94
+    source_class: strong_derivation
+  - id: G-P11
+    statement: >
+      Supporting qualities such as modularity, performance, durability, observability,
+      portability, and maintainability have value because they serve G-O1/G-O2 or an
+      authority gate; they are not independent top-level purposes by default.
+    confidence: 0.99
+    source_class: explicit_owner
+  - id: G-P12
+    statement: >
+      Material design choices introduce implicit assertions about causality, sufficiency,
+      scope, or interaction even when those assertions are not written down.
+    confidence: 0.98
+    source_class: explicit_owner
+  - id: G-P13
+    statement: >
+      Dominance and importance relations are contextual beliefs rather than static total
+      orderings; contrary evidence can revise them inside the hard-gate envelope.
+    confidence: 0.999
+    source_class: explicit_owner
+  - id: G-P14
+    statement: >
+      Only implicit assertions capable of materially changing the current objectives,
+      candidates, evidence requirements, or target relations belong in the active reasoning
+      graph.
+    confidence: 0.999
+    source_class: explicit_owner
+  - id: G-P15
+    statement: >
+      Background acquisition, analysis, maintenance, or evidence work must not silently
+      degrade the foreground chess workload whose behavior the Arena is trying to prove.
+    confidence: 0.97
+    source_class: strong_derivation
+
+implicit_assertions:
+  - id: G-A1
+    statement: >
+      A proving ground that only tests engines or configurations selected by its own designers
+      can overestimate real-world strength.
+    derived_from: [G-P1, G-P2]
+    confidence: 0.96
+  - id: G-A2
+    statement: >
+      Lichess is valuable primarily as an external-validation environment; its uncontrolled
+      results should trigger investigation but should not by themselves identify causality.
+    derived_from: [G-P2, G-P3]
+    confidence: 0.98
+  - id: G-A3
+    statement: >
+      Cross-component assumptions must be represented at suite scope because copying them into
+      isolated local trees loses interaction effects and encourages divergent truth.
+    derived_from: [G-P4]
+    confidence: 0.99
+  - id: G-A4
+    statement: >
+      A component may optimize its internals only while preserving the suite-level outcomes
+      and interface assumptions on which other components rely.
+    derived_from: [G-P4, G-P13]
+    confidence: 0.97
+  - id: G-A5
+    statement: >
+      A fix that satisfies one subordinate target can still be a regression when it weakens a
+      more strongly supported global target.
+    derived_from: [G-P8, G-P12, G-P13]
+    confidence: 0.995
+  - id: G-A6
+    statement: >
+      An evidence-backed minimum useful quantity is not automatically an evidence-backed
+      maximum or an optimal total allocation.
+    derived_from: [G-P6, G-P8]
+    confidence: 0.999
+    evidence_note: move_timing_incident
+  - id: G-A7
+    statement: >
+      Stable installation, exact versioning, and reproducible composition contribute to chess
+      validity because otherwise performance changes can be confounded with deployment drift.
+    derived_from: [G-P4, G-P6]
+    confidence: 0.94
+  - id: G-A8
+    statement: >
+      Usability improvements that conceal meaningful state, silently change experimental
+      semantics, or weaken evidence do not satisfy G-O2 even if they reduce clicks.
+    derived_from: [G-O2, G-P7]
+    confidence: 0.98
+  - id: G-A9
+    statement: >
+      Engine/provider substitution reduces self-confirmation risk and increases the range of
+      useful competitive experiments available to the Arena.
+    derived_from: [G-P5, G-P2]
+    confidence: 0.93
+  - id: G-A10
+    statement: >
+      A suite feature without a credible derivation to G-O1, G-O2, or an authority gate is
+      presumptively accidental complexity.
+    derived_from: [G-P11]
+    confidence: 0.96
+  - id: G-A11
+    statement: >
+      Historical failures must remain distinguishable from later success rather than being
+      rewritten as though the successful design had always been authoritative.
+    derived_from: [G-P9]
+    confidence: 0.98
+  - id: G-A12
+    statement: >
+      Rich diagnostics are beneficial only while their measurement cost does not materially
+      corrupt the competitive behavior they are meant to explain.
+    derived_from: [G-P10]
+    confidence: 0.94
+
+implementation_targets:
+  - id: G-T1
+    name: valid_competition_truth
+    statement: >
+      Preserve correct chess rules, time controls, legal moves, protocol state, identities,
+      results, and other facts required for a competition result to mean what it claims.
+    supports: [G-O1]
+  - id: G-T2
+    name: controlled_reproducible_testing
+    statement: >
+      Provide controlled matches, tournaments, regressions, and experiments whose causes and
+      exact conditions can be reproduced and compared.
+    supports: [G-O1]
+  - id: G-T3
+    name: external_validation
+    statement: >
+      Test engines against independently operated, unknown, and eventually elite external
+      opposition through Lichess or equivalent proving environments.
+    supports: [G-O1, G-M2]
+  - id: G-T4
+    name: evidence_integrity
+    statement: >
+      Preserve identity-bound evidence, population/statistical validity, failed results,
+      provenance, and explicit claim scope so optimization follows trustworthy feedback.
+    supports: [G-O1]
+  - id: G-T5
+    name: engine_and_provider_neutrality
+    statement: >
+      Admit conforming replacement engines and providers through public contracts rather than
+      product-specific implementation assumptions.
+    supports: [G-O1, G-O2]
+  - id: G-T6
+    name: composition_fidelity
+    statement: >
+      Make cross-component contracts, lifecycle, timing, state, and identity composition as
+      correct as the local components themselves.
+    supports: [G-O1, G-O2]
+  - id: G-T7
+    name: usable_operation
+    statement: >
+      Minimize unnecessary operator burden while keeping configuration, experiments, status,
+      failures, updates, and controls understandable.
+    supports: [G-O2]
+  - id: G-T8
+    name: reliability_and_recovery
+    statement: >
+      Keep the proving ground available and recoverable across crashes, interruptions,
+      upgrades, network failures, and partial operations without fabricating success.
+    supports: [G-O1, G-O2]
+  - id: G-T9
+    name: observability
+    statement: >
+      Expose enough bounded state and evidence to diagnose failures and understand outcomes
+      without creating a second authority.
+    supports: [G-O1, G-O2]
+  - id: G-T10
+    name: low_measurement_perturbation
+    statement: >
+      Keep proving-ground observation, orchestration, and background work from materially
+      changing the foreground chess behavior being measured.
+    supports: [G-O1]
+  - id: G-T11
+    name: feature_rich_testing
+    statement: >
+      Support broad useful testing conditions, engines, time controls, knowledge sources,
+      external providers, experiments, histories, and analysis capabilities.
+    supports: [G-O1, G-O2]
+  - id: G-T12
+    name: durable_evolution
+    statement: >
+      Allow application components and experimental capabilities to evolve without requiring
+      unrelated mechanisms or neighboring products to be repeatedly rewritten.
+    supports: [G-O1, G-O2]
+  - id: G-T13
+    name: evidence_to_improvement_loop
+    statement: >
+      Convert trustworthy completed-game evidence into future improvements through explicit
+      discovery, qualification, review, and activation boundaries rather than same-game or
+      unqualified adaptation.
+    supports: [G-O1]
+  - id: G-T14
+    name: user_and_credential_authority
+    statement: >
+      Preserve operator ownership, secrets, authorization, and explicit control over
+      consequential actions.
+    supports: [G-O2]
+  - id: G-T15
+    name: elite_external_terminal_benchmark
+    statement: >
+      Provide a credible path to demonstrating sustained success against some of the strongest
+      externally operated engines without treating isolated wins as proof.
+    supports: [G-O1, G-M2]
+
+dominance_relations:
+  - id: G-D1
+    stronger: G-T1
+    weaker: G-T11
+    context: feature_breadth_conflicts_with_result_validity
+    confidence: 0.999
+    consequence: critical
+  - id: G-D2
+    stronger: G-T4
+    weaker: G-T11
+    context: adding_features_requires_weakening_evidence_claims
+    confidence: 0.99
+    consequence: major
+  - id: G-D3
+    stronger: G-T14
+    weaker: G-T7
+    context: convenience_requires_weakening_user_or_credential_authority
+    confidence: 0.999
+    consequence: critical
+  - id: G-D4
+    stronger: G-T6
+    weaker: G-T7
+    context: local_shortcut_breaks_cross_component_contract_truth
+    confidence: 0.97
+    consequence: major
+  - id: G-D5
+    stronger: G-T10
+    weaker: G-T9
+    context: benchmark_diagnostics_materially_perturb_foreground_behavior
+    confidence: 0.93
+    consequence: major
+  - id: G-D6
+    stronger: G-T8
+    weaker: G-T11
+    context: new_feature_materially_weakens_recovery_or_runtime_continuity
+    confidence: 0.94
+    consequence: major
+  - id: G-D7
+    stronger: G-T5
+    weaker: G-T7
+    context: convenience_hardcodes_one_engine_or_provider_and_harms_arena_generality
+    confidence: 0.91
+    consequence: moderate
+  - id: G-D8
+    stronger: G-T4
+    weaker: G-T13
+    context: faster_iteration_requires_unqualified_or_contaminated_evidence
+    confidence: 0.995
+    consequence: critical
+  - id: G-D9
+    stronger: G-T1
+    weaker: G-T15
+    context: elite_result_claim_requires_relaxing_legality_clock_identity_or_result_truth
+    confidence: 0.999
+    consequence: critical
+  - id: G-D10
+    stronger: G-T12
+    weaker: G-T7
+    context: short_term_convenience_creates_recurring_cross_component_rewrite_cost
+    confidence: 0.86
+    consequence: moderate
+
+importance_relations:
+  - id: G-I1
+    more_important: G-T2
+    less_important: G-T3
+    context: causal_diagnosis_of_a_specific_regression
+    confidence: 0.96
+  - id: G-I2
+    more_important: G-T3
+    less_important: G-T2
+    context: final_external_strength_validation_after_internal_qualification
+    confidence: 0.94
+  - id: G-I3
+    more_important: G-T4
+    less_important: G-T9
+    context: qualification_claims
+    confidence: 0.97
+  - id: G-I4
+    more_important: G-T7
+    less_important: G-T11
+    context: operator_workflow_when_extra_features_add_material_confusion
+    confidence: 0.91
+  - id: G-I5
+    more_important: G-T8
+    less_important: G-T13
+    context: active_foreground_game_or_irreversible_operation
+    confidence: 0.97
+  - id: G-I6
+    more_important: G-T15
+    less_important: G-T11
+    context: mature_engine_claiming_world_class_competitiveness
+    confidence: 0.92
+
+cross_component_edges:
+  - id: G-X1
+    from: uci_arena_evidence_service
+    to: uci_arena_vector
+    statement: >
+      Evidence may produce qualified future policy/artifact inputs; Vector owns live
+      application against current engine/game facts. Evidence never commands active search.
+    supports: [G-T4, G-T13, G-T6]
+    confidence: 0.99
+  - id: G-X2
+    from: uci_arena_book_forge
+    to: uci_arena_vector
+    statement: >
+      Book Forge produces qualified immutable opening knowledge; Vector consumes declared
+      artifacts without learning Book Forge internals.
+    supports: [G-T5, G-T6, G-T13]
+    confidence: 0.98
+  - id: G-X3
+    from: uci_arena_lichess_bot
+    to: uci_arena_vector
+    statement: >
+      Lichess Bot provides authoritative remote game state, clocks, transport constraints,
+      and UCI process hosting while leaving chess move selection and chess-thinking policy to
+      the selected engine.
+    supports: [G-T3, G-T5, G-T6]
+    confidence: 0.995
+  - id: G-X4
+    from: uci_arena_vector
+    to: uci_arena_lichess_bot
+    statement: >
+      The selected engine returns legal current-state UCI moves and engine-owned timing
+      behavior; the Bot submits them subject only to provider transport/API authority.
+    supports: [G-T1, G-T3, G-T6]
+    confidence: 0.995
+  - id: G-X5
+    from: uci_arena_manager
+    to: all_components
+    statement: >
+      Manager exposes operator control, orchestration, status, and typed configuration through
+      public component contracts without absorbing provider/engine semantic ownership.
+    supports: [G-T7, G-T5, G-T6, G-T9]
+    confidence: 0.98
+  - id: G-X6
+    from: uci_arena_installer
+    to: all_components
+    statement: >
+      Installer composes exact immutable released artifacts and installation lifecycle without
+      interpreting chess, evidence, book, or provider semantics.
+    supports: [G-T6, G-T8, G-T12, G-T7]
+    confidence: 0.99
+  - id: G-X7
+    from: uci_arena_lichess_bot
+    to: uci_arena_evidence_service
+    statement: >
+      Completed external games and bounded runtime observations may become evidence inputs
+      under explicit provenance and authority; live uncontrolled results do not automatically
+      tune or qualify future policy.
+    supports: [G-T3, G-T4, G-T13]
+    confidence: 0.96
+
+component_graphs:
+  - component: uci_arena_installer
+    repository: iteathen/uci-arena-installer
+    path: reasoning/component_graph_v1.yaml
+  - component: uci_arena_vector
+    repository: iteathen/UCI-Arena-Vector
+    path: reasoning/component_graph_v1.yaml
+  - component: uci_arena_manager
+    repository: iteathen/uci-arena-manager
+    path: reasoning/component_graph_v1.yaml
+  - component: uci_arena_lichess_bot
+    repository: iteathen/uci-arena-lichess-bot
+    path: reasoning/component_graph_v1.yaml
+  - component: uci_arena_book_forge
+    repository: iteathen/uci-arena-book-forge
+    path: reasoning/component_graph_v1.yaml
+  - component: uci_arena_evidence_service
+    repository: iteathen/uci-arena-evidence-service
+    path: reasoning/component_graph_v1.yaml
+
+decision_procedure:
+  - identify_affected_scopes
+  - load_relevant_global_local_and_interface_nodes
+  - surface_candidate_specific_implicit_assertions
+  - reject_authority_gate_violations
+  - compare_expected_effects_on_G_O1_and_G_O2
+  - apply_contextual_dominance_relations
+  - apply_contextual_importance_and_consequence_to_remaining_candidates
+  - record_evidence_falsifiers_and_confidence_changes
+  - escalate_cross_component_assumption_changes_to_suite_graph
