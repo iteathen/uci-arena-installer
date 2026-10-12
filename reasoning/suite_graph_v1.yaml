@@ -170,8 +170,89 @@ premises:
     source_class: explicit_owner
   - id: G-P15
     statement: >
-      Background acquisition, analysis, maintenance, or evidence work must not silently
-      degrade the foreground chess workload whose behavior the Arena is trying to prove.
+      Shared-resource background acquisition, analysis, maintenance, concurrency, and
+      instrumentation can materially change foreground engine behavior and therefore can
+      confound a chess-performance comparison if not controlled or recorded.
+    confidence: 0.98
+    source_class: strong_derivation
+  - id: G-P16
+    statement: >
+      Chess strength is conditional on the tested distribution and environment, including
+      time control, opponent population, openings, rule context, model/knowledge configuration,
+      hardware/runtime, and available resources; no single rating or score is universally
+      sufficient to describe an engine.
+    confidence: 0.99
+    source_class: strong_derivation
+  - id: G-P17
+    statement: >
+      Comparative results are trustworthy only to the extent that material asymmetries and
+      nuisance variables such as color, openings, clocks, options, versions, rule context,
+      hardware, concurrency, and resource interference are controlled, randomized, paired,
+      or explicitly recorded by the experimental design.
+    confidence: 0.995
+    source_class: accepted_authority
+  - id: G-P18
+    statement: >
+      Repeatedly designing against and evaluating on the same evidence creates selection and
+      overfitting risk; strong generalization claims require evidence that retained meaningful
+      independence from the design process, such as frozen held-out data or external
+      competition.
+    confidence: 0.99
+    source_class: strong_derivation
+  - id: G-P19
+    statement: >
+      Failure to detect a difference does not establish equivalence or absence of effect
+      unless the experiment was designed and sufficiently powered for that equivalence claim.
+    confidence: 0.995
+    source_class: strong_derivation
+  - id: G-P20
+    statement: >
+      Crashes, flags, illegal moves, protocol failures, transport failures, and resource
+      exhaustion can determine practical competitive outcome, but causal diagnosis requires
+      retaining which owner and mechanism produced the failure.
+    confidence: 0.99
+    source_class: accepted_authority
+  - id: G-P21
+    statement: >
+      Operator-selected configuration and every behavior-changing engine, model, book,
+      tablebase, timing policy, option, version, rule, and time-control input are part of the
+      experiment identity when they can affect the result; silently changing them changes the
+      experiment.
+    confidence: 0.995
+    source_class: accepted_authority
+  - id: G-P22
+    statement: >
+      Active-game and sealed-experiment semantic inputs must remain latched for the scope whose
+      result they are intended to explain; mid-scope mutation can contaminate causality and
+      reproducibility even when each individual version is valid.
+    confidence: 0.99
+    source_class: accepted_authority
+  - id: G-P23
+    statement: >
+      A material semantic fact, lifecycle, or state machine needs one visible authoritative
+      owner; competing owners for the same fact create contradictory state and weaken both
+      usability and evidence validity.
+    confidence: 0.995
+    source_class: accepted_authority
+  - id: G-P24
+    statement: >
+      Increasing sample count cannot repair a biased sampling frame, uncontrolled confound,
+      or nonrepresentative opponent/opening/control distribution; representativeness and
+      independence are separate from quantity.
+    confidence: 0.99
+    source_class: strong_derivation
+  - id: G-P25
+    statement: >
+      Internal proxies such as nodes per second, depth, evaluation delta, GPU utilization,
+      latency, or local tactical success establish only their declared claims unless evidence
+      connects them to downstream chess performance.
+    confidence: 0.985
+    source_class: strong_derivation
+  - id: G-P26
+    statement: >
+      Chess engines and competitive environments can be stochastic, asynchronous, or
+      nonstationary. Deterministic schedules and retained seeds improve reproducibility but do
+      not remove the need for repeated trials and explicit uncertainty.
     confidence: 0.97
     source_class: strong_derivation
 
@@ -249,6 +330,82 @@ implicit_assertions:
       corrupt the competitive behavior they are meant to explain.
     derived_from: [G-P10]
     confidence: 0.94
+
+  - id: G-A13
+    statement: >
+      An Elo estimate, win rate, or score from one control/opponent/environment cannot be
+      treated as a universal engine-strength scalar outside its supported distribution.
+    derived_from: [G-P16, G-P24]
+    confidence: 0.99
+  - id: G-A14
+    statement: >
+      A head-to-head winner is not a reliable causal winner when treatment is confounded with
+      color, opening, clock, options, runtime identity, hardware, or resource interference.
+    derived_from: [G-P17, G-P21]
+    confidence: 0.995
+  - id: G-A15
+    statement: >
+      A benchmark repeatedly consulted while designing the candidate gradually becomes
+      discovery evidence and loses strength as independent final validation.
+    derived_from: [G-P18]
+    confidence: 0.99
+  - id: G-A16
+    statement: >
+      An inconclusive or non-significant result cannot be rewritten as no effect, equivalent,
+      safe to simplify, or evidence that additional capability has no value.
+    derived_from: [G-P19]
+    confidence: 0.995
+  - id: G-A17
+    statement: >
+      Silent configuration, model, knowledge, timing, rule, or runtime drift between compared
+      cohorts creates a different experiment even if the displayed engine name is unchanged.
+    derived_from: [G-P21, G-P22]
+    confidence: 0.995
+  - id: G-A18
+    statement: >
+      A whole-system external loss caused by a crash, flag, illegal move, or transport failure
+      is real practical performance evidence, but it does not by itself prove that the chess
+      search/model made the wrong move.
+    derived_from: [G-P20]
+    confidence: 0.99
+  - id: G-A19
+    statement: >
+      More games against the same biased or narrow population can increase precision around
+      the wrong quantity without increasing general external validity.
+    derived_from: [G-P24]
+    confidence: 0.99
+  - id: G-A20
+    statement: >
+      The best candidate among a tested set is supported only relative to that tested set and
+      evidence scope; it is not evidence that no untested strategy could dominate it.
+    derived_from: [G-P18, G-P19, G-P24]
+    confidence: 0.995
+  - id: G-A21
+    statement: >
+      An automation or usability feature that silently changes behavior-affecting experiment
+      inputs can invalidate evidence even when it reduces operator effort.
+    derived_from: [G-O2, G-P21]
+    confidence: 0.995
+  - id: G-A22
+    statement: >
+      Improving a proxy such as throughput, depth, utilization, local evaluation agreement,
+      or latency is not automatically a chess-strength improvement.
+    derived_from: [G-P25]
+    confidence: 0.99
+  - id: G-A23
+    statement: >
+      Hot-swapping a behavior-affecting policy, book, tablebase, model, or rule interpretation
+      during the scope of one game or sealed experiment makes that result causally ambiguous
+      unless the experiment explicitly treats the transition as its subject.
+    derived_from: [G-P22]
+    confidence: 0.995
+  - id: G-A24
+    statement: >
+      Deterministic scheduling and recorded seeds support exact replay of the experimental
+      plan, but stochastic outcome variance still requires replication and uncertainty rather
+      than one-run certainty.
+    derived_from: [G-P26]
+    confidence: 0.98
 
 implementation_targets:
   - id: G-T1
@@ -342,6 +499,49 @@ implementation_targets:
       Provide a credible path to demonstrating sustained success against some of the strongest
       externally operated engines without treating isolated wins as proof.
     supports: [G-O1, G-M2]
+
+target_derivations:
+  G-T1: [G-O1, G-P4, G-P17, G-P20, G-P23]
+  G-T2: [G-O1, G-P1, G-P17, G-P21, G-P22, G-P26]
+  G-T3: [G-O1, G-P2, G-P3, G-P16, G-P24, G-P26]
+  G-T4: [G-O1, G-P6, G-P9, G-P18, G-P19, G-P24, G-P25]
+  G-T5: [G-O1, G-O2, G-P5, G-P23]
+  G-T6: [G-O1, G-O2, G-P4, G-P21, G-P22, G-P23]
+  G-T7: [G-O2, G-P7, G-P21]
+  G-T8: [G-O1, G-O2, G-P4, G-P20, G-P22]
+  G-T9: [G-O1, G-O2, G-P7, G-P20, G-P23]
+  G-T10: [G-O1, G-P10, G-P15, G-P17]
+  G-T11: [G-O1, G-O2, G-P5, G-P7, G-P16]
+  G-T12: [G-O1, G-O2, G-P4, G-P11, G-P23]
+  G-T13: [G-O1, G-P6, G-P9, G-P18, G-P19, G-P25]
+  G-T14: [G-O2, G-P21, G-P23]
+  G-T15: [G-O1, G-P2, G-P3, G-P16, G-P18, G-P24, G-P26]
+
+assertion_relevance:
+  G-A1: [G-T3, G-T15]
+  G-A2: [G-T3, G-T4, G-T15]
+  G-A3: [G-T6, G-T12]
+  G-A4: [G-T6, G-T12]
+  G-A5: [G-T1, G-T4, G-T6, G-T8, G-T13]
+  G-A6: [G-T4, G-T13]
+  G-A7: [G-T2, G-T4, G-T6, G-T12]
+  G-A8: [G-T7, G-T9, G-T14]
+  G-A9: [G-T3, G-T5, G-T11]
+  G-A10: [G-T11, G-T12]
+  G-A11: [G-T4, G-T13]
+  G-A12: [G-T9, G-T10]
+  G-A13: [G-T3, G-T4, G-T15]
+  G-A14: [G-T1, G-T2, G-T4]
+  G-A15: [G-T4, G-T13, G-T15]
+  G-A16: [G-T4, G-T13]
+  G-A17: [G-T1, G-T2, G-T4, G-T6]
+  G-A18: [G-T1, G-T3, G-T4, G-T8, G-T9]
+  G-A19: [G-T4, G-T15]
+  G-A20: [G-T4, G-T13]
+  G-A21: [G-T2, G-T7, G-T14]
+  G-A22: [G-T4, G-T10, G-T13]
+  G-A23: [G-T1, G-T4, G-T6]
+  G-A24: [G-T2, G-T4]
 
 dominance_relations:
   - id: G-D1
