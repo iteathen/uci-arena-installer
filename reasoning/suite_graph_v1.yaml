@@ -152,8 +152,9 @@ premises:
     source_class: accepted_authority
   - id: G-P10
     statement: >
-      Measurement and diagnostic machinery can perturb the system being measured; proving
-      ground instrumentation must therefore be bounded and its effect considered.
+      Measurement and diagnostic machinery can perturb the system being measured;
+      unbounded or uncharacterized instrumentation can confound foreground chess-performance
+      observations.
     confidence: 0.94
     source_class: strong_derivation
   - id: G-P15
