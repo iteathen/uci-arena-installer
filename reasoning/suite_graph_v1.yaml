@@ -256,6 +256,21 @@ premises:
     confidence: 0.97
     source_class: strong_derivation
 
+  - id: G-P27
+    statement: >
+      Validation is not independent when the oracle, expected output, or adjudicating logic
+      shares the material implementation or defect under test; independent ownership or a
+      genuinely independent derivation reduces common-mode self-confirmation risk.
+    confidence: 0.995
+    source_class: accepted_authority
+  - id: G-P28
+    statement: >
+      Fixtures, mocks, simulations, portable checks, neighboring environments, and synthetic
+      artifacts establish only the behavior they actually exercise; they do not automatically
+      establish native hardware, live-provider, performance, or playing-strength claims.
+    confidence: 0.999
+    source_class: accepted_authority
+
 implicit_assertions:
   - id: G-A1
     statement: >
@@ -407,6 +422,21 @@ implicit_assertions:
     derived_from: [G-P26]
     confidence: 0.98
 
+  - id: G-A25
+    statement: >
+      Expected chess/model/evidence output generated from the same implementation being tested
+      can reproduce the same bug and therefore cannot by itself serve as independent
+      correctness evidence.
+    derived_from: [G-P27]
+    confidence: 0.999
+  - id: G-A26
+    statement: >
+      A green fixture, loopback simulator, portable test, or mocked platform path cannot be
+      promoted into a live/native/performance/strength claim without evidence at that claimed
+      layer.
+    derived_from: [G-P28]
+    confidence: 0.999
+
 implementation_targets:
   - id: G-T1
     name: valid_competition_truth
@@ -501,10 +531,10 @@ implementation_targets:
     supports: [G-O1, G-M2]
 
 target_derivations:
-  G-T1: [G-O1, G-P4, G-P17, G-P20, G-P23]
+  G-T1: [G-O1, G-P4, G-P17, G-P20, G-P23, G-P27, G-P28]
   G-T2: [G-O1, G-P1, G-P17, G-P21, G-P22, G-P26]
-  G-T3: [G-O1, G-P2, G-P3, G-P16, G-P24, G-P26]
-  G-T4: [G-O1, G-P6, G-P9, G-P18, G-P19, G-P24, G-P25]
+  G-T3: [G-O1, G-P2, G-P3, G-P16, G-P24, G-P26, G-P28]
+  G-T4: [G-O1, G-P6, G-P9, G-P18, G-P19, G-P24, G-P25, G-P27, G-P28]
   G-T5: [G-O1, G-O2, G-P5, G-P23]
   G-T6: [G-O1, G-O2, G-P4, G-P21, G-P22, G-P23]
   G-T7: [G-O2, G-P7, G-P21]
@@ -515,7 +545,7 @@ target_derivations:
   G-T12: [G-O1, G-O2, G-P4, G-P11, G-P23]
   G-T13: [G-O1, G-P6, G-P9, G-P18, G-P19, G-P25]
   G-T14: [G-O2, G-P21, G-P23]
-  G-T15: [G-O1, G-P2, G-P3, G-P16, G-P18, G-P24, G-P26]
+  G-T15: [G-O1, G-P2, G-P3, G-P16, G-P18, G-P24, G-P26, G-P27, G-P28]
 
 assertion_relevance:
   G-A1: [G-T3, G-T15]
@@ -542,6 +572,8 @@ assertion_relevance:
   G-A22: [G-T4, G-T10, G-T13]
   G-A23: [G-T1, G-T4, G-T6]
   G-A24: [G-T2, G-T4]
+  G-A25: [G-T1, G-T4, G-T13]
+  G-A26: [G-T1, G-T3, G-T4, G-T15]
 
 dominance_relations:
   - id: G-D1
