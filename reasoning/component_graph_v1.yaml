@@ -32,8 +32,9 @@ premises:
     confidence: 0.98
   - id: I-P2
     statement: >
-      Ordinary application evolution should not require Installer control-flow changes when
-      existing installation contracts can express the new artifact.
+      Application components evolve more frequently than stable installation mechanisms, and
+      many ordinary component changes can be fully represented by existing manifests,
+      compatibility declarations, composition data, and immutable artifacts.
     confidence: 0.99
   - id: I-P3
     statement: >
@@ -50,6 +51,24 @@ premises:
       Windows and Linux need different low-level adapters but should share installation
       semantics wherever the platform does not force a difference.
     confidence: 0.96
+
+  - id: I-P6
+    statement: >
+      Exact artifact identity is necessary but not sufficient for a valid suite; selected
+      component versions and public contracts must also be mutually compatible.
+    confidence: 0.995
+  - id: I-P7
+    statement: >
+      An interrupted or partially applied suite update can leave a mixed generation whose
+      behavior differs from both the prior and intended suite even when every individual file
+      is authentic.
+    confidence: 0.99
+  - id: I-P8
+    statement: >
+      Operator-selected install scope, roots, preserved external locators, and ownership
+      boundaries are part of installed-state identity and cannot be safely reconstructed from
+      future defaults alone.
+    confidence: 0.99
 
 implicit_assertions:
   - id: I-A1
@@ -81,6 +100,26 @@ implicit_assertions:
       Installer interpretation of chess, timing, book, evidence, or provider semantics would
       create a second semantic authority and increase future change radius.
     derived_from: [G-P4, I-P1]
+    confidence: 0.99
+
+  - id: I-A6
+    statement: >
+      A cryptographically valid component set that violates declared compatibility can install
+      successfully at the byte level while producing an invalid proving environment.
+    derived_from: [I-P1, I-P6]
+    confidence: 0.995
+  - id: I-A7
+    statement: >
+      A successful installation or upgrade establishes deployment correctness only; it does
+      not itself establish engine strength, timing qualification, book quality, or provider
+      behavior.
+    derived_from: [G-P6, I-P1]
+    confidence: 0.999
+  - id: I-A8
+    statement: >
+      A mixed-generation partial update can confound later chess/evidence comparisons unless
+      transaction recovery restores or explicitly identifies one coherent installed state.
+    derived_from: [I-P7, G-P21]
     confidence: 0.99
 
 implementation_targets:
@@ -117,6 +156,28 @@ implementation_targets:
   - id: I-T10
     name: windows_linux_semantic_parity
     supports: [I-O1, I-O2]
+
+target_derivations:
+  I-T1: [I-O1, I-O2, I-P1, I-P2, I-P6]
+  I-T2: [I-O1, I-O2, I-P2, G-P11]
+  I-T3: [I-O1, I-P3, I-P8]
+  I-T4: [I-O1, I-P7, G-P20]
+  I-T5: [I-O2, I-P1, I-P6, G-P6]
+  I-T6: [I-O1, I-P2, I-P5]
+  I-T7: [I-O1, I-P4, I-P8]
+  I-T8: [I-O1, G-P7, I-P2]
+  I-T9: [I-O1, I-P7, G-P20]
+  I-T10: [I-O1, I-O2, I-P3, I-P5]
+
+assertion_relevance:
+  I-A1: [I-T1, I-T2]
+  I-A2: [I-T4, I-T7, I-T8, I-T9]
+  I-A3: [I-T2, I-T6]
+  I-A4: [I-T3, I-T10]
+  I-A5: [I-T1, I-T2, I-T5]
+  I-A6: [I-T1, I-T5]
+  I-A7: [I-T5, I-T9]
+  I-A8: [I-T4, I-T5, I-T9]
 
 dominance_relations:
   - {id: I-D1, stronger: I-T5, weaker: I-T8, context: convenience_conflicts_with_exact_identity, confidence: 0.995, consequence: critical}
