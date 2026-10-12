@@ -222,9 +222,9 @@ premises:
     source_class: accepted_authority
   - id: G-P22
     statement: >
-      Active-game and sealed-experiment semantic inputs must remain latched for the scope whose
-      result they are intended to explain; mid-scope mutation can contaminate causality and
-      reproducibility even when each individual version is valid.
+      Changing behavior-affecting semantic inputs during the game or sealed-experiment scope
+      whose result they are intended to explain can contaminate causality and reproducibility
+      even when each individual version is valid.
     confidence: 0.99
     source_class: accepted_authority
   - id: G-P23
