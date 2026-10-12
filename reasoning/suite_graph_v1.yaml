@@ -766,8 +766,11 @@ cross_component_edges:
     from: uci_arena_book_forge
     to: uci_arena_vector
     statement: >
-      Book Forge produces qualified immutable opening knowledge; Vector consumes declared
-      artifacts without learning Book Forge internals.
+      Book Forge publishes exact immutable opening-book snapshots with declared integration
+      or strength-qualified authority. Integration snapshots are operationally consumable
+      but do not establish playing-strength benefit; qualified snapshots require separate
+      producer-owned evidence gates. Vector validates declared artifact identity and
+      authority without acquiring Book Forge internals.
     supports: [G-T5, G-T6, G-T13]
     confidence: 0.98
   - id: G-X3
