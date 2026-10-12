@@ -24,16 +24,96 @@ Every material design decision should be traceable through:
 
 1. **Objectives** — outcomes UCI Arena is actually trying to achieve.
 2. **Premises** — currently accepted facts or working truths relevant to those objectives.
-3. **Implicit assertions** — assumptions a candidate design relies upon even when nobody
-   stated them explicitly.
-4. **Implementation targets** — desired implementation properties derived from objectives,
-   premises, and relevant assertions.
-5. **Dominance relations** — contextual Bayesian confidence that one target should constrain
-   or supersede another when they conflict.
-6. **Importance relations** — contextual Bayesian confidence that one admissible target
-   deserves more optimization/attention than another.
+3. **Implicit assertions** — bounded causal/conditional consequences inferred when relevant
+   premises are applied to objectives. They are not new world facts or hidden solutions.
+4. **Implementation targets** — affirmative, solution-independent problems/conditions the
+   resulting system should satisfy. A correctly formulated target is a successful reasoning
+   result even when no implementation has yet been selected.
+5. **Candidate solutions** — concrete mechanisms considered only after the upstream target is
+   characterized. Existing code is one candidate/current implementation, not proof that its
+   mechanism belongs in the target.
+6. **Causal relations** — necessary-condition, enabling, feedback, or dependency relations
+   among objectives/targets. Causal precedence is not automatically dominance.
+7. **Dominance relations** — contextual Bayesian confidence that one objective/target should
+   constrain or supersede another inside a genuine conflict scope.
+8. **Importance relations** — contextual Bayesian confidence that one otherwise admissible
+   objective/target deserves more optimization/attention in the stated context.
 
-A candidate implementation is never justified merely because it fixes the immediate defect.
+A candidate implementation is never justified merely because it fixes the immediate defect,
+and an existing mechanism must never be back-projected into the upstream target definition.
+
+
+## Coverage census before premise derivation
+
+Before declaring premises complete, enumerate the broad concern areas that can materially
+affect the current objectives. The suite census is `reasoning/concern_census_v1.yaml`.
+Concern areas are a coverage map, not modules, repositories, or implementation boundaries.
+Their purpose is to expose missing domains before a convenient architecture narrows attention.
+
+A concern area belongs only when facts in that area could materially change attainment of
+good chess playing, proving-ground validity, or usability. Do not add generic social,
+economic, legal, or engineering topics without a concrete UCI Arena consequence.
+
+## Premise strength and scope
+
+In addition to Bayesian `confidence`, classify premises by the kind of proposition being
+asserted:
+
+- **structural** — a narrow logical, definitional, ownership, protocol, or physical/resource
+  distinction;
+- **empirical_regular** — a broad observed regularity whose frequency/magnitude may vary;
+- **material_risk** — a credible possibility important enough to affect design even when it
+  is not typical or inevitable.
+
+The type is not a confidence score. A structural distinction can have uncertain application;
+an empirical regularity can have high confidence but variable magnitude. Premise statements
+must remain descriptive/epistemic and must not smuggle in a preferred algorithm, transport,
+platform mechanism, module topology, or current implementation.
+
+## Implicit-assertion discipline
+
+Every implicit assertion records three distinct ideas:
+
+- **derivation** — the premises and objectives that make the inference relevant;
+- **inference class** — `structural`, `conditional`, or `risk_implication`;
+- **boundary** — what the inference explicitly does *not* establish.
+
+A boundary is mandatory reasoning, not prose decoration. It prevents a correct local
+inference from becoming a wider unsupported authority. Assertions with no material target or
+decision consequence are removed rather than preserved as general philosophy.
+
+## Solution-independent target discipline
+
+An implementation target states the problem to solve, not the current mechanism used to solve
+it. Terms such as a particular transport, file format, operating-system integration,
+programming language, process model, search backend, timing formula, or UI widget belong in a
+target only when that mechanism is itself imposed by explicit higher authority.
+
+For each target, ask: *Could two genuinely different architectures satisfy this target?* If
+the answer is no only because the target embeds today's solution, rewrite it.
+
+The reasoning stage succeeds when the problem is correctly characterized. Lack of a selected
+solution, implementation, or proof of feasibility is not a defect in a well-founded target.
+
+## Causal structure versus dominance
+
+Do not infer dominance merely because A causally enables B. Record causal relations
+separately. Dominance applies only after identifying a real decision scope in which two
+objectives/targets cannot both be achieved as well as desired.
+
+For a proposed conflict, record:
+
+- the actual contested decision and conflict scope;
+- the causal/necessary-condition paths;
+- dominance direction;
+- dominance strength: `strict_necessary_condition`, `strong_conditional`,
+  `partial_defeasible`, or `unresolved_incomparable`;
+- Bayesian confidence in that directional relation;
+- evidence, counterexamples, and alternatives that might satisfy both sides.
+
+If both objectives can be substantially satisfied by another design, there is no justified
+sacrifice merely because the first candidate created a tradeoff. Dominance never licenses
+gratuitous harm to the weaker side.
 
 ## Relevance boundary for implicit assertions
 
@@ -91,14 +171,21 @@ For a material decision:
 3. State the candidate implementations.
 4. Surface candidate-specific implicit assertions inside the relevance boundary.
 5. Reject candidates that violate an authority gate.
-6. Evaluate expected effects on the two root objectives.
-7. Apply contextual dominance relations to material conflicts.
-8. Among remaining candidates, apply importance relations and consequence magnitude.
-9. Prefer the candidate with the strongest traceable justification; do not use a generic
-   engineering virtue as an unstated objective.
-10. Record new evidence, falsifiers, or changed confidence when the decision materially
+6. Check that the relevant implementation targets are solution-independent; if a target
+   merely restates today's mechanism, repair the target before comparing candidates.
+7. Evaluate expected effects on the two root objectives and follow causal/enabling paths,
+   including feedback and indirect effects.
+8. Name any *actual* conflicts. Search for alternatives that satisfy both sides before
+   invoking dominance.
+9. For unavoidable material conflicts, apply contextual dominance with explicit scope,
+   strength, confidence, evidence, and counterexamples.
+10. Among remaining admissible candidates, apply contextual importance and consequence
+    magnitude.
+11. Prefer the candidate with the strongest traceable justification; do not use a generic
+    engineering virtue or current implementation as an unstated objective.
+12. Record new evidence, falsifiers, or changed confidence when the decision materially
     changes the reasoning graph.
-11. If a local decision changes another component's assumptions or interface, update the
+13. If a local decision changes another component's assumptions or interface, update the
     suite graph before treating the local decision as complete.
 
 ## Self-reference limitation
