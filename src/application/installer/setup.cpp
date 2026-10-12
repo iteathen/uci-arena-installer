@@ -6065,6 +6065,82 @@ json SetupEngine::plan(const json& catalog, const SetupPaths& paths, const std::
     };
 }
 
+namespace {
+json finish_apply_cleanup(json& journal, const SetupPaths& paths,
+                          const fs::path& journal_path) {
+    const fs::path staging_root = paths.install_root / ".staging";
+    const std::string transaction_id = journal.at("transaction_id");
+    json superseded_component_cleanup{{"schema", "arena_superseded_component_cleanup_v1"},
+                                       {"roots", json::array()}};
+    try {
+        superseded_component_cleanup = cleanup_superseded_component_roots(
+            paths, [&](const json& checkpoint) {
+                journal["superseded_component_cleanup"] = checkpoint;
+                write_json_atomic(journal_path, journal);
+            });
+    } catch (const std::exception& cleanup_error) {
+        superseded_component_cleanup["error"] = cleanup_error.what();
+        journal["superseded_component_cleanup"] =
+            superseded_component_cleanup;
+        write_json_atomic(journal_path, journal);
+    }
+    std::error_code ignored;
+    for (const auto& write :
+         journal.value("consumer_refresh_writes", json::array())) {
+        const std::string backup = write.value("backup", "");
+        if (!backup.empty()) {
+            fs::remove(backup, ignored);
+            ignored.clear();
+        }
+    }
+    for (const auto& action : journal.at("actions")) {
+        if (action.contains("rollback_path")) {
+            fs::remove_all(action.at("rollback_path").get<std::string>(), ignored);
+            ignored.clear();
+        }
+        if (action.contains("receipt_backup")) {
+            fs::remove(action.at("receipt_backup").get<std::string>(), ignored);
+            ignored.clear();
+        }
+        for (const auto& activation :
+             action.value("knowledge_activations", json::array())) {
+            for (const auto field : {"backup_path", "candidate_path"}) {
+                const std::string path = activation.value(field, "");
+                if (!path.empty()) {
+                    fs::remove_all(path, ignored);
+                    ignored.clear();
+                }
+            }
+        }
+        if (action.contains("configuration_backup")) {
+            fs::remove(action.at("configuration_backup").get<std::string>(), ignored);
+            ignored.clear();
+        }
+        for (const auto& write :
+             action.value("generated_document_writes", json::array())) {
+            const std::string backup = write.value("backup", "");
+            if (!backup.empty()) {
+                fs::remove(backup, ignored);
+                ignored.clear();
+            }
+        }
+        if (action.contains("workspace_migration")) {
+            for (const auto& locator :
+                 action.at("workspace_migration")
+                     .value("locator_writes", json::array())) {
+                const std::string backup = locator.value("backup", "");
+                if (!backup.empty()) {
+                    fs::remove(backup, ignored);
+                    ignored.clear();
+                }
+            }
+        }
+    }
+    fs::remove_all(staging_root / transaction_id, ignored);
+    return superseded_component_cleanup;
+}
+} // namespace
+
 json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
                         const bool confirmed, const bool repair) {
     if (!confirmed) {
@@ -6715,71 +6791,7 @@ json SetupEngine::apply(const json&, const json& plan, const SetupPaths& paths,
         }
         journal["state"] = "committed";
         write_json_atomic(journal_path, journal);
-        try {
-            superseded_component_cleanup = cleanup_superseded_component_roots(
-                paths, [&](const json& checkpoint) {
-                    journal["superseded_component_cleanup"] = checkpoint;
-                    write_json_atomic(journal_path, journal);
-                });
-        } catch (const std::exception& cleanup_error) {
-            superseded_component_cleanup["error"] = cleanup_error.what();
-            journal["superseded_component_cleanup"] =
-                superseded_component_cleanup;
-            write_json_atomic(journal_path, journal);
-        }
-        std::error_code ignored;
-        for (const auto& write :
-             journal.value("consumer_refresh_writes", json::array())) {
-            const std::string backup = write.value("backup", "");
-            if (!backup.empty()) {
-                fs::remove(backup, ignored);
-                ignored.clear();
-            }
-        }
-        for (const auto& action : journal.at("actions")) {
-            if (action.contains("rollback_path")) {
-                fs::remove_all(action.at("rollback_path").get<std::string>(), ignored);
-                ignored.clear();
-            }
-            if (action.contains("receipt_backup")) {
-                fs::remove(action.at("receipt_backup").get<std::string>(), ignored);
-                ignored.clear();
-            }
-            for (const auto& activation :
-                 action.value("knowledge_activations", json::array())) {
-                for (const auto field : {"backup_path", "candidate_path"}) {
-                    const std::string path = activation.value(field, "");
-                    if (!path.empty()) {
-                        fs::remove_all(path, ignored);
-                        ignored.clear();
-                    }
-                }
-            }
-            if (action.contains("configuration_backup")) {
-                fs::remove(action.at("configuration_backup").get<std::string>(), ignored);
-                ignored.clear();
-            }
-            for (const auto& write :
-                 action.value("generated_document_writes", json::array())) {
-                const std::string backup = write.value("backup", "");
-                if (!backup.empty()) {
-                    fs::remove(backup, ignored);
-                    ignored.clear();
-                }
-            }
-            if (action.contains("workspace_migration")) {
-                for (const auto& locator :
-                     action.at("workspace_migration")
-                         .value("locator_writes", json::array())) {
-                    const std::string backup = locator.value("backup", "");
-                    if (!backup.empty()) {
-                        fs::remove(backup, ignored);
-                        ignored.clear();
-                    }
-                }
-            }
-        }
-        fs::remove_all(staging_root / transaction_id, ignored);
+        superseded_component_cleanup = finish_apply_cleanup(journal, paths, journal_path);
     } catch (const std::exception& error) {
         compensating_lifecycle = true;
         std::error_code rollback_error;

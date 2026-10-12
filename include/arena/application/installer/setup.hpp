@@ -20,6 +20,21 @@ struct SetupPaths {
     std::string bundle_owner;
     bool restart_manager_service{};
     bool manager_service_access{true};
+    std::string package_transaction;
+};
+
+enum class PackageRecoveryAction { prepare, rollback, restore_msi, commit, recover };
+
+struct PackageRecoveryMedia {
+    std::filesystem::path integration_root;
+    std::filesystem::path target_msi;
+    std::string target_sha256;
+    std::filesystem::path prior_msi;
+    std::string prior_sha256;
+    std::filesystem::path catalog;
+    std::filesystem::path metadata;
+    bool allow_unsigned_development{};
+    std::vector<std::string> bundle_features;
 };
 
 class SetupEngine final {
@@ -78,6 +93,10 @@ class SetupEngine final {
                                               bool confirmed, bool repair);
 
     [[nodiscard]] static nlohmann::json verify(const SetupPaths& paths);
+
+    [[nodiscard]] static nlohmann::json package_recovery(
+        PackageRecoveryAction action, const SetupPaths& paths,
+        const PackageRecoveryMedia& media = {});
 
     [[nodiscard]] static nlohmann::json
     plan_uninstall(const SetupPaths& paths,

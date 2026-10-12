@@ -66,6 +66,7 @@ target_link_libraries(
 if(WIN32)
   target_sources(arena_installer_core PRIVATE
     src/platform/windows/package_layout.cpp
+    src/platform/windows/package_recovery.cpp
     src/platform/windows/asset_search_index.cpp
     src/platform/windows/durable_state_publisher.cpp
     src/platform/windows/filesystem_identity.cpp
@@ -75,7 +76,7 @@ if(WIN32)
     src/platform/windows/workspace_permissions.cpp
   )
   target_link_libraries(
-    arena_installer_core PRIVATE advapi32 ole32 oleaut32 uuid)
+    arena_installer_core PRIVATE advapi32 ole32 oleaut32 uuid msi)
 else()
   target_sources(arena_installer_core PRIVATE
     src/platform/linux/asset_search_index.cpp
