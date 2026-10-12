@@ -229,8 +229,8 @@ premises:
     source_class: accepted_authority
   - id: G-P23
     statement: >
-      A material semantic fact, lifecycle, or state machine needs one visible authoritative
-      owner; competing owners for the same fact create contradictory state and weaken both
+      When multiple components can independently authoritatively mutate the same material
+      semantic fact, lifecycle, or state machine, contradictory state can arise and weaken both
       usability and evidence validity.
     confidence: 0.995
     source_class: accepted_authority
