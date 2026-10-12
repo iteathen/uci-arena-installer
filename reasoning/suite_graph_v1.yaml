@@ -4,6 +4,7 @@ version: 1
 status: initial_owner_directed
 owner: uci_arena_suite
 methodology: reasoning/README.md
+concern_census: reasoning/concern_census_v1.yaml
 
 authority:
   behavioral_specs_remain_authoritative: true
@@ -142,25 +143,6 @@ premises:
       ground instrumentation must therefore be bounded and its effect considered.
     confidence: 0.94
     source_class: strong_derivation
-  - id: G-P11
-    statement: >
-      Supporting qualities such as modularity, performance, durability, observability,
-      portability, and maintainability have value because they serve G-O1/G-O2 or an
-      authority gate; they are not independent top-level purposes by default.
-    confidence: 0.99
-    source_class: explicit_owner
-  - id: G-P12
-    statement: >
-      Material design choices introduce implicit assertions about causality, sufficiency,
-      scope, or interaction even when those assertions are not written down.
-    confidence: 0.98
-    source_class: explicit_owner
-  - id: G-P13
-    statement: >
-      Dominance and importance relations are contextual beliefs rather than static total
-      orderings; contrary evidence can revise them inside the hard-gate envelope.
-    confidence: 0.999
-    source_class: explicit_owner
   - id: G-P15
     statement: >
       Shared-resource background acquisition, analysis, maintenance, concurrency, and
@@ -264,6 +246,32 @@ premises:
     confidence: 0.999
     source_class: accepted_authority
 
+premise_metadata:
+  G-P1: {kind: empirical_regular, concern_areas: [C03, C04]}
+  G-P2: {kind: empirical_regular, concern_areas: [C06]}
+  G-P3: {kind: empirical_regular, concern_areas: [C04, C06]}
+  G-P4: {kind: structural, concern_areas: [C08]}
+  G-P5: {kind: structural, concern_areas: [C06, C08]}
+  G-P6: {kind: structural, concern_areas: [C04, C09]}
+  G-P7: {kind: empirical_regular, concern_areas: [C10]}
+  G-P8: {kind: empirical_regular, concern_areas: [C04, C12]}
+  G-P9: {kind: empirical_regular, concern_areas: [C04, C09]}
+  G-P10: {kind: empirical_regular, concern_areas: [C07]}
+  G-P15: {kind: material_risk, concern_areas: [C07]}
+  G-P16: {kind: structural, concern_areas: [C02, C03, C06, C07]}
+  G-P17: {kind: structural, concern_areas: [C03, C04, C07]}
+  G-P18: {kind: empirical_regular, concern_areas: [C04]}
+  G-P19: {kind: structural, concern_areas: [C04]}
+  G-P20: {kind: structural, concern_areas: [C01, C06, C08, C09]}
+  G-P21: {kind: structural, concern_areas: [C03, C05, C08, C09, C10]}
+  G-P22: {kind: material_risk, concern_areas: [C03, C08, C09]}
+  G-P23: {kind: material_risk, concern_areas: [C08, C10, C11]}
+  G-P24: {kind: structural, concern_areas: [C03, C04, C06]}
+  G-P25: {kind: structural, concern_areas: [C02, C04, C07]}
+  G-P26: {kind: empirical_regular, concern_areas: [C03, C04, C06]}
+  G-P27: {kind: structural, concern_areas: [C01, C02, C04]}
+  G-P28: {kind: structural, concern_areas: [C04, C06, C07]}
+
 implicit_assertions:
   - id: G-A1
     statement: >
@@ -287,13 +295,13 @@ implicit_assertions:
     statement: >
       A component may optimize its internals only while preserving the suite-level outcomes
       and interface assumptions on which other components rely.
-    derived_from: [G-P4, G-P13]
+    derived_from: [G-P4]
     confidence: 0.97
   - id: G-A5
     statement: >
       A fix that satisfies one subordinate target can still be a regression when it weakens a
       more strongly supported global target.
-    derived_from: [G-P8, G-P12, G-P13]
+    derived_from: [G-P8]
     confidence: 0.995
   - id: G-A6
     statement: >
@@ -320,12 +328,6 @@ implicit_assertions:
       useful competitive experiments available to the Arena.
     derived_from: [G-P5, G-P2]
     confidence: 0.93
-  - id: G-A10
-    statement: >
-      A suite feature without a credible derivation to G-O1, G-O2, or an authority gate is
-      presumptively accidental complexity.
-    derived_from: [G-P11]
-    confidence: 0.96
   - id: G-A11
     statement: >
       Historical failures must remain distinguishable from later success rather than being
@@ -430,6 +432,33 @@ implicit_assertions:
     derived_from: [G-P28]
     confidence: 0.999
 
+assertion_metadata:
+  G-A1: {inference: conditional, boundary: "Internal-only testing can still be useful and strong within its declared distribution; this does not prove every external environment is representative."}
+  G-A2: {inference: structural, boundary: "External games remain genuine whole-system performance evidence even when they do not isolate causality."}
+  G-A3: {inference: structural, boundary: "Suite-level interface reasoning does not transfer component-internal semantic ownership to the suite graph."}
+  G-A4: {inference: conditional, boundary: "Components retain freedom to optimize internally when exported assumptions and suite outcomes are preserved."}
+  G-A5: {inference: conditional, boundary: "A local repair is not presumed wrong; the assertion requires an actual negative effect on a better-supported target."}
+  G-A6: {inference: structural, boundary: "No particular block count, timing formula, or allocation strategy follows from this distinction."}
+  G-A7: {inference: conditional, boundary: "Reproducible deployment is necessary context for comparison but does not itself establish chess strength."}
+  G-A8: {inference: structural, boundary: "Presentation may be simplified when meaningful state, experiment identity, and failure semantics remain intact."}
+  G-A9: {inference: conditional, boundary: "Substitutability increases experimental breadth but does not itself prove independence, quality, or fairness."}
+  G-A11: {inference: structural, boundary: "Historical evidence remains auditable without retaining obsolete behavior as current authority."}
+  G-A12: {inference: conditional, boundary: "Diagnostics are not disfavored categorically; only material perturbation must be accounted for."}
+  G-A13: {inference: structural, boundary: "Scoped ratings and scores remain useful descriptions inside the population and conditions they actually measure."}
+  G-A14: {inference: structural, boundary: "A comparison can still be causal when the experimental design explicitly balances or models the material asymmetries."}
+  G-A15: {inference: conditional, boundary: "Repeated use does not make a benchmark worthless; it changes its authority from untouched final validation toward discovery evidence."}
+  G-A16: {inference: structural, boundary: "Inconclusive evidence can still guide future experiment design; it simply cannot support an equivalence claim it was not powered to establish."}
+  G-A17: {inference: structural, boundary: "Only behavior-affecting drift matters to experiment identity; unrelated provenance changes need not invalidate semantic evidence."}
+  G-A18: {inference: structural, boundary: "Whole-system failures count against practical competitiveness while causal attribution remains owner-specific."}
+  G-A19: {inference: structural, boundary: "A narrow population can still yield precise and useful in-scope evidence."}
+  G-A20: {inference: structural, boundary: "The system need not exhaustively test every imaginable alternative before selecting among a declared candidate set."}
+  G-A21: {inference: structural, boundary: "Automation is compatible with usability when it preserves explicit operator intent and experiment identity."}
+  G-A22: {inference: structural, boundary: "Proxy improvements may be valuable intermediate mechanisms when downstream evidence supports their relationship to chess outcome."}
+  G-A23: {inference: structural, boundary: "A transition can be experimentally valid when the transition itself is the declared treatment and is represented in the evidence."}
+  G-A24: {inference: structural, boundary: "Determinism reduces one source of variance but does not automatically remove opponent, scheduling, runtime, or environment uncertainty."}
+  G-A25: {inference: structural, boundary: "Shared implementation checks may still catch defects; they simply do not supply independent-oracle authority by themselves."}
+  G-A26: {inference: structural, boundary: "Lower evidence classes remain useful for the properties they actually exercise and should not be discarded."}
+
 implementation_targets:
   - id: G-T1
     name: valid_competition_truth
@@ -523,6 +552,30 @@ implementation_targets:
       externally operated engines without treating isolated wins as proof.
     supports: [G-O1, G-M2]
 
+target_semantics:
+  status: problem_characterized
+  solution_selected_by_reasoning_graph: false
+  rule: >
+    Targets state conditions to satisfy, not required mechanisms. Current specifications and
+    implementations may realize a target through one particular mechanism without making that
+    mechanism part of the target's upstream meaning.
+
+causal_relations:
+  - {id: G-C1, cause: G-T1, effect: G-T2, relation: necessary_condition, confidence: 0.99}
+  - {id: G-C2, cause: G-T1, effect: G-T3, relation: necessary_condition, confidence: 0.99}
+  - {id: G-C3, cause: G-T2, effect: G-T4, relation: enabler, confidence: 0.96}
+  - {id: G-C4, cause: G-T3, effect: G-T4, relation: complementary_external_evidence, confidence: 0.94}
+  - {id: G-C5, cause: G-T4, effect: G-T13, relation: necessary_condition, confidence: 0.99}
+  - {id: G-C6, cause: G-T13, effect: G-O1, relation: feedback_improvement_path, confidence: 0.95}
+  - {id: G-C7, cause: G-T5, effect: G-T11, relation: enabler, confidence: 0.95}
+  - {id: G-C8, cause: G-T6, effect: G-T2, relation: necessary_condition_for_composed_validity, confidence: 0.97}
+  - {id: G-C9, cause: G-T6, effect: G-T3, relation: necessary_condition_for_composed_validity, confidence: 0.97}
+  - {id: G-C10, cause: G-T8, effect: G-T2, relation: enabler, confidence: 0.94}
+  - {id: G-C11, cause: G-T9, effect: G-T4, relation: enabler, confidence: 0.92}
+  - {id: G-C12, cause: G-T10, effect: G-T2, relation: validity_preserver, confidence: 0.96}
+  - {id: G-C13, cause: G-T7, effect: G-T11, relation: enabler, confidence: 0.90}
+  - {id: G-C14, cause: G-T3, effect: G-T15, relation: necessary_condition, confidence: 0.98}
+
 target_derivations:
   G-T1: [G-O1, G-P4, G-P17, G-P20, G-P23, G-P27, G-P28]
   G-T2: [G-O1, G-P1, G-P17, G-P21, G-P22, G-P26]
@@ -535,7 +588,7 @@ target_derivations:
   G-T9: [G-O1, G-O2, G-P7, G-P20, G-P23]
   G-T10: [G-O1, G-P10, G-P15, G-P17]
   G-T11: [G-O1, G-O2, G-P5, G-P7, G-P16]
-  G-T12: [G-O1, G-O2, G-P4, G-P11, G-P23]
+  G-T12: [G-O1, G-O2, G-P4, G-P23]
   G-T13: [G-O1, G-P6, G-P9, G-P18, G-P19, G-P25]
   G-T14: [G-O2, G-P21, G-P23]
   G-T15: [G-O1, G-P2, G-P3, G-P16, G-P18, G-P24, G-P26, G-P27, G-P28]
@@ -550,7 +603,6 @@ assertion_relevance:
   G-A7: [G-T2, G-T4, G-T6, G-T12]
   G-A8: [G-T7, G-T9, G-T14]
   G-A9: [G-T3, G-T5, G-T11]
-  G-A10: [G-T11, G-T12]
   G-A11: [G-T4, G-T13]
   G-A12: [G-T9, G-T10]
   G-A13: [G-T3, G-T4, G-T15]
@@ -573,60 +625,80 @@ dominance_relations:
     stronger: G-T1
     weaker: G-T11
     context: feature_breadth_conflicts_with_result_validity
+    strength: strict_necessary_condition
+    basis: [G-P17, G-A14]
     confidence: 0.999
     consequence: critical
   - id: G-D2
     stronger: G-T4
     weaker: G-T11
     context: adding_features_requires_weakening_evidence_claims
+    strength: strong_conditional
+    basis: [G-P6, G-P28, G-A26]
     confidence: 0.99
     consequence: major
   - id: G-D3
     stronger: G-T14
     weaker: G-T7
     context: convenience_requires_weakening_user_or_credential_authority
+    strength: strict_necessary_condition
+    basis: [G-P21, G-P23, G-A21]
     confidence: 0.999
     consequence: critical
   - id: G-D4
     stronger: G-T6
     weaker: G-T7
     context: local_shortcut_breaks_cross_component_contract_truth
+    strength: strong_conditional
+    basis: [G-P4, G-P23, G-A3, G-A4]
     confidence: 0.97
     consequence: major
   - id: G-D5
     stronger: G-T10
     weaker: G-T9
     context: benchmark_diagnostics_materially_perturb_foreground_behavior
+    strength: strong_conditional
+    basis: [G-P10, G-P15, G-A12]
     confidence: 0.93
     consequence: major
   - id: G-D6
     stronger: G-T8
     weaker: G-T11
     context: new_feature_materially_weakens_recovery_or_runtime_continuity
+    strength: strong_conditional
+    basis: [G-P20, G-P22, G-A18]
     confidence: 0.94
     consequence: major
   - id: G-D7
     stronger: G-T5
     weaker: G-T7
     context: convenience_hardcodes_one_engine_or_provider_and_harms_arena_generality
+    strength: partial_defeasible
+    basis: [G-P5, G-A9]
     confidence: 0.91
     consequence: moderate
   - id: G-D8
     stronger: G-T4
     weaker: G-T13
     context: faster_iteration_requires_unqualified_or_contaminated_evidence
+    strength: strict_necessary_condition
+    basis: [G-P6, G-P18, G-P19, G-A16]
     confidence: 0.995
     consequence: critical
   - id: G-D9
     stronger: G-T1
     weaker: G-T15
     context: elite_result_claim_requires_relaxing_legality_clock_identity_or_result_truth
+    strength: strict_necessary_condition
+    basis: [G-P17, G-P20, G-A18]
     confidence: 0.999
     consequence: critical
   - id: G-D10
     stronger: G-T12
     weaker: G-T7
     context: short_term_convenience_creates_recurring_cross_component_rewrite_cost
+    strength: partial_defeasible
+    basis: [G-P4, G-P23]
     confidence: 0.86
     consequence: moderate
 
