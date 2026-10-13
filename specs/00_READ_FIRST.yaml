@@ -33,8 +33,12 @@ principles:
     - The installer engine and product composition have independent versions.
     - Composition pins exact component versions, artifacts, manifests,
       provenance, and compatibility.
-    - Read-only pull-request CI is enabled; release activity is explicit and private until
-      approved.
+    - Public source repositories use read-only pull-request CI; neither a
+      green CI result nor repository visibility authorizes release publication.
+    - Release signing and publication are separate explicitly approved actions.
+      Draft candidates remain unpublished until separately authorized; published
+      prerelease assets in a public repository are publicly accessible, but are
+      not thereby approved as stable suite releases.
 
 hard_rules:
   - Strong cross-platform immutability and persisted-layout parity are target
