@@ -2186,6 +2186,28 @@ transaction:
   installed_engine_handoff:
     owner: arena_setup
     rules:
+      - A manifest dependency binding with source configuration forwards the
+        current object returned by the receipt-selected component's verified
+        installer-integration renderer. It uses the current declared workspace,
+        dependency paths and saved locators, never stale stored configuration.
+        Installer does not interpret the returned component-owned fields.
+      - Configuration dependency projection requires a managed receipt, exact
+        component/version root and declared configuration workspace, full
+        component-payload validation, and a public renderer. An absent optional
+        dependency may be omitted; present invalid authority fails. Cycles,
+        depth beyond sixteen renderers, more than sixty-four renderer calls or
+        a context larger than one MiB fail before consumer configuration activation.
+      - Configuration producer roots and ancestors must not be linked. Windows
+        holds a native directory admission across projection and verifies the
+        open object and path binding again before accepting its output.
+        A present unusable producer selects its verified configuration consumers
+        for failing projection even when its invalid payload cannot establish
+        the relevant locator inputs; no saved authority commits with stale output.
+      - A locator-triggered refresh includes the bounded transitive closure of
+        configuration dependencies independent of receipt filename order.
+        One refresh memoizes each exact component/root/workspace/enabled render
+        so consumers and the producer's generated documents/configuration use
+        the same snapshot of public producer output within existing rollback.
       - Saved opening-book and Syzygy locators are revalidated immediately
         before a generated consumer configuration is activated.
       - A flat opening-book directory selects strong_rare_v1.bin when present;

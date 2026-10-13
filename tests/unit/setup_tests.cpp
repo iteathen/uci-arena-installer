@@ -2431,6 +2431,160 @@ TEST_CASE("locator imports refresh only manifest-declared provider consumers") {
     fs::remove_all(root);
 }
 
+TEST_CASE("dependency configuration binding renders fresh public configuration rather than stale stored bytes") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path consumer = write_mock_renderer_consumer(paths, "a.configuration.consumer", "timing_profile");
+    const fs::path producer = write_mock_renderer_consumer(paths, "z.configuration.producer", "uci_engine");
+    const fs::path producer_receipt_path = paths.data_root / "receipts" / "z.configuration.producer.json";
+    json producer_receipt = json::parse(std::ifstream(producer_receipt_path));
+    producer_receipt["state"] = "installed_managed";
+    std::ofstream(producer_receipt_path) << producer_receipt.dump(2);
+    const fs::path manifest_path = paths.install_root / "components" /
+                                  "a.configuration.consumer" / "1.0.0" / "arena-component.json";
+    json manifest = json::parse(std::ifstream(manifest_path));
+    manifest["dependencies"].push_back("z.configuration.producer");
+    manifest["installer_integration"]["dependency_bindings"].push_back({
+        {"name", "producerConfiguration"}, {"component_id", "z.configuration.producer"},
+        {"source", "configuration"}, {"required", true}});
+    std::ofstream(manifest_path) << manifest.dump(2);
+    std::ofstream(producer) << R"({"schema":"stale-stored-configuration","unselected":true})";
+    const json imported = SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH);
+    REQUIRE(imported.at("refreshed_consumers") ==
+            json::array({"a.configuration.consumer", "z.configuration.producer"}));
+    const json generated = json::parse(std::ifstream(consumer));
+    const json selected = generated.at("bindings").at("producerConfiguration");
+    REQUIRE(selected.at("schema") == "replaceable_provider_configuration_v1");
+    REQUIRE(selected.at("enabled") == true);
+    REQUIRE(selected.at("locators").at("selected") ==
+            fs::absolute(ARENA_MOCK_UCI_PATH).lexically_normal().string());
+    REQUIRE_FALSE(selected.contains("unselected"));
+    REQUIRE(selected == json::parse(std::ifstream(producer)));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("dependency configuration rejects cycles without replacing saved authority or consumer bytes") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(paths, "cyclic.configuration", "uci_engine");
+    const fs::path receipt_path = paths.data_root / "receipts" / "cyclic.configuration.json";
+    json receipt = json::parse(std::ifstream(receipt_path));receipt["state"] = "installed_managed";
+    std::ofstream(receipt_path) << receipt.dump(2);
+    const fs::path manifest_path = paths.install_root / "components" /
+                                  "cyclic.configuration" / "1.0.0" / "arena-component.json";
+    json manifest = json::parse(std::ifstream(manifest_path));
+    manifest["dependencies"].push_back("cyclic.configuration");
+    manifest["installer_integration"]["dependency_bindings"].push_back({
+        {"name", "cycle"}, {"component_id", "cyclic.configuration"},
+        {"source", "configuration"}, {"required", true}});
+    std::ofstream(manifest_path) << manifest.dump(2);
+    try {
+        static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+        FAIL("cyclic configuration dependency was admitted");
+    } catch (const std::runtime_error& failure) {
+        REQUIRE(std::string(failure.what()).find("configuration dependency cycle") != std::string::npos);
+    }
+    REQUIRE(json::parse(std::ifstream(configuration)).at("schema") == "old");
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "uci_engine.json"));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("dependency configuration omits an absent optional producer but rejects a present corrupted producer") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path configuration = write_mock_renderer_consumer(paths, "optional.configuration.consumer", "uci_engine");
+    const fs::path manifest_path = paths.install_root / "components" /
+                                  "optional.configuration.consumer" / "1.0.0" / "arena-component.json";
+    json manifest = json::parse(std::ifstream(manifest_path));
+    manifest["installer_integration"]["dependency_bindings"].push_back({
+        {"name", "optionalConfiguration"}, {"component_id", "optional.configuration.producer"},
+        {"source", "configuration"}, {"required", false}});
+    std::ofstream(manifest_path) << manifest.dump(2);
+    static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    const json baseline = json::parse(std::ifstream(configuration));
+    const fs::path locator = paths.data_root / "locators" / "uci_engine.json";
+    const json saved_locator = json::parse(std::ifstream(locator));
+    REQUIRE_FALSE(baseline.at("bindings").contains("optionalConfiguration"));
+    const fs::path producer = write_mock_renderer_consumer(paths, "optional.configuration.producer", "timing_profile");
+    const fs::path receipt_path = paths.data_root / "receipts" / "optional.configuration.producer.json";
+    json receipt = json::parse(std::ifstream(receipt_path));receipt["state"] = "installed_managed";
+    std::ofstream(receipt_path) << receipt.dump(2);
+    const fs::path renderer = paths.install_root / "components" /
+                              "optional.configuration.producer" / "1.0.0" / "installer-integration.fixture";
+    std::ofstream(renderer) << "corrupted inventoried bytes";
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    REQUIRE(json::parse(std::ifstream(configuration)) == baseline);
+    REQUIRE(json::parse(std::ifstream(producer)).at("schema") == "old");
+    REQUIRE(json::parse(std::ifstream(locator)) == saved_locator);
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("dependency configuration rejects a corrupted transitive-only locator producer before committing authority") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path consumer = write_mock_renderer_consumer(paths, "a.transitive.consumer", "timing_profile");
+    const fs::path producer = write_mock_renderer_consumer(paths, "z.transitive.producer", "uci_engine");
+    const fs::path receipt_path = paths.data_root / "receipts" / "z.transitive.producer.json";
+    json receipt = json::parse(std::ifstream(receipt_path));receipt["state"] = "installed_managed";
+    std::ofstream(receipt_path) << receipt.dump(2);
+    const fs::path consumer_manifest_path = paths.install_root / "components" /
+                                          "a.transitive.consumer" / "1.0.0" / "arena-component.json";
+    json manifest = json::parse(std::ifstream(consumer_manifest_path));
+    manifest["dependencies"].push_back("z.transitive.producer");
+    manifest["installer_integration"]["dependency_bindings"].push_back({
+        {"name", "producerConfiguration"}, {"component_id", "z.transitive.producer"},
+        {"source", "configuration"}, {"required", true}});
+    std::ofstream(consumer_manifest_path) << manifest.dump(2);
+    const fs::path renderer = paths.install_root / "components" /
+                              "z.transitive.producer" / "1.0.0" / "installer-integration.fixture";
+    std::ofstream(renderer) << "corrupted transitive-only producer";
+    REQUIRE_THROWS(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH));
+    REQUIRE(json::parse(std::ifstream(consumer)).at("schema") == "old");
+    REQUIRE(json::parse(std::ifstream(producer)).at("schema") == "old");
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "uci_engine.json"));
+    remove_locator_test_directory(root);
+}
+
+TEST_CASE("dependency configuration rejects a linked version root before producer execution") {
+    const fs::path root = temporary_directory();
+    const SetupPaths paths = paths_under(root);
+    const fs::path consumer = write_mock_renderer_consumer(paths, "linked.configuration.consumer", "uci_engine");
+    static_cast<void>(write_mock_renderer_consumer(paths, "linked.configuration.producer", "timing_profile"));
+    const fs::path receipt_path = paths.data_root / "receipts" / "linked.configuration.producer.json";
+    json receipt = json::parse(std::ifstream(receipt_path));receipt["state"] = "installed_managed";
+    std::ofstream(receipt_path) << receipt.dump(2);
+    const fs::path consumer_manifest_path = paths.install_root / "components" /
+                                          "linked.configuration.consumer" / "1.0.0" / "arena-component.json";
+    json manifest = json::parse(std::ifstream(consumer_manifest_path));
+    manifest["dependencies"].push_back("linked.configuration.producer");
+    manifest["installer_integration"]["dependency_bindings"].push_back({
+        {"name", "producerConfiguration"}, {"component_id", "linked.configuration.producer"},
+        {"source", "configuration"}, {"required", true}});
+    std::ofstream(consumer_manifest_path) << manifest.dump(2);
+    const fs::path version_root = paths.install_root / "components" / "linked.configuration.producer" / "1.0.0";
+    const fs::path redirected = root / "redirected-producer";
+    fs::rename(version_root, redirected);
+    std::error_code link_error;fs::create_directory_symlink(redirected, version_root, link_error);
+    if (link_error) {
+        INFO(link_error.message());
+        bool unavailable = link_error == std::errc::operation_not_permitted || link_error == std::errc::permission_denied;
+#ifdef _WIN32
+        unavailable = unavailable || link_error.value() == ERROR_PRIVILEGE_NOT_HELD;
+#endif
+        REQUIRE(unavailable);
+        remove_locator_test_directory(root);SKIP("directory-link creation is unavailable on this host");
+    }
+    bool rejected = false;
+    try { static_cast<void>(SetupEngine::import_path(paths, "uci_engine", ARENA_MOCK_UCI_PATH)); }
+    catch (const std::exception&) { rejected = true; }
+    fs::remove(version_root); // Remove the owned link before recursive fixture cleanup.
+    REQUIRE(rejected);
+    REQUIRE(json::parse(std::ifstream(consumer)).at("schema") == "old");
+    REQUIRE_FALSE(fs::exists(paths.data_root / "locators" / "uci_engine.json"));
+    REQUIRE(fs::is_regular_file(redirected / "installer-integration.fixture"));
+    remove_locator_test_directory(root);
+}
+
 TEST_CASE("explicit locator clear revokes a UCI override and retains the managed profile") {
     const fs::path root = temporary_directory();
     const SetupPaths paths = paths_under(root);
