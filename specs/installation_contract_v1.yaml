@@ -6,6 +6,26 @@ meta:
 
 authority:
   suite_release_repository: iteathen/uci-arena-installer
+  source_visibility_and_release_roles:
+    observation_date: '2026-10-12'
+    source_repositories_currently_public:
+      - iteathen/uci-arena-installer
+      - iteathen/UCI-Arena-Vector
+      - iteathen/uci-arena-manager
+      - iteathen/uci-arena-lichess-bot
+      - iteathen/uci-arena-book-forge
+      - iteathen/uci-arena-evidence-service
+      - iteathen/uci-arena-syzygy-root-provider
+    ci: read_only_pull_request_and_main_push_qualification
+    release_candidate_generation: separately_authorized_explicit_dispatch
+    current_release_authority: specs/release_provenance_v1.yaml
+    rules:
+      - "Repository visibility is not signing, artifact trust, source approval, or authority to promote a suite release."
+      - "A published non-draft prerelease in a public repository and its assets are publicly accessible; the prerelease flag is not a confidentiality boundary or stable approval."
+      - "Draft candidate release records remain distinct from published prereleases; do not publish drafts or bypass a producer's own release gate."
+      - "New release work uses the trust-policy, exact candidate evidence, and release lock v3 governed by release_provenance_v1; historical private-only GitHub v1/v2 paths are not current universal release policy."
+      - "Public CI and successful CodeQL jobs do not independently establish safe public release bytes, trusted provenance, signing authority, or installed/runtime qualification."
+      - "A repository-visibility transition does not grant permission to disclose credentials, change release trust, or waive artifact/asset security review."
   current_engine_selection:
     source: reviewed_versioned_product_composition_and_verified_release_lock
     reference_only:
@@ -64,12 +84,23 @@ authority:
       replaces original-provider identity or attestation verification.
     - Stable promotion republishes the exact tested candidate bytes and never rebuilds.
     - Build identities never receive private signing keys.
-    - Local pre-merge validation and the explicitly dispatched suite release
-      always run the lockfile-backed npm audit. Automatic GitHub dependency
-      review is disabled with continuous integration; feature availability
-      must never create an implicit hosted pull-request job.
+    - Local pre-merge validation and the separately authorized suite release
+      retain their lockfile-backed npm-audit requirements. Public read-only
+      pull-request and main-push CI is enabled; ordinary CI does not dispatch
+      signing, promotion, release publication, or credential-bearing operations.
+      GitHub dependency-review automation, if separately available, does not
+      become an implicit release-trust gate or authorize a release.
 
 signed_provenance:
+  historical_github_release_scope: >
+    The following legacy keyless v1/v2 candidate, private repository/mirror,
+    and publication vocabulary describes the earlier GitHub-specific release
+    path. In current public source repositories, the word private does not
+    make any non-draft published prerelease or its assets confidential. New
+    candidate provenance and suite release lock v3 are governed by the
+    specialized release_provenance_v1 specification. Historical identifiers,
+    digests and compatibility formats remain unchanged; no existing private
+    trust or release approval gate is waived by this descriptive distinction.
   repository_visibility: private
   implementation: sigstore_cosign_keyless
   cosign_version: 3.0.6
@@ -778,14 +809,15 @@ packaging:
     source_requirement: clean_tracked_worktree
     behavior:
       - Run specification and model/product naming gates before compilation.
-      - Automatic GitHub Actions validation is disabled for pull requests,
-        pushes, merge queues, and schedules in every private UCI Arena
-        repository. Required checks run locally before a pull request is
-        merged, and the pull request records the exact commands and outcomes.
-      - Release and provenance workflows are separate from continuous
-        integration. They accept workflow_dispatch only, run solely after an
-        explicit operator request, and are never configured as automatically
-        required pull-request status checks.
+      - The previous private-repository no-hosted-CI posture is historical.
+        The public Installer and provider repositories now use read-only
+        pull-request and main-push CI with required checks. Reviewers must
+        still record the exact evidence needed for claims beyond those checks.
+      - Release and provenance signing or publication are separate from
+        ordinary CI, require their declared explicit operator authorization,
+        and never inherit approval from a green pull-request status check.
+        Historical workflow_dispatch-only release contracts keep their
+        original exact workflow, source and trigger meanings.
       - Acquire and verify one immutable Manager component candidate and one
         Installer runtime candidate per target. Platform integration overlays
         are Installer-owned data applied only after both manifests validate.
@@ -894,9 +926,11 @@ packaging:
         candidates for both platforms, validates their manifests and provenance,
         runs the acceptance gates, and emits the complete installer sets from
         the accepted bytes.
-      - Provider artifacts from every lock-allowlisted private repository
-        remain immutable component candidates. They never satisfy or replace a
-        suite installer artifact.
+      - Provider artifacts from every exact trusted, lock-allowlisted
+        repository remain immutable component candidates regardless of source
+        visibility. Release eligibility requires all declared provenance,
+        manifest, source, digest and compatibility gates; candidate assets
+        never satisfy or replace a suite installer artifact.
       - Unsigned local artifacts are development installers, not official
         releases. Signing, stable promotion, and protected acceptance remain
         protected-CI-only operations over the exact accepted bytes.
