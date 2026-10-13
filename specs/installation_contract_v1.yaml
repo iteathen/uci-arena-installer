@@ -8,8 +8,10 @@ authority:
   suite_release_repository: iteathen/uci-arena-installer
   current_engine_selection:
     source: reviewed_versioned_product_composition_and_verified_release_lock
-    current_product_repository: iteathen/UCI-Arena-Vector
-    current_product_component: uci_arena.vector
+    reference_only:
+      observed_composition_on_2026_10_12: compositions/complete-arena-0.3.63.json
+      observed_repository: iteathen/UCI-Arena-Vector
+      observed_component: uci_arena.vector
     rules:
       - "The selected product composition and exact compatible release lock determine which engine is packaged; static candidate inventories and native executable names do not."
       - "The cancelled native uci_arena.engine product is not a fallback for Vector, even when historical component and provenance records remain valid."
@@ -1213,10 +1215,11 @@ components:
   complete_arena_record_scope: >
     The static complete_arena entries below record a legacy compatibility/profile
     vocabulary; they do not select components for a current deployment and do not
-    license insertion of the cancelled uci_arena.engine. Active components, source
-    repositories, defaults and dependencies are selected from the exact reviewed
+    license insertion of the cancelled uci_arena.engine. Eligible component identities,
+    sources, declared defaults and dependencies come from the exact reviewed
     versioned product composition, its provider manifests and its compatible
-    verified release lock. Retain historic identities for older receipts.
+    verified release lock. Actual installation follows the authorized preset or
+    operator selection and its validated plan. Retain historic identities for older receipts.
   complete_arena:
     - manager.core
     - uci_arena.engine
