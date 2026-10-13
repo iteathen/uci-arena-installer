@@ -141,7 +141,9 @@ release/
 
 The component manifest declares identity, version, artifact, entrypoints, working directory, health checks, owned/preserved/generated paths, prerequisites, required components, minimum installer, and Manager API compatibility. Each provider owns its manifest content. Installer owns composition, compatibility resolution, and deployment mechanics.
 
-Example shape:
+Historical native-engine shape illustration only (not the selected Vector
+manifest or a current release candidate; exact active identities come from the
+reviewed product composition and verified component manifests):
 
 ```yaml
 component:

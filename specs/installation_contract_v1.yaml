@@ -6,10 +6,24 @@ meta:
 
 authority:
   suite_release_repository: iteathen/uci-arena-installer
+  current_engine_selection:
+    source: reviewed_versioned_product_composition_and_verified_release_lock
+    reference_only:
+      observed_composition_on_2026_10_12: compositions/complete-arena-0.3.63.json
+      observed_repository: iteathen/UCI-Arena-Vector
+      observed_component: uci_arena.vector
+    rules:
+      - "The selected product composition and exact compatible release lock determine which engine is packaged; static candidate inventories and native executable names do not."
+      - "The cancelled native uci_arena.engine product is not a fallback for Vector, even when historical component and provenance records remain valid."
+      - "A future conforming engine may be explicitly selected by reviewed composition without product-name branches in Installer."
+      - "Independent SDK, referee, process, timing and evidence-runtime contracts retain their own exact identities; this selection rule does not retire them."
   component_candidate_repositories:
     manager:
       repository: iteathen/uci-arena-manager
       components: [manager.core]
+    # Historical native candidate inventory (iteathen/UCI_Arena redirects to
+    # iteathen/uci-arena-engine); this is not current chess/search selection.
+    # Independently owned retained contracts/artifacts keep their original identity.
     uci_arena:
       repository: iteathen/UCI_Arena
       components:
@@ -65,6 +79,12 @@ signed_provenance:
   oidc_issuer: https://token.actions.githubusercontent.com
   provider_candidates:
     predicate_type: https://uci-arena.example/attestations/provider-release-result/v1
+    legacy_trusted_provider_scope: >
+      This static trusted_providers list retains the earlier provider-result v1/v2
+      workflow and historical provenance meaning. New release work uses the
+      component owners, reviewed composition, trusted-producer policy and exact
+      release lock v3 under release_provenance_v1; the legacy uci_arena entry is
+      not a current Vector release producer or engine-selection fallback.
     trusted_providers:
       manager:
         repository: iteathen/uci-arena-manager
@@ -670,6 +690,8 @@ setup:
       - uci_arena_evidence.service
       - lichess.adapter
     selected_product_profile:
+      # The pinned 0.3.55 profile is a retained example, not the selection for
+      # every later release. Its actual package uses its reviewed composition/lock.
       composition: compositions/complete-arena-0.3.55.json
       feature_policy: packaging/windows/suite-bundle.json
       historical_compositions: immutable separately versioned composition data
@@ -1190,6 +1212,14 @@ packaging:
 components:
   required:
     - manager.core
+  complete_arena_record_scope: >
+    The static complete_arena entries below record a legacy compatibility/profile
+    vocabulary; they do not select components for a current deployment and do not
+    license insertion of the cancelled uci_arena.engine. Eligible component identities,
+    sources, declared defaults and dependencies come from the exact reviewed
+    versioned product composition, its provider manifests and its compatible
+    verified release lock. Actual installation follows the authorized preset or
+    operator selection and its validated plan. Retain historic identities for older receipts.
   complete_arena:
     - manager.core
     - uci_arena.engine
@@ -1232,9 +1262,11 @@ components:
     - Catalog fields declare default activation, capacity-degraded activation,
       and whether installed bytes are also copied to the knowledge activation
       root. Product identities never select any of those planner behaviors.
-    - The validated default model is an immutable runtime asset inside the
-      uci_arena.engine provider component and is not selected as a nonexistent
-      independent catalog component.
+    - When a selected engine component embeds a validated default model, that
+      model remains an immutable asset of its exact provider manifest; Installer
+      does not invent a separate model component. The earlier uci_arena.engine
+      packaging assumption applies only to historical native component records,
+      not as a current Vector source-selection rule.
     - The Lichess adapter payload is installed disabled. Credentials are not
       accessed and per-user startup is not registered until explicit bot onboarding.
   optional:
@@ -1502,7 +1534,13 @@ discovery:
   registration_after_detection: explicit_only
   engine_probe: [process_launch, uciok, readyok, typed_options, legal_startpos_bestmove]
   engine_naming:
+    # Retained native executable discovery aliases, not current product selection.
     uci_arena_executable_names: [uci_arena_engine.exe, uci_arena_engine]
+    current_discovery_authority: >
+      Installed engines are identified by verified component-manifest discovery
+      declarations and exact receipt/selection identity. These legacy executable
+      names do not substitute for a current Vector manifest or an explicit
+      operator-selected conforming external UCI engine.
     model_branded_executable_aliases: forbidden
     rule: >
       Model package labels are not product identities and never participate in
@@ -1608,6 +1646,12 @@ vm_mounts:
   local_ephemeral_component_runner:
     implementation: tools/release/invoke-local-ephemeral-release.ps1
     scope: manually_dispatched_private_component_candidate_only
+    native_engine_dependency_scope: >
+      The ONNX Runtime/model URL and SHA-256 requirements described below are
+      specific to an explicitly selected historical uci_arena.engine native
+      candidate. They do not become Vector release or deployment prerequisites.
+      Current provider qualification remains governed by its owning contract
+      and exact selected component identity.
     official_suite_release_authority: false
     rules:
       - One command performs clean-tree, exact-head, component-version,
@@ -2266,9 +2310,11 @@ acceptance:
     proving that no CMake configure, native compilation, MSI build, Burn build,
     or installer-envelope composition entrypoint was invoked.
   - Local component-release preflight rejects version drift, a missing runner
-    label, missing required uci_arena.engine ONNX Runtime or model input pairs,
-    Git Bash or PowerShell module-path breakage, and an unclean or stale source
-    head before candidate creation, runner registration, or workflow dispatch.
+    label, Git Bash or PowerShell module-path breakage, and an unclean or stale
+    source head before candidate creation, runner registration, or workflow dispatch.
+    For an explicitly selected historical uci_arena.engine native release only,
+    missing required ONNX Runtime or model input pairs also block preflight;
+    this is not a Vector qualification requirement.
   - Local component-release preflight rejects an unmerged release ref by
     default, rejects a stale local main, and labels the explicit unmerged
     override diagnostic-only.
