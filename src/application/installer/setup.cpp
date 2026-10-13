@@ -1326,7 +1326,7 @@ void validate_provider_installer_integration(const json& manifest,
                 !safe_relative_path(binding.at("path").get<std::string>())) {
                 throw std::runtime_error("provider installer path binding is invalid");
             }
-        } else if (source != "active_root" || binding.size() != 4) {
+        } else if ((source != "active_root" && source != "configuration") || binding.size() != 4) {
             throw std::runtime_error("provider installer dependency source is invalid");
         }
         if (binding.at("required").get<bool>() &&
@@ -3806,9 +3806,57 @@ struct ProviderInstallResult {
     json generated_documents;
 };
 
+json configuration_dependency_receipt(const fs::path& receipts_root,
+                                      const std::string& component_id) {
+    const fs::path filename = receipts_root / (component_id + ".json");
+#ifdef _WIN32
+    auto identity = arena::platform::make_filesystem_identity();
+    const auto directory = identity->admit_directory(receipts_root);
+    const auto document = ExactDocumentReader{}.read_child(
+        *directory, filename.filename().generic_string(), {1048576, true});
+    return parse_bounded_json(document, {32, 65536, 4096, 4096, 4096, 65536, false});
+#else
+    // The current Linux receipt adapter remains pathname based. Bound this
+    // additive projection before parsing; do not claim Windows physical admission.
+    if (contains_symbolic_link(filename) || !fs::is_regular_file(filename) ||
+        fs::file_size(filename) > 1048576) {
+        throw std::runtime_error("configuration dependency receipt is unavailable or oversized");
+    }
+    std::ifstream input(filename, std::ios::binary);
+    std::string bytes(1048577, '\0');
+    input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    const auto count = input.gcount();
+    if (count < 2 || count > 1048576 || input.bad()) {
+        throw std::runtime_error("configuration dependency receipt exceeds its bounded input");
+    }
+    bytes.resize(static_cast<std::size_t>(count));
+    return json::parse(bytes);
+#endif
+}
+
 ProviderInstallResult render_provider_installation(
     const SetupPaths& paths, const json& manifest, const fs::path& component_root,
-    const fs::path& workspace, const bool enabled) {
+    const fs::path& workspace, const bool enabled,
+    std::vector<std::string> configuration_ancestry = {},
+    std::size_t* configuration_call_count = nullptr,
+    std::map<std::string, ProviderInstallResult>* configuration_cache = nullptr) {
+    std::size_t initial_call_count = 0;
+    std::map<std::string, ProviderInstallResult> initial_cache;
+    if (configuration_call_count == nullptr) configuration_call_count = &initial_call_count;
+    if (configuration_cache == nullptr) configuration_cache = &initial_cache;
+    const std::string current_component_id = manifest.at("component_id").get<std::string>();
+    if (std::ranges::find(configuration_ancestry, current_component_id) != configuration_ancestry.end()) {
+        throw std::runtime_error("configuration dependency cycle is invalid");
+    }
+    const std::string cache_key = json::array({current_component_id,
+        manifest.at("component_version"), component_root.string(), workspace.string(), enabled}).dump();
+    if (const auto prior = configuration_cache->find(cache_key); prior != configuration_cache->end()) {
+        return prior->second;
+    }
+    if (configuration_ancestry.size() >= 16 || ++*configuration_call_count > 64) {
+        throw std::runtime_error("configuration dependency traversal exceeds its bounded limit");
+    }
+    configuration_ancestry.push_back(current_component_id);
     const json& integration = manifest.at("installer_integration");
     const fs::path receipts_root = paths.data_root / "receipts";
     json bindings = json::object();
@@ -3816,9 +3864,52 @@ ProviderInstallResult render_provider_installation(
         const std::string name = binding.at("name").get<std::string>();
         const std::string component_id = binding.at("component_id").get<std::string>();
         const bool required = binding.at("required").get<bool>();
+        const std::string source = binding.at("source").get<std::string>();
+        const bool present_configuration = source == "configuration" &&
+            fs::exists(fs::symlink_status(receipts_root / (component_id + ".json")));
         try {
-            const std::string source = binding.at("source").get<std::string>();
-            if (source == "entrypoint") {
+            if (source == "configuration") {
+                const json receipt = configuration_dependency_receipt(receipts_root, component_id);
+                if (receipt.value("schema", "") != "arena_install_receipt_v1" ||
+                    receipt.value("component_id", "") != component_id ||
+                    receipt.value("state", "") != "installed_managed" ||
+                    !receipt.contains("component_version") || !receipt.at("component_version").is_string() ||
+                    !valid_identifier(receipt.at("component_version").get<std::string>())) {
+                    throw std::runtime_error("configuration dependency identity is invalid");
+                }
+                const std::string version = receipt.at("component_version").get<std::string>();
+                const fs::path root = normalized_absolute(receipt.at("active_root").get<std::string>());
+                const fs::path expected_root = normalized_absolute(
+                    paths.install_root / "components" / component_id / version);
+                if (root != expected_root || contains_symbolic_link(root) || !fs::is_directory(root)) {
+                    throw std::runtime_error("configuration dependency root is not receipt-owned or is linked");
+                }
+#ifdef _WIN32
+                auto root_identity = arena::platform::make_filesystem_identity();
+                const auto admitted_root = root_identity->admit_directory(root);
+#endif
+                const auto producer = validate_component_payload(root, component_id, version);
+                if (!producer.manifest.contains("installer_integration")) {
+                    throw std::runtime_error("configuration dependency has no public renderer");
+                }
+                const fs::path producer_workspace = provider_workspace(paths, producer.manifest.at("installer_integration"));
+                if (normalized_absolute(receipt.at("configuration_path").get<std::string>()) !=
+                    producer_workspace / "manager-config.json" || contains_symbolic_link(producer_workspace) ||
+                    !fs::is_directory(producer_workspace)) {
+                    throw std::runtime_error("configuration dependency workspace is not receipt-owned");
+                }
+                // Compose current inputs through the producer's verified public
+                // renderer. Stored configuration is never promoted as fresh authority.
+                bindings[name] = render_provider_installation(paths, producer.manifest, root,
+                    producer_workspace, true, configuration_ancestry,
+                    configuration_call_count, configuration_cache).configuration;
+#ifdef _WIN32
+                if (admitted_root->observe_open_object() != admitted_root->initial_observation() ||
+                    admitted_root->observe_path_binding() != arena::ports::PathBindingState::same_object) {
+                    throw std::runtime_error("configuration dependency root changed during projection");
+                }
+#endif
+            } else if (source == "entrypoint") {
                 bindings[name] = installed_entrypoint(
                     receipts_root, component_id,
                     binding.at("entrypoint").get<std::string>())
@@ -3841,7 +3932,7 @@ ProviderInstallResult render_provider_installation(
                 }
             }
         } catch (const std::exception&) {
-            if (required) {
+            if (required || present_configuration) {
                 throw;
             }
         }
@@ -3892,6 +3983,9 @@ ProviderInstallResult render_provider_installation(
         {"locators", std::move(locators)},
         {"locator_details", std::move(locator_details)},
     };
+    if (context.dump().size() > 1048576) {
+        throw std::runtime_error("provider installer context exceeds its bounded limit");
+    }
     const fs::path context_root = paths.cache_root / "provider-context";
     fs::create_directories(context_root);
     if (!within(paths.cache_root, context_root) || contains_symbolic_link(context_root)) {
@@ -3956,7 +4050,9 @@ ProviderInstallResult render_provider_installation(
                 "provider installer generated-document path is unsafe");
         }
     }
-    return {response.at("configuration"), response.at("generated_documents")};
+    ProviderInstallResult result{response.at("configuration"), response.at("generated_documents")};
+    configuration_cache->emplace(cache_key, result);
+    return result;
 }
 
 struct ImportWrite {
@@ -4019,6 +4115,12 @@ json refresh_provider_consumers(
         throw std::runtime_error("installed receipt inventory exceeds its bounded limit");
     }
     std::ranges::sort(receipt_paths);
+    struct RefreshProvider {
+        json receipt;
+        ValidatedComponentPayload payload;
+    };
+    std::vector<RefreshProvider> providers;
+    std::set<std::string> selected_components;
     for (const auto& receipt_path : receipt_paths) {
         json receipt;
         try {
@@ -4051,8 +4153,50 @@ json refresh_provider_consumers(
         if (!validated.manifest.contains("installer_integration")) {
             continue;
         }
+        if (matches(receipt, validated.manifest)) selected_components.insert(component_id);
+        providers.push_back({std::move(receipt), std::move(validated)});
+    }
+    std::set<std::string> valid_configuration_producers;
+    for (const auto& provider : providers) {
+        valid_configuration_producers.insert(provider.receipt.at("component_id").get<std::string>());
+    }
+    for (const auto& provider : providers) {
+        for (const auto& binding : provider.payload.manifest.at("installer_integration").at("dependency_bindings")) {
+            if (binding.at("source") != "configuration") continue;
+            const std::string producer_id = binding.at("component_id").get<std::string>();
+            if (!valid_configuration_producers.contains(producer_id) &&
+                fs::exists(fs::symlink_status(receipts_root / (producer_id + ".json")))) {
+                // A present unusable producer cannot establish which locator
+                // inputs are relevant. Force its verified consumers through
+                // fail-closed projection rather than committing a stale graph.
+                selected_components.insert(provider.receipt.at("component_id").get<std::string>());
+            }
+        }
+    }
+    // A producer's locator change also invalidates configurations projected by
+    // its consumers. Closure is independent of receipt filename ordering.
+    bool selection_changed = true;
+    while (selection_changed) {
+        selection_changed = false;
+        for (const auto& provider : providers) {
+            for (const auto& binding : provider.payload.manifest.at("installer_integration").at("dependency_bindings")) {
+                if (binding.at("source") == "configuration" &&
+                    selected_components.contains(binding.at("component_id").get<std::string>())) {
+                    selection_changed |= selected_components.insert(
+                        provider.receipt.at("component_id").get<std::string>()).second;
+                }
+            }
+        }
+    }
+    std::map<std::string, ProviderInstallResult> configuration_cache;
+    for (const auto& provider : providers) {
+        const json& receipt = provider.receipt;
+        const auto& validated = provider.payload;
+        const std::string component_id = receipt.at("component_id").get<std::string>();
+        if (!selected_components.contains(component_id)) continue;
+        const std::string receipt_state = receipt.at("state").get<std::string>();
+        const fs::path component_root = normalized_absolute(receipt.at("active_root").get<std::string>());
         const json& integration = validated.manifest.at("installer_integration");
-        if (!matches(receipt, validated.manifest)) continue;
         const std::string configured = receipt.value("configuration_path", "");
         if (configured.empty()) {
             throw std::runtime_error("installed consumer has no generated configuration: " +
@@ -4070,7 +4214,7 @@ json refresh_provider_consumers(
             workspace, paths.manager_service_access);
         const ProviderInstallResult generated = render_provider_installation(
             paths, validated.manifest, component_root, workspace,
-            receipt_state == "installed_managed");
+            receipt_state == "installed_managed", {}, nullptr, &configuration_cache);
         for (const auto& document : generated.generated_documents) {
             const fs::path document_path = normalized_absolute(
                 workspace /

@@ -129,12 +129,16 @@
       "properties": {
         "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "component_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
-        "source": {"enum": ["active_root", "entrypoint", "component_path"]},
+        "source": {"enum": ["active_root", "entrypoint", "component_path", "configuration"]},
         "entrypoint": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
         "path": {"type": "string", "minLength": 1},
         "required": {"type": "boolean"}
       },
       "allOf": [
+        {
+          "if": {"properties": {"source": {"const": "configuration"}}},
+          "then": {"not": {"anyOf": [{"required": ["entrypoint"]}, {"required": ["path"]}]}}
+        },
         {
           "if": {"properties": {"source": {"const": "entrypoint"}}},
           "then": {"required": ["entrypoint"]}
